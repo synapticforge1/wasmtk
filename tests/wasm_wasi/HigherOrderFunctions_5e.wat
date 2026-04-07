@@ -243,17 +243,17 @@
             (i32.const 128)))
   )
 
-  (func $increment (param $n i32) (result i32)
-    (return (i32.add (local.get $n) (i32.const 1)))
-  )
-
   (func $__anon_0 (param $n i32) (result i32)
     (return (i32.mul (local.get $n) (local.get $n)))
+  )
+
+  (func $__anon_1 (param $n i32) (result i32)
+    (return (i32.add (local.get $n) (i32.const 1)))
   )
   (func $_start (export "_start")
     (call $testCallbacks )
     (call $proc_exit (i32.const 0))
   )
   (table 2 funcref)
-  (elem (i32.const 0) $__anon_0 $increment)
+  (elem (i32.const 0) $__anon_0 $__anon_1)
 )
