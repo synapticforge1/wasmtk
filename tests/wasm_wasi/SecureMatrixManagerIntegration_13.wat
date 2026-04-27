@@ -281,7 +281,7 @@
       (i32.store offset=12 (local.get $data) (local.tee $__2d_tmp (call $__malloc (i32.const 40))))
       (i32.store (local.get $__2d_tmp) (i32.const 0))
       (i32.store offset=4 (local.get $__2d_tmp) (i32.const 8))
-    (local.set $__obj_ret (call $__malloc (i32.const 20)))
+    (local.set $__obj_ret (call $__malloc (i32.const 16)))
       (i32.store offset=0 (local.get $__obj_ret) (call $__anon_0__factory (local.get $data)))
       (i32.store offset=4 (local.get $__obj_ret) (call $__anon_1__factory (local.get $data)))
       (return (local.get $__obj_ret))
