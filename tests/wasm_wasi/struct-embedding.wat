@@ -481,7 +481,7 @@
           (i32.store8 (i32.const 138) (i32.const 109))
           (i32.store8 (i32.const 139) (i32.const 58))
           (i32.store8 (i32.const 140) (i32.const 32))
-          (i32.store (i32.const 4) (i32.add (i32.const 9) (call $__i32_to_str (;? co.base.num ;) (i32.const 0) (i32.const 141))))
+          (i32.store (i32.const 4) (i32.add (i32.const 9) (call $__f64_to_str (f64.load (i32.add (i32.load (i32.add (local.get $co) (i32.const 0))) (i32.const 0))) (i32.const 141))))
           (i32.store8 (i32.add (i32.const 132) (i32.add (i32.load (i32.const 4)) (i32.const 0))) (i32.const 44))
           (i32.store8 (i32.add (i32.const 132) (i32.add (i32.load (i32.const 4)) (i32.const 1))) (i32.const 32))
           (i32.store8 (i32.add (i32.const 132) (i32.add (i32.load (i32.const 4)) (i32.const 2))) (i32.const 115))
@@ -512,7 +512,7 @@
           (i32.store8 (i32.const 139) (i32.const 109))
           (i32.store8 (i32.const 140) (i32.const 58))
           (i32.store8 (i32.const 141) (i32.const 32))
-          (i32.store (i32.const 4) (i32.add (i32.const 10) (call $__i32_to_str (;? co.base.num ;) (i32.const 0) (i32.const 142))))
+          (i32.store (i32.const 4) (i32.add (i32.const 10) (call $__f64_to_str (f64.load (i32.add (i32.load (i32.add (local.get $co) (i32.const 0))) (i32.const 0))) (i32.const 142))))
           (i32.store8 (i32.add (i32.const 132) (i32.load (i32.const 4))) (i32.const 10))
           (i32.store (i32.const 4) (i32.add (i32.load (i32.const 4)) (i32.const 1)))
           (drop (call $fd_write
