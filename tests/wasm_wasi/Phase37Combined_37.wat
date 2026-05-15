@@ -473,6 +473,8 @@
     (local $mapped i32)
     (local $bumped i32)
     (local $__iface_tmp i32)
+    (local $__str_op_ptr i32)
+    (local $__str_op_len i32)
     (local.set $nested (call $__malloc (i32.const 40)))
       (i32.store (local.get $nested) (i32.const 3))
       (i32.store offset=4 (local.get $nested) (i32.const 8))
