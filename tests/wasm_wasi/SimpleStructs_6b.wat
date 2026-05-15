@@ -333,7 +333,7 @@
             (i32.const 1)
             (i32.const 128)))
     (local.set $p (call $__malloc (i32.const 16)))
-      (f64.store offset=0 (local.get $p) (f64.sub (;? 9.109e ;) (f64.const 0) (f64.const 31)))
+      (f64.store offset=0 (local.get $p) (f64.const 9.109e-31))
       (i32.store offset=8 (local.get $p) (i32.const -1))
       (i32.store offset=12 (local.get $p) (i32.const 1))
         (i32.store (i32.const 0) (i32.const 132))
