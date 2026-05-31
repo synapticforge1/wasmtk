@@ -706,7 +706,7 @@
     (local $__str_op_len i32)
     (local.set $afterScheme (f64.add (f64.convert_i32_s (call $__str_indexof (local.get $u_ptr) (local.get $u_len) (i32.const 305) (i32.const 3))) (f64.const 3)))
     (local.set $atIdx (f64.convert_i32_s (call $__str_indexof_from (local.get $u_ptr) (local.get $u_len) (i32.const 308) (i32.const 1) (i32.trunc_f64_s (local.get $afterScheme)))))
-    (local.set $hostStart (f64.convert_i32_s (call $__str_indexof_from (local.get $u_ptr) (local.get $u_len) (i32.const 309) (i32.const 1) (f64.ge (;? afterScheme + (atIdx ;) (f64.const 0) (;? 0 ? atIdx - afterScheme + 1 : 0) ;) (f64.const 0)))))
+    (local.set $hostStart (f64.convert_i32_s (call $__str_indexof_from (local.get $u_ptr) (local.get $u_len) (i32.const 309) (i32.const 1) (i32.trunc_f64_s (f64.add (local.get $afterScheme) (if (result f64) (f64.ge (local.get $atIdx) (f64.const 0)) (then (f64.add (f64.sub (local.get $atIdx) (local.get $afterScheme)) (f64.const 1))) (else (f64.const 0))))))))
     (if (f64.ge (local.get $atIdx) (f64.const 0))
       (then
       (call $__str_slice (local.get $u_ptr) (local.get $u_len) (i32.trunc_f64_s (local.get $afterScheme)) (i32.trunc_f64_s (local.get $atIdx)))
