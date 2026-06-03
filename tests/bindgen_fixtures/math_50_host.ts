@@ -1,8 +1,8 @@
 
 // auto-generated host runner for math_50 bindgen test
-import { loadModule } from "file:///<repo-root>/tests/bindgen_fixtures/math_50.bindings.ts";
+import { loadModule } from "file:///path/to/wasmtk/tests/bindgen_fixtures/math_50.bindings.ts";
 
-const wasmBytes = await Deno.readFile(new URL("file:///<repo-root>/tests/bindgen_fixtures/math_50.wasm"));
+const wasmBytes = await Deno.readFile(new URL("file:///path/to/wasmtk/tests/bindgen_fixtures/math_50.wasm"));
 const m = await loadModule(wasmBytes);
 console.log(m.add(3, 4));
 console.log(m.multiply(2.5, 4.0));
