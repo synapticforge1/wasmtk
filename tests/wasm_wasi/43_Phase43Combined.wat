@@ -1204,6 +1204,8 @@
     (local $bVegs i32)
     (local $longVegs i32)
     (local $__iface_tmp i32)
+    (local $__str_op_ptr i32)
+    (local $__str_op_len i32)
     (local.set $vegs (i32.const 286))
         (i32.store (i32.const 0) (i32.const 132))
           (i32.store (i32.const 4) (call $__i32_to_str (call $strIndexOf (local.get $vegs) (i32.const 266) (i32.const 4)) (i32.const 132)))
