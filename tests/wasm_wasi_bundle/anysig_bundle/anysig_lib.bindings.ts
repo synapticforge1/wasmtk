@@ -11,6 +11,7 @@ export interface ModuleExports {
   triple(a: number, b: number, c: number): any;
   sumArr(arr: any): any;
   getX(o: any): any;
+  getDoubler(): any;
 }
 
 export async function loadModule(
@@ -55,6 +56,10 @@ export async function loadModule(
   const _dynObjKeyLen = exp["dynObjKeyLen"] as (h: number, i: number) => number;
   const _dynObjValAt = exp["dynObjValAt"] as (h: number, i: number) => number;
   const _dynSet = exp["dynSet"] as (o: number, p: number, l: number, v: number) => void;
+  const _dynApply = exp["dynApply"] as (fn: number, args: number) => number;
+  const _dynGcPin = exp["dynGcPin"] as (h: number) => number;
+  const _dynGcUnpin = exp["dynGcUnpin"] as (slot: number) => void;
+  const _pinReg = new FinalizationRegistry((pin: number) => _dynGcUnpin(pin));
   const _dec = new TextDecoder();
   function _box(v: unknown): number {
     if (typeof v === "number") return _dynNumber(v);
@@ -86,7 +91,18 @@ export async function loadModule(
         }
         return o;
       }
-      default: return h; // function — opaque handle
+      case 7: {
+        const _pin = _dynGcPin(h);
+        const _fn = ((...args: unknown[]): unknown => {
+          const _a = _dynArray();
+          for (const _x of args) _dynPush(_a, _box(_x));
+          return _unbox(_dynApply(h, _a));
+        }) as ((...a: unknown[]) => unknown) & { release(): void };
+        _fn.release = () => _dynGcUnpin(_pin);
+        _pinReg.register(_fn, _pin);
+        return _fn;
+      }
+      default: return h; // unknown tag — opaque handle
     }
   }
   return {
@@ -98,5 +114,6 @@ export async function loadModule(
     triple(a: number, b: number, c: number): any { return _unbox((exp["triple"] as (...a: unknown[]) => unknown)(a, b, c) as number); },
     sumArr(arr: any): any { return _unbox((exp["sumArr"] as (...a: unknown[]) => unknown)(_box(arr)) as number); },
     getX(o: any): any { return _unbox((exp["getX"] as (...a: unknown[]) => unknown)(_box(o)) as number); },
+    getDoubler(): any { return _unbox((exp["getDoubler"] as (...a: unknown[]) => unknown)() as number); },
   };
 }
