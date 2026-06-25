@@ -9,7 +9,11 @@ export interface ModuleExports {
 export async function loadModule(
   source: string | URL | BufferSource,
 ): Promise<ModuleExports> {
-  const importObj: Record<string, Record<string, unknown>> = {};
+  const _hostFns: ((...a: unknown[]) => unknown)[] = [];
+  let _hostCallImpl: (fnIdx: number, argsArr: number) => number = () => 0;
+  const env: Record<string, unknown> = {};
+  env["__host_call"] = (fnIdx: number, argsArr: number) => _hostCallImpl(fnIdx, argsArr);
+  const importObj = { env };
   let raw: ArrayBuffer;
   if (source instanceof ArrayBuffer) {
     raw = source;
@@ -52,6 +56,7 @@ export async function loadModule(
   const _dynGcPin = exp["dynGcPin"] as (h: number) => number;
   const _dynGcUnpin = exp["dynGcUnpin"] as (slot: number) => void;
   const _pinReg = new FinalizationRegistry((pin: number) => _dynGcUnpin(pin));
+  const _dynMakeHostFn = exp["dynMakeHostFn"] as (index: number) => number;
   const _dec = new TextDecoder();
   function _box(v: unknown): number {
     if (typeof v === "number") return _dynNumber(v);
@@ -65,7 +70,12 @@ export async function loadModule(
       for (const k of Object.keys(o)) { const [p, l] = _writeStr(k); _dynSet(h, p, l, _box(o[k])); }
       return h;
     }
-    return _dynNumber(0); // functions/symbols — not marshalled
+    if (typeof v === "function") {
+      const _hi = _hostFns.length;
+      _hostFns.push(v as (...a: unknown[]) => unknown);
+      return _dynMakeHostFn(_hi);
+    }
+    return _dynNumber(0); // symbols / other — not marshalled
   }
   function _unbox(h: number): unknown {
     switch (_dynTag(h)) {
@@ -103,6 +113,14 @@ export async function loadModule(
       default: return h; // unknown tag — opaque handle
     }
   }
+  _hostCallImpl = (fnIdx: number, argsArr: number): number => {
+    const _f = _hostFns[fnIdx];
+    if (!_f) return _dynUndefined();
+    const _n = _dynArrLen(argsArr);
+    const _js: unknown[] = [];
+    for (let _i = 0; _i < _n; _i++) _js.push(_unbox(_dynArrGet(argsArr, _i)));
+    return _box(_f(..._js));
+  };
   return {
     getDoubler(): any { return _unbox((exp["getDoubler"] as (...a: unknown[]) => unknown)() as number); },
   };
