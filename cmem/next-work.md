@@ -2,10 +2,27 @@
 
 > ## 2026-09-29 — H12 sw01 fixed (+ sw33); binaryang answered the 11-skip letter
 >
-> - ⏳ **NEXT ROUND, first step: pin binaryang 1.7.2** (owner, 2026-09-29; on JSR since
->   16:18 UTC). It fixes at least three items found ELSEWHERE; every wasmtk item was already closed
->   in 1.7.1 (owner, 2026-09-29). So nothing of ours is expected to move: read their changelog
->   FIRST, write down any of our numbers a fix could still touch, then gate: all three specifiers together, `-Oz` guard, full gate, wast
+> - 📬 **binaryang 1.8.0 (2026-09-29) SUPERSEDES 1.7.2 as the next pin.** Their letter: none of
+>   the default changes reaches our three subpaths; `wasmValidate` no longer validates an
+>   undecodable module (our `readWasm` check in `binaryangInvalid` stays: cheap, and it guards the
+>   false-pass class); type-mismatch message text changed (nothing here reads it); `optimize()`
+>   fixed for `br_on_*` (none of our skips rest on it). NEW: a `LowerCustomPageSizes` pass that
+>   makes custom-page-size modules run on V8.
+> - ✅ **Lowering VERIFIED on five engines, reply SENT 2026-09-29** (`scripts/binaryang-report.md`,
+>   top section: method, matrix, findings). Against a native-wasmtime reference, the lowered
+>   modules give the right values, trap positions and links on wasmtime, V8, JSC, wasmer, wazero
+>   (engine limits aside). **Two findings for them:** the out-of-range access traps as `unreachable`
+>   on every engine (not out-of-bounds), and a lowered link failure says "unknown import", not
+>   "incompatible import type"; fixes suggested. Scripts were scratch-only (`cps/`), not kept.
+>   Wired into our runner it would take skips **66 → 16**; NOT wired yet.
+> - ⏳ **Ours, found by this: `assert_trap` accepts ANY trap** (`src/wast.ts`, `case
+>   "assert_trap"`: any `WebAssembly.RuntimeError` passes). Map the spec's trap message to V8's
+>   wording per kind. A false-pass class beyond custom page sizes; do it as its own fix with the
+>   full gate, BEFORE wiring the lowering in, so its 4 trap passes are real.
+> - ⏳ **NEXT ROUND, first step: pin binaryang 1.8.0** (not 1.7.2). Its fixes are for items
+>   found ELSEWHERE; every wasmtk item was closed in 1.7.1 (owner, 2026-09-29). So nothing of ours
+>   is expected to move: read the changelog (§ 1.8.0) FIRST, write down any of our numbers a fix
+>   could still touch, then gate: all three specifiers together, `-Oz` guard, full gate, wast
 >   re-record only for drift that is explained. The wast oracle guard (0 valid modules rejected)
 >   must hold on the new validator.
 >
