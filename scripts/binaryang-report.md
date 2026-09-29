@@ -8,7 +8,115 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## SENT 2026-09-29 — 1.7.1 re-gated here; all 11 are passes, and 28 more
+## SENT 2026-09-29 — `LowerCustomPageSizes` checked on five engines
+
+Thank you for 1.8.0 and for the lowering pass. You asked what it does to our skip count; before
+wiring it into our runner we checked it against engines other than V8, since a V8-only check would
+only show that V8 agrees with itself. **Short version: the values, trap positions and linking
+hold on every engine that can run the modules. One thing differs on all of them: the trap KIND.**
+
+### How we checked
+
+Everything ran against the published `@jrmarcum/binaryang@1.8.0`, in a scratch area. Our repo
+still pins 1.7.1 and has not changed.
+
+1. **A reference first.** The original, unlowered files on wasmtime 49.0.1 with the proposal
+   implemented natively (`wasmtime wast -W custom-page-sizes=y,memory64=y`). Every behavioural
+   directive passed. As a control, the same run without the flag fails, so the reference really
+   exercises the proposal. (Two files, `binary.wast:6` and `memory_max_i64.wast:28`, fail on
+   message wording for malformed text; that is wasmtime's text parser, not behaviour.)
+2. **Lowering.** For the four behavioural files, every module (and the module inside each
+   `assert_unlinkable`) went through `compat/wabt` `parseWat` → `toBinary` → `compat/binaryen`
+   `readBinary` → `runPasses(["LowerCustomPageSizes"])` → `emitBinary`, and was written back as
+   `(module … binary "…")`. We kept `register`, `invoke`, `assert_return`, `assert_trap` and
+   `assert_unlinkable`, and dropped `assert_invalid` / `assert_malformed`, which lowering does not
+   touch. All 12 lowered modules of `custom-page-sizes.wast` pass `validate()`, `wasmValidate`
+   and V8. The renamed exports and imports pair up as you described
+   (`small-pages-memory#pagesize=1` plus `small-pages-memory#pages`).
+3. **wasmtime, lowered, without the proposal flag**, in two modes: strict (`wasmtime wast` checks
+   the expected message text), and relaxed (trap and link messages emptied, so ANY trap or link
+   failure matches: this checks where they happen, not what kind they are).
+4. **V8** through our own wast runner, and **V8 and JavaScriptCore** through a small plain-JS
+   harness (no dependencies) run on Deno 2.9.7 and Bun 1.4.2. The harness also records each
+   trap's message.
+5. **wasmer 7.4.2 and wazero.** Their CLIs run one fresh module, so we built one WASI driver per
+   assertion (41 in all) with your builder API: the lowered module, an imported `proc_exit`, and a
+   `_start` that replays the earlier calls on that instance, then performs the assertion. A wrong
+   value exits 73, a call that should trap and returns exits 74, and a trap must be the engine's
+   own error exit with trap text. The same 41 drivers on wasmtime are the control on the method
+   (41/41). The two modules that import from a registered module cannot run alone and are left
+   out.
+
+### Results
+
+| engine | modules | `assert_return` | `assert_trap` (position) | `assert_unlinkable` | `memory_max` / `memory_max_i64` definitions |
+| --- | --- | --- | --- | --- | --- |
+| wasmtime, native proposal (reference, original files) | all | 27/27 | 4/4 | 2/2 | 4/4 · 4/4 |
+| wasmtime, lowered, no flag | 12/12 | 27/27 | 4/4 (relaxed) | 2/2 (relaxed) | 4/4 · 4/4 |
+| V8 (Deno), lowered | 12/12 | 27/27 | 4/4 | 2/2 | 4/4 · 0/4 (V8's 262,144-page cap) |
+| JSC (Bun), lowered | 12/12 | 27/27 | 4/4 | 2/2 | 4/4 · 0/4 (no memory64 in JSC) |
+| wasmer, lowered | 10/10 | 27/27 | 4/4 | not runnable alone | not runnable alone |
+| wazero, lowered | 8/10 | 20/27 | 4/4 | not runnable alone | not runnable alone |
+
+wazero's misses are all modules #7 and #8, which declare two memories; wazero has no
+multi-memory. We tested the lowered-as-read variant only, not your `-O1`…`-Oz` versions.
+
+### Finding 1: the out-of-range access traps as `unreachable`, on every engine
+
+What each engine reports for the four `assert_trap … "out of bounds memory access"`:
+V8 `unreachable`; JSC `Unreachable code should not be executed`; wasmer
+`RuntimeError: unreachable`; wazero `wasm error: unreachable`; wasmtime
+``wasm `unreachable` instruction executed``. The position is right; the kind is not. Strict
+`wasmtime wast` stops on the first one (`custom-page-sizes.wast:7`), and any runner that checks
+the trap kind will do the same. A possible fix on your side is in the suggestions below.
+
+### Finding 2: a lowered link failure says "unknown import", not "incompatible import type"
+
+Both `assert_unlinkable`s do fail to link, as a `LinkError`. But the renaming means the importer
+asks for a name the exporter does not have, so the message is "unknown import", and strict
+`wasmtime wast` rejects it (`custom-page-sizes-invalid.wast:3`). This follows from the rename,
+which we agree with; see the suggestions for a way to keep it and get the spec's error.
+
+### A small compat difference
+
+`compat/binaryen` `getFunctionInfo(f).results` returns an ARRAY of types (`[2]`, `[]`), where
+binaryen.js returns one packed type (a number, `binaryen.none` for no results). Code written for
+binaryen.js that compares `results === binaryen.none` then takes the wrong branch; it cost us
+one invalid driver. `createType(results)` works around it.
+
+### Your question: what it does to our skip count
+
+Wired into our runner for `proposals/custom-page-sizes/` only, on V8: **66 skips → 16.** 31
+assertions and both `assert_unlinkable`s would become passes, and 17 modules would build. The 16
+left are the four `memory_max_i64` definitions (V8's cap), 3 stringref, 4 V8 size caps, and 5
+vendored `threads` blocks. We have not wired it in yet. Four of those new passes would be traps of
+the wrong kind, and our runner does not currently check trap kind (a gap on our side that this
+exposed). So we would rather wait for Finding 1 than count them.
+
+### Suggestions
+
+- **Finding 1, a genuine out-of-bounds trap.** In the out-of-range branch, replace `unreachable`
+  with an access to the same memory at an address that can never be in bounds: for a 32-bit
+  memory, a 4-byte load at `0xFFFF_FFFF` (the access ends past 2^32 even when the memory is a
+  full 4 GiB); for memory64, a load at `-1` (`0xFFFF_FFFF_FFFF_FFFF`). The engine then raises
+  its own out-of-bounds trap, with its own message, on every engine above. The same applies to
+  the bulk-memory checks (`memory.fill`, `memory.copy`, `memory.init`), whose spec trap is also
+  "out of bounds memory access", if the pass guards them with `unreachable` too.
+- **Finding 2, keep the rename and get "incompatible import type".** Also export, under the
+  memory's ORIGINAL name, a placeholder of a different kind (for example an immutable i32 global
+  holding the page size), and have a lowered importer import that placeholder under the original
+  name, FIRST, before the renamed memory. Then:
+  - a 64 KiB-page importer asking for memory `small-pages-memory` finds a global there:
+    incompatible import type (case 1 of `custom-page-sizes-invalid.wast`);
+  - a lowered importer asking for global `large-pages-memory` finds a real memory there:
+    incompatible import type (case 2);
+  - two lowered modules with the same page size link as they do today (global to global, then
+    the renamed memory).
+  One case it does not cover: two LOWERED modules with different custom page sizes (say 1 and 2)
+  match on the placeholder and then fail on the renamed memory, as "unknown import" again. The
+  spec files do not test that pairing. The cost is one extra export per lowered memory and one
+  extra import per lowered memory import, which a JS host has to pass along. Your call whether the
+  exact error is worth that.
 
 Thank you for 1.7.1, and for the correction on item 2: you were right, and the gap was ours.
 
