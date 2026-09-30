@@ -75,6 +75,10 @@
    engine 1149 on baseline, wast 64,473 / 0 / 66. The printed WAT of modules read from binary is
    laid out one expression per line with `;; label` comments (binaryang 1.7.2); our merge paths
    read it unchanged. Brings `LowerCustomPageSizes`, not yet used.
+10. **The wast GATE runs custom-page-size modules on V8 (2026-09-30)** through binaryang's
+    `LowerCustomPageSizes`, gate-only, when V8 refuses a module for that reason; never for validity
+    assertions. wast 64,506 / 0 / 16 (skips 66 → 16); the 33 lowered passes are reported apart.
+    The `wasmtk wast` CLI is unchanged (V8's own verdict).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

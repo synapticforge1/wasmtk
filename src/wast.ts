@@ -20,6 +20,7 @@
  */
 import wabt from "wabt";
 import { allFeatures, wasmValidate } from "binaryang-validate";
+import { binaryenLowerCustomPageSizes } from "./binaryen.ts";
 import { rt } from "./rt.ts";
 import { engineName, explainEngineRejection } from "./engine.ts";
 
@@ -953,6 +954,13 @@ export interface WastResult {
    * the gate requires this to be empty.
    */
   validatorRejectedValid: string[];
+  /**
+   * With `lowerCustomPageSizes`: modules lowered because V8 refused their custom page size, and the
+   * passes that depended on one (an action on a lowered instance, or a lowered module's own
+   * assertion). They are V8 running binaryang's rewrite, not an engine implementing the proposal,
+   * so they are reported apart from the plain count. Added 2026-09-30.
+   */
+  lowered: { modules: number; passes: number };
 }
 
 /**
@@ -1007,10 +1015,26 @@ function watQuote(text: string): string {
     '"';
 }
 
+/** Options for {@link runWast} and {@link runWastPath}. */
+export interface WastOptions {
+  /** Also record skipped modules' reasons among `failures`. */
+  verbose?: boolean;
+  /** Keep at most this many failure messages (default 25). */
+  maxFailures?: number;
+  /**
+   * When V8 refuses a module ONLY because it does not implement custom page sizes, lower it with
+   * binaryang's `LowerCustomPageSizes` and try again, so V8 runs it with the proposal's behaviour
+   * (2026-09-30). Off by default: the `wasmtk wast` CLI reports V8's own verdict, and the repo's gate
+   * turns it on. Never applied to `assert_invalid` / `assert_malformed`, whose question is validity.
+   * Passes that depended on a lowered module are counted in `WastResult.lowered`.
+   */
+  lowerCustomPageSizes?: boolean;
+}
+
 /** Run a single `.wast` file. Never throws — every command's outcome is tallied. */
 export async function runWast(
   path: string,
-  opts: { verbose?: boolean; maxFailures?: number } = {},
+  opts: WastOptions = {},
 ): Promise<WastResult> {
   const res: WastResult = {
     file: path,
@@ -1022,6 +1046,7 @@ export async function runWast(
     failures: [],
     engineLimits: {},
     validatorRejectedValid: [],
+    lowered: { modules: 0, passes: 0 },
   };
   const skip = (reason: string) => {
     res.skipped++;
@@ -1156,10 +1181,44 @@ export async function runWast(
     return instance;
   }
 
+  // Custom-page-sizes lowering (opts.lowerCustomPageSizes). Instances and definitions built from a
+  // lowered module are remembered, so a pass that used one is counted in `res.lowered.passes`.
+  const loweredInstances = new WeakSet<WebAssembly.Instance>();
+  const loweredDefinitions = new WeakSet<WebAssembly.Module>();
+  let touchedLowered = false;
+  /**
+   * Run `use` on `bytes`. If V8 refuses them ONLY for custom page sizes (and the option is on),
+   * lower them and run `use` again; any other error, including a trap or a LinkError from the
+   * lowered module, propagates as it would have. The lowered bytes must pass binaryang's validator,
+   * or they are recorded in `validatorRejectedValid`, which fails the gate: the guard on the oracle
+   * covers the lowering too.
+   */
+  async function withLowering<T>(
+    bytes: Uint8Array,
+    use: (b: Uint8Array) => T | Promise<T>,
+  ): Promise<[T, boolean]> {
+    try {
+      return [await use(bytes), false];
+    } catch (e) {
+      if (
+        !opts.lowerCustomPageSizes || explainEngineRejection(e)?.feature !== "custom page sizes"
+      ) {
+        throw e;
+      }
+    }
+    const lowered = binaryenLowerCustomPageSizes(bytes);
+    const why = binaryangInvalid(lowered);
+    if (why !== null) res.validatorRejectedValid.push(`LOWERED module rejected: ${why}`);
+    res.lowered.modules++;
+    touchedLowered = true;
+    return [await use(lowered), true];
+  }
+
   // Resolve the instance an action targets (optional leading `$name`).
   function actionInstance(nameTok: string | undefined): WebAssembly.Instance | null {
-    if (nameTok && nameTok.startsWith("$")) return named.get(nameTok) ?? null;
-    return cur;
+    const inst = nameTok && nameTok.startsWith("$") ? named.get(nameTok) ?? null : cur;
+    if (inst && loweredInstances.has(inst)) touchedLowered = true;
+    return inst;
   }
 
   // One compiled trampoline per (instance, export, signature). Most SIMD files hammer a handful of
@@ -1273,6 +1332,8 @@ export async function runWast(
 
   for (const cmd of cmds) {
     const h = head(cmd);
+    const passedBefore = res.passed; // for res.lowered.passes
+    touchedLowered = false;
     try {
       switch (h) {
         case "module": {
@@ -1297,7 +1358,11 @@ export async function runWast(
             if (kind === "definition") {
               const defBytes = assemble(cmd);
               checkValid(defBytes);
-              const mod = new WebAssembly.Module(defBytes as BufferSource);
+              const [mod, lowered] = await withLowering(
+                defBytes,
+                (b) => new WebAssembly.Module(b as BufferSource),
+              );
+              if (lowered) loweredDefinitions.add(mod);
               lastDefinition = mod;
               if (ids[0]) definitions.set(ids[0], mod);
               break;
@@ -1307,13 +1372,16 @@ export async function runWast(
               const mod = defName ? definitions.get(defName) : lastDefinition;
               if (!mod) throw new Error(`module instance: no definition ${defName ?? "(last)"}`);
               cur = await WebAssembly.instantiate(mod, buildImports());
+              if (loweredDefinitions.has(mod)) loweredInstances.add(cur);
               if (instName) named.set(instName, cur);
               break;
             }
             const nameTok = ids[0];
             const bytes = assemble(cmd);
             checkValid(bytes);
-            cur = await instantiate(bytes);
+            const [inst, lowered] = await withLowering(bytes, instantiate);
+            cur = inst;
+            if (lowered) loweredInstances.add(cur);
             if (nameTok) named.set(nameTok, cur);
           } catch (e) {
             // A module we cannot assemble/instantiate (unsupported proposal, missing import, …).
@@ -1476,7 +1544,7 @@ export async function runWast(
             let trapError: unknown = null;
             if (bytes) {
               try {
-                await instantiate(bytes);
+                await withLowering(bytes, instantiate);
                 outcome = "instantiated";
               } catch (e) {
                 const trap = e instanceof WebAssembly.RuntimeError ||
@@ -1630,7 +1698,8 @@ export async function runWast(
           let bytes: Uint8Array | null = null;
           try {
             bytes = assemble(mod);
-            if (kind === "assert_unlinkable") await instantiate(bytes);
+            // Lowering applies to linking (the question is the link), never to validation.
+            if (kind === "assert_unlinkable") await withLowering(bytes, instantiate);
             else await WebAssembly.compile(bytes as BufferSource); // validation
             if (kind === "assert_invalid" && binaryangInvalid(bytes) !== null) {
               res.passed++;
@@ -1751,6 +1820,7 @@ export async function runWast(
     } catch (e) {
       fail(`command ${h} error: ${e instanceof Error ? e.message : e}`);
     }
+    if (touchedLowered) res.lowered.passes += res.passed - passedBefore;
   }
   // A text `assert_malformed` passes on a PARSE failure. But when the backend rejects modules the
   // spec calls WELL-FORMED, in this same file, with the very same parse error, that error is a
@@ -1781,7 +1851,7 @@ async function* walkWast(dir: string): AsyncGenerator<string> {
 /** Run every `.wast` under `target` (a file or a directory tree). */
 export async function runWastPath(
   target: string,
-  opts: { verbose?: boolean; maxFailures?: number } = {},
+  opts: WastOptions = {},
 ): Promise<WastResult[]> {
   const stat = await Deno.stat(target);
   const files: string[] = [];

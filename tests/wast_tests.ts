@@ -192,7 +192,7 @@ if (Deno.args[0] === "--scan-chunk") {
       Deno.exit(2);
     }
     try {
-      const r = await runWast(join(SUITE, rel), { maxFailures: 0 });
+      const r = await runWast(join(SUITE, rel), { maxFailures: 0, lowerCustomPageSizes: true });
       acc[rel] = { pass: r.passed, skip: r.skipped, failed: r.failed, unbuilt: r.modulesFailed };
     } catch {
       // A file that throws is simply absent from this chunk's output.
@@ -213,7 +213,7 @@ if (Deno.args[0] === "--run-one") {
     console.error(`scoped features missing for ${rel}: ${missingHere.join(" ")}`);
     Deno.exit(2);
   }
-  const r = await runWast(join(SUITE, rel), { maxFailures: 5 });
+  const r = await runWast(join(SUITE, rel), { maxFailures: 5, lowerCustomPageSizes: true });
   await Deno.writeTextFile(
     outPath,
     JSON.stringify({
@@ -223,6 +223,7 @@ if (Deno.args[0] === "--run-one") {
       modulesFailed: r.modulesFailed,
       failures: r.failures,
       validatorRejectedValid: r.validatorRejectedValid,
+      lowered: r.lowered,
     }),
   );
   Deno.exit(0);
@@ -350,6 +351,7 @@ try {
 
 const names = Object.keys(baseline).sort();
 let totalPass = 0, totalFail = 0, totalSkip = 0, badFiles = 0;
+let loweredModules = 0, loweredPasses = 0; // custom-page-sizes lowering, reported apart
 const drifted: string[] = [];
 
 for (const rel of names) {
@@ -361,6 +363,7 @@ for (const rel of names) {
     modulesFailed: number;
     failures: string[];
     validatorRejectedValid: string[];
+    lowered: { modules: number; passes: number };
   };
   try {
     if (isScoped(rel)) {
@@ -383,7 +386,7 @@ for (const rel of names) {
         await Deno.remove(out);
       }
     } else {
-      r = await runWast(join(SUITE, rel), { maxFailures: 5 });
+      r = await runWast(join(SUITE, rel), { maxFailures: 5, lowerCustomPageSizes: true });
     }
   } catch (e) {
     console.log(red(`  ✗ ${rel} — could not run: ${e instanceof Error ? e.message : e}`));
@@ -393,6 +396,8 @@ for (const rel of names) {
   totalPass += r.passed;
   totalFail += r.failed;
   totalSkip += r.skipped;
+  loweredModules += r.lowered.modules;
+  loweredPasses += r.lowered.passes;
 
   // Check all THREE dimensions independently and collect every mismatch.
   //
@@ -459,6 +464,15 @@ console.log("\n" + "─".repeat(60));
 console.log(
   `  wast gate: ${names.length} files — ${totalPass} passed, ${totalFail} failed, ${totalSkip} skipped`,
 );
+if (loweredModules > 0) {
+  // V8 running binaryang's rewrite, not an engine implementing custom page sizes: reported apart.
+  console.log(
+    dim(
+      `  of which ${loweredPasses} passed on ${loweredModules} module(s) lowered for custom page ` +
+        `sizes (V8 does not implement the proposal; binaryang's LowerCustomPageSizes)`,
+    ),
+  );
+}
 if (ungated.length) {
   console.log(
     dim(
