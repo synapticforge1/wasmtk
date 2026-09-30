@@ -242,6 +242,6 @@ public `compileWasiTs` / `compileLibTs` / `compileWat` functions. Target: a few 
 - Full suite green throughout (wasi 375/375, bindgen, jstyper, go), **zero golden-WAT diff** across
   Phases 1–3.
 - `deno doc --lint` clean on any new exported surface (hold the JSR score; new files get an
-  `@module` tag — see the wast.ts lesson in [next-work.md](next-work.md)).
+  `@module` tag — see the wast.ts lesson in [next-work.md](next-work.md) (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`)).
 - The extracted `types.ts` / `maptype.ts` / emit layer are importable as the "supported subset"
   contract that wabt-ts `wasm2ts` builds against.

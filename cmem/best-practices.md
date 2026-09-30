@@ -239,7 +239,7 @@ batch. Know which one you are in.
 **Design the gate so an IMPROVEMENT also fails.** [wasmtk, 2026-08-20] Files pinned at 0 passes —
 like `ref_null.wast` — exist so that the day a backend learns to encode `ref.null`, the gate *says
 so* rather than absorbing the win silently. This will look like a regression during a version bump;
-it is written down in [next-work.md](next-work.md) so nobody has to diagnose it live.
+it is written down in [next-work.md](next-work.md) (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`) so nobody has to diagnose it live.
 
 **Prefer a self-discovering list to a hand-maintained one.** [wasmtk] `--update-baseline` finds
 unrunnable files by chunking across subprocesses and retrying a dead chunk file-by-file, because a
@@ -651,7 +651,8 @@ carries a three-suite asterisk on this machine, including in today's commit mess
 
 ## ★ The workspace's convergent rules — a COPY, stamped 2026-09-30 (workspace letter H6)
 
-**Source:** `../cmem/best-practices.md` (the workspace, "compiled across the siblings"), last
+**Copied from wasmExamples/cmem/best-practices.md on 2026-09-30** (the stamp wording
+`memory-conventions.md` prescribes). **Source:** `../cmem/best-practices.md` (the workspace, "compiled across the siblings"), last
 modified 2026-09-20; **28 rules**, every bullet the source marks **★ = convergent**: two or more
 repos derived it without reading each other. Copied VERBATIM, with the source's section headings
 and rule numbers, so a rule can be cited as "workspace 2.1" in either place.

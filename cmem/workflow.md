@@ -47,6 +47,34 @@ pin."* The premature `-Oz` skip removal on 2026-08-25 is what that sentence is p
 `git config --global --add safe.directory <abs-path-to>/upstream/binaryang`. The symptom is a silent
 `unknown` where `upstream:link` should print the checkout revision.
 
+## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1)
+
+Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full text before the
+2026-09-30 rewrite: `git show ab5d1273644:cmem/next-work.md`). Each step has cost time when skipped.
+
+1. **Read the changelog FIRST and write predictions down** (binaryang's `CHANGELOG.md` on GitHub;
+   JSR does not serve it): which of our numbers each change should move, and by how much. Nothing
+   in the list reaching us means "no number moves": a moved number is then a finding.
+2. **Confirm the version is served:** `curl -s https://jsr.io/@jrmarcum/binaryang/meta.json`. JSR
+   has served a release minutes after its tag, and a cached read has reported a published version
+   missing: reload before concluding it is absent (best-practices).
+3. **Anything we PARSE that the release changed: measure it before pinning, at token level**, e.g.
+   compat `readWasm(…).toText()`, which our merge regexes read (1.7.2 re-laid it out; tokens were
+   identical). A probe that imports `jsr:@jrmarcum/binaryang@<new>` with `--config deno.json` writes
+   the new version into `deno.lock`: restore it (`git checkout -- deno.lock`) afterwards.
+4. **Pin all three specifiers together** (`compat/binaryen`, `wasm-validate`, `compat/wabt`, exact)
+   plus the `src/binaryen.ts` comment; `deno cache --reload=jsr:@jrmarcum/binaryang main.ts
+   src/wast.ts`; the lock must then hold only the new version. `deno task install`.
+5. **`deno run -A scripts/check_try_table_oz.ts`** (the `-Oz` guard: 42 / 42).
+6. **At-risk suites first** (what the changelog touches; for a printer change, the merge paths:
+   merge, bundle, mod, go_merge, wasmmerge_guard), then **the full gate in order** (§ The full gate).
+   Golden-WAT changes must be checked token by token against a snapshot of the old goldens before
+   re-recording.
+7. **wast: re-record only drift that is explained**, file by file, and the validator-oracle guard
+   (binaryang rejects no valid module) must read 0.
+8. **If a report went to binaryang, verify every item it claims fixed against OUR numbers**, and
+   answer with them.
+
 ## Context boundaries
 
 **One context per batch.** Cut at the natural boundary: after the memory update and commit. That
@@ -226,6 +254,9 @@ git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
 #    previews it. A compatible change the diff calls CHANGED can be reviewed:
 #    `deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>` (committed).
 #    If api-surface.ts or bump.ts changed: `deno run -A scripts/check_compat_gate.ts`.
+#    Before a PATCH or MINOR bump (Rule 3, H6.5a): `deno run -A scripts/check_prev_tests.ts`
+#    (~25–30 min; the last tag's tests/ against today's src/ in a fresh clone). Classify every red
+#    suite: regression (fix first) / intended surface change (raises the floor) / improvement.
 deno task bump patch|minor|major
 #    (`deno task update-version` alone only propagates a version already edited by hand.)
 # 2b. DENO FLOOR (REVISED by the owner 2026-09-28, see design-decisions.md § Tooling): while
