@@ -41,9 +41,16 @@
 >    Our merge paths passed unchanged; golden-WAT's 60 merged entries changed in layout only (0
 >    token changes) and were re-recorded. wast 64,473 / 0 / 66 unchanged, oracle guard 0. The
 >    layout note belongs in the step-5 reply (their 1.7.2 note reads as if only `wasm2wat` changed).
-> 4. **Wire the lowering into the runner** for `proposals/custom-page-sizes/` only: passes
->    labelled separately, the valid-module guard covering lowered modules, `register`/imports
->    passing all three exports. Measure the skip count (expected 66 → 16).
+> 4. ✅ **DONE 2026-09-30: the lowering is wired into the runner, and the prediction held: skips
+>    66 → 16**, wast **64,506 / 0 / 16** (+33 passes). The gate reports them apart: "33 passed on
+>    23 module(s) lowered". Per file: `custom-page-sizes` 1 → 32 (12 modules lowered, the 4 traps
+>    checked by KIND and out-of-bounds), `custom-page-sizes-invalid` 19 → 21 (both unlinkables),
+>    `memory_max` 4 definitions now build, `memory_max_i64` still 4 unbuilt (lowered, then V8's
+>    memory64 cap; the skip now names that). Lowered modules rejected by binaryang: 0. Rules in
+>    design-decisions.md (gate-only, a retry on V8's custom-page-sizes refusal, never for validity,
+>    reported apart and guarded). `wast_runner_tests` 8/8 with a lowering fixture; each property
+>    inversion-checked. The 16 left: 4 `memory_max_i64` (V8 cap), 3 stringref, 4 V8 size caps,
+>    5 vendored `threads`.
 > 5. **Reply to binaryang with that count** (they asked for it).
 >
 > Then H12: **sw04**.

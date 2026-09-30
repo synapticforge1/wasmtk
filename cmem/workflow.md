@@ -197,7 +197,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 # 3. the Go suites — ONE AT A TIME (see traps)
 #    go_bindgen go_merge go_asyncify
 
-# 4. wast_tests   → expect 288 files / 64473 assertions / 0 failures / 66 skipped / 0 unrunnable
+# 4. wast_tests   → expect 288 files / 64506 assertions / 0 failures / 16 skipped / 0 unrunnable, "of which 33 passed on 23 module(s) lowered"
 #    (as of 2026-09-30, binaryang 1.8.1) → "✅ ALL CLEAN". Should a known failure ever be pinned
 #    again, "✅ ON BASELINE — N known failure(s) still standing" is the pass condition.
 #    The known failures print in red every run by design; the gate fails only if a count MOVES.
