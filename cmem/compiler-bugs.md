@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 28 | 41 | 0 | 16 |
-| LOUD | 14 | 13 | 1 | 8 |
+| SILENT-WRONG | 19 | 43 | 0 | 16 |
+| LOUD | 21 | 13 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
 79 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
@@ -16,7 +16,12 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 28** (2026-09-29, which is H12/I11 bar (c): sw01 fixed, and
+**Open silent-wrong in the compiler: 19** (2026-09-30, which is H12/I11 bar (c): the console
+fallback now delegates to wasic's `emitExpr` and otherwise ABORTS, so sw04 and sw27 are fixed and
+7 rows (sw18, sw21, sw22, sw23, sw26, sw30, sw31) turned LOUD: still open, now loud, 14 → 21. The
+corpus reached the stub nowhere (0 of 489 golden WAT outputs held one), so no existing program
+changed, bar one intentionally failing test that now names a second cause. Before that, **28**
+(2026-09-29: sw01 fixed, and
 sw33 found and fixed with it; then sw02 fixed and sw34 found with it; then sw03 and sw34 fixed.
 The round-1 table has 47 rows. 31 on 2026-09-28: 29 after
 round 1, −1 sw29 closed by the typed-declaration rule, +3 found while landing it). It read 0 earlier the
@@ -42,7 +47,7 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~sw33~~ | ✅ FIXED 2026-09-29 (found fixing sw01): `String(<bool>)` went through `$__i32_to_str`: `true` → `1`. Now selects static "true"/"false". Test `15_ThrowNonError` | wasic `String(...)` in emitStringAssign |
 | ~~sw02~~ | ✅ FIXED 2026-09-29: console ternary with a template branch: `n=5` → `n=`. Four causes in the one construct, all fixed: (1) `getStrPtrLen` kept only `segs[0]` of a multi-piece branch (template, concat); the branch is now built whole by wasic's `emitStringAssign` via the string-expression resolver; (2) `select` ran BOTH branches (a call in the branch not taken still ran) and, when both captured a length in `$__str_op_len`, the ELSE length won; now `if` with the chosen branch's length; (3) `looksLikeString` missed templates, string-method calls and string-returning calls, so those ternaries printed `0` or built an invalid module (widened for the ternary only); (4) the split used the LAST `?` (`findTopLevelOp`), so a nested ternary grouped wrongly: new `splitTernary` (first `?`, matching `:`). Also: `console_log.ts` gained its first error path (`setConsoleDiagnosticSink`), and a branch nothing can build is now a diagnostic, not `""`. Test `7b_ConsoleStringTernary`; fails on the old compiler | console_log string ternary |
 | ~~sw03~~ | ✅ FIXED 2026-09-29: `ok ? "pass" : "fail: " + msg`: `pass` → `passboom`. The `+` concat split ran before the ternary and cut at the `+` INSIDE the else branch. The string-ternary block now runs before every operator handler in `parseSingleArg` (the conditional binds looser than all of them). Golden-WAT: no existing output changed. Test `7b_ConsoleTernaryBeforeOperators`; fails on the old compiler | console_log `+` split |
-| sw04 | `Math.abs(s.charCodeAt(0) - 100)`: `3` → `100` (operand → 0) | console_log fallback |
+| ~~sw04~~ | ✅ FIXED 2026-09-30: `Math.abs(s.charCodeAt(0) - 100)`: `3` → `100` (operand → 0). The console fallback delegates to wasic's emitExpr (`setExprFallbackResolver`). Test `7b_ConsoleExprFallback`; fails on the old compiler | console_log fallback |
 | sw05 | string arg that is not a plain var/literal (`count(names[1])`): `3` → `0` | console_log exprToWat string |
 | sw06 | `` `len=${s.length}` + "!" ``: `len=5!` → `len=!` | wasic appendConcatPart |
 | sw07 | `console.log(s.includes("b"))`: `true` → `1` | wasic dotCallLookupFn |
@@ -56,20 +61,20 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | sw15 | binop typed from the LEFT operand: `i + f` = `3.5` → `3` | wasic lhsType |
 | sw16 | `if (0.5)` truncates: `yes` → `no` | wasic |
 | sw17 | `a >> 2 << 1`: `32` → `4` | wasic op table |
-| sw18 | `console.log(n << 2)`: `12` → `true` | console_log findTopLevelOp |
+| sw18 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(n << 2)`: `12` → `true` | console_log findTopLevelOp |
 | sw19 | `x ?? 5` on a non-nullable 0: `0` → `5` | wasic |
 | sw20 | `console.log(-7 % 4)`: `-3` → `1` (`rem_u`) | console_log |
-| sw21 | `console.log((a+1)*(a+2))`: `20` → `5` | console_log paren strip |
-| sw22 | `console.log(a ** 2)`: `9` → `0` | console_log |
-| sw23 | `console.log(n * -2)`: `-6` → `-2` | console_log |
+| sw21 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log((a+1)*(a+2))`: `20` → `5` | console_log paren strip |
+| sw22 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(a ** 2)`: `9` → `0` | console_log |
+| sw23 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(n * -2)`: `-6` → `-2` | console_log |
 | sw24 | `console.log("C:\\tmp")` double-decoded: `C:\tmp` → `C:<TAB>mp` | console_log per-iov |
 | sw25 | `console.log(n > 0 ? true : false)`: `true` → `1` | console_log |
-| sw26 | `"x" + (a < b ? "lo" : "hi")`: `xlo` → `x0` | console_log |
-| sw27 | `"v=" + (x ?? 5)`: `v=3` → `v=0` | console_log |
+| sw26 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `"x" + (a < b ? "lo" : "hi")`: `xlo` → `x0` | console_log |
+| ~~sw27~~ | ✅ FIXED 2026-09-30: `"v=" + (x ?? 5)`: `v=3` → `v=0`. Same delegation. Test `7b_ConsoleExprFallback` | console_log |
 | sw28 | `Math.max(a, b, c)` ignores the 3rd: `9` → `5` | both |
 | ~~sw29~~ | ✅ CLOSED 2026-09-28: an UNANNOTATED number was typed i32 (`let a = 100000; a * a` wrapped). Now LOUD by rule: every declaration states its type (design-decisions.md); the repro was retired, `tests/typed_decl_tests.ts` asserts the refusal | wasic checkDeclarationTypes |
-| sw30 | an ARRAY declared from an array PARAMETER reads 0s: `const d: i32[] = xs` → sum `6` → `0` | wasic arrayVars (a name initialiser is not registered as an alias). Found landing the rule |
-| sw31 | a 2D array declared from a CALL reads 0s: `const d: i32[][] = mk()` → `3` → `0` (typed or not) | wasic 2D paths. Found landing the rule |
+| sw30 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | an ARRAY declared from an array PARAMETER reads 0s: `const d: i32[] = xs` → sum `6` → `0` | wasic arrayVars (a name initialiser is not registered as an alias). Found landing the rule |
+| sw31 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | a 2D array declared from a CALL reads 0s: `const d: i32[][] = mk()` → `3` → `0` (typed or not) | wasic 2D paths. Found landing the rule |
 | sw32 | closure state across two calls in ONE `console.log`: `k.inc(), k.inc()` → `1 2` → `1 1` | console_log arg evaluation. Found landing the rule |
 | ld01 | function-typed var from a ternary: undefined func | wasic |
 | ld02 | console `x % 2` on f64: `f64.rem` does not exist | console_log |

@@ -143,6 +143,7 @@ import {
   SCRATCH_BASE,
   setConsoleDiagnosticSink,
   setEnumStrVarResolver,
+  setExprFallbackResolver,
   setFuncTableLookup,
   setInstanceofResolver,
   setNullishResolver,
@@ -13199,6 +13200,31 @@ class WasicTranspiler {
       setConsoleDiagnosticSink((msg) => {
         if (this.emitDiagSuppressDepth === 0) this.diagnostics.push(msg);
       });
+      // H12 (2026-09-30): an expression console_log.ts's exprToWat has no handler for goes to
+      // emitExpr, the more complete emitter, before it may fall to a stub. Speculative: every
+      // diagnostic it raises is rolled back, a stub or `unreachable` in its output is a refusal,
+      // and a STRING is never handed back as a number (it would print a pointer).
+      setExprFallbackResolver((tok, locs) => {
+        const l = locs as Map<string, WatType>;
+        if (this.isStringExpr(tok, l)) return undefined;
+        const t = this.inferExprType(tok, l);
+        const bt: WatType = t === "f64" || t === "f32" ? "f64" : t === "i64" ? "i64" : "i32";
+        const mark = this.diagnostics.length;
+        let wat = "";
+        try {
+          wat = this.quietEmit(() => this.emitExpr(tok, l, bt));
+        } catch {
+          wat = "";
+        }
+        if (
+          this.diagnostics.length > mark || !wat.trim() || wat.includes("(;?") ||
+          wat.includes("(unreachable)")
+        ) {
+          this.diagnostics.length = mark;
+          return undefined;
+        }
+        return { wat, type: bt };
+      });
       setStringExprResolver((tok, locs) => {
         const w = this.quietEmit(() => this.emitStringPtrLen(tok, locs as Map<string, WatType>));
         if (w === "(i32.const 0) (i32.const 0)") {
@@ -13278,6 +13304,7 @@ class WasicTranspiler {
       setInstanceofResolver(undefined);
       setStringExprResolver(undefined);
       setConsoleDiagnosticSink(undefined);
+      setExprFallbackResolver(undefined);
       setNullishResolver(undefined);
       setEnumStrVarResolver(undefined);
       const { statements, needsHelpers, needsStrGather, needsArrPrintHelper, needsJoinHelper } =
@@ -13634,6 +13661,31 @@ class WasicTranspiler {
       setConsoleDiagnosticSink((msg) => {
         if (this.emitDiagSuppressDepth === 0) this.diagnostics.push(msg);
       });
+      // H12 (2026-09-30): an expression console_log.ts's exprToWat has no handler for goes to
+      // emitExpr, the more complete emitter, before it may fall to a stub. Speculative: every
+      // diagnostic it raises is rolled back, a stub or `unreachable` in its output is a refusal,
+      // and a STRING is never handed back as a number (it would print a pointer).
+      setExprFallbackResolver((tok, locs) => {
+        const l = locs as Map<string, WatType>;
+        if (this.isStringExpr(tok, l)) return undefined;
+        const t = this.inferExprType(tok, l);
+        const bt: WatType = t === "f64" || t === "f32" ? "f64" : t === "i64" ? "i64" : "i32";
+        const mark = this.diagnostics.length;
+        let wat = "";
+        try {
+          wat = this.quietEmit(() => this.emitExpr(tok, l, bt));
+        } catch {
+          wat = "";
+        }
+        if (
+          this.diagnostics.length > mark || !wat.trim() || wat.includes("(;?") ||
+          wat.includes("(unreachable)")
+        ) {
+          this.diagnostics.length = mark;
+          return undefined;
+        }
+        return { wat, type: bt };
+      });
       setStringExprResolver((tok, locs) => {
         const w = this.quietEmit(() => this.emitStringPtrLen(tok, locs as Map<string, WatType>));
         if (w === "(i32.const 0) (i32.const 0)") {
@@ -13713,6 +13765,7 @@ class WasicTranspiler {
       setInstanceofResolver(undefined);
       setStringExprResolver(undefined);
       setConsoleDiagnosticSink(undefined);
+      setExprFallbackResolver(undefined);
       setNullishResolver(undefined);
       setEnumStrVarResolver(undefined);
       const {

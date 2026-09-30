@@ -79,6 +79,9 @@
     `LowerCustomPageSizes`, gate-only, when V8 refuses a module for that reason; never for validity
     assertions. wast 64,506 / 0 / 16 (skips 66 → 16); the 33 lowered passes are reported apart.
     The `wasmtk wast` CLI is unchanged (V8's own verdict).
+11. **H12: the console fallback no longer prints a silent `0` (2026-09-30).** It delegates to
+    wasic's `emitExpr`, else aborts naming the expression. sw04 and sw27 fixed; 7 rows turned
+    loud. Open silent-wrong in the compiler 28 → 19. Test `7b_ConsoleExprFallback`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
