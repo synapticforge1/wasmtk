@@ -918,8 +918,9 @@ silently break (all `src/wasic.ts`):
       `assert_unlinkable`; (4) **reported apart and guarded**: `WastResult.lowered` counts the
       modules and the passes that depended on one (the gate prints them on their own line), and
       every lowered module goes through `binaryangInvalid`, a rejection failing the gate. It was
-      verified on five engines against a native-wasmtime reference before it was wired in
-      (next-work.md).
+      verified on five engines against a native-wasmtime reference before it was wired in (the
+      method and the matrix: `scripts/binaryang-report.md`, the SENT 2026-09-29 and 2026-09-30
+      sections).
 
     ⚠️ **The alias is `binaryen-backend`, not `binaryen`** — see the invariant below. This block is
     the live shape; keep it in step with `deno.json` or it becomes the thing people copy.
