@@ -7,16 +7,18 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 18 | 45 | 0 | 17 |
-| LOUD | 20 | 14 | 1 | 8 |
+| SILENT-WRONG | 19 | 45 | 0 | 17 |
+| LOUD | 17 | 17 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 48 rows of the Phase 0b round-1 table (sw35 the 48th, 2026-09-30) (each row counted as one
+80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 49 rows of the Phase 0b round-1 table (sw35 the 48th, sw36 the 49th, 2026-09-30) (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 18** (2026-09-30, later: sw05 fixed, and sw35 found and
+**Open silent-wrong in the compiler: 19** (2026-09-30, evening: sw18, sw22, sw23 fixed, all
+three loud, so open loud 20 → 17; sw36 FOUND, the i32 division, pending a ruling: 18 → 19).
+Before that, **18** (2026-09-30, later: sw05 fixed, and sw35 found and
 fixed with it; sw21, loud since the morning, fixed too, so open loud 21 → 20). Before that, **19**
 (2026-09-30, which is H12/I11 bar (c): the console
 fallback now delegates to wasic's `emitExpr` and otherwise ABORTS, so sw04 and sw27 are fixed and
@@ -64,12 +66,13 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | sw15 | binop typed from the LEFT operand: `i + f` = `3.5` → `3` | wasic lhsType |
 | sw16 | `if (0.5)` truncates: `yes` → `no` | wasic |
 | sw17 | `a >> 2 << 1`: `32` → `4` | wasic op table |
-| sw18 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(n << 2)`: `12` → `true` | console_log findTopLevelOp |
+| ~~sw18~~ | ✅ FIXED 2026-09-30 (LOUD since that morning): `console.log(n << 2)`: `12` → `true`. `findTopLevelOp` scans right to left and skipped only the FIRST `<` of `<<` (`after === "<"`), so the second split `n <` from `2`; it now skips a `<` with a `<` on either side. Test `7b_ConsoleOperatorSplit` | console_log findTopLevelOp |
 | sw19 | `x ?? 5` on a non-nullable 0: `0` → `5` | wasic |
 | sw20 | `console.log(-7 % 4)`: `-3` → `1` (`rem_u`) | console_log |
 | ~~sw21~~ | ✅ FIXED 2026-09-30 (with sw05; LOUD since earlier that day): `console.log((a+1)*(a+2))`: `20` → `5`. The paren unwrap stripped the first `(` and the last `)` of any expression shaped `(…)`; it now unwraps only a matching outer pair. Repro now MATCH | console_log paren strip |
-| sw22 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(a ** 2)`: `9` → `0` | console_log |
-| sw23 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(n * -2)`: `-6` → `-2` | console_log |
+| ~~sw22~~ | ✅ FIXED 2026-09-30 (LOUD since that morning): `console.log(a ** 2)`: `9` → `0`. `*` split inside `**`; it now skips a `*` next to a `*`, and `**` (not in the console table) reaches wasic's emitExpr through the fallback resolver. Test `7b_ConsoleOperatorSplit` | console_log findTopLevelOp |
+| ~~sw23~~ | ✅ FIXED 2026-09-30 (LOUD since that morning): `console.log(n * -2)`: `-6` → `-2`. The split took the unary minus as the binary operator; a `-` / `+` is now unary when nothing, an operator or an opening bracket precedes it, or it signs an exponent (`1e-3`). Found and fixed with it, all LOUD before (invalid modules), so not counted: the unary-minus handler ran before the binary split, making `-n + m` into `-(n + m)`; a binary op returned its result at the OPERAND type (`1 << n` where f64 was expected); an identifier was returned at its own type whatever was asked. The last two now widen losslessly, and NEVER a boolean (`"ok: " + (a > b)`, ld06, stays loud: widened, it printed `ok: 1`). One golden entry changed correctly: `-Math.PI / 2` is `(-π) / 2` now, bit-identical. Test `7b_ConsoleOperatorSplit` | console_log |
+| sw36 | ⏳ OPEN, AWAITING THE OWNER'S RULING (found fixing sw23, 2026-09-30): `/` of two `i32` operands is `i32.div_s`, so it TRUNCATES: `m / n` with 5 and 3 prints `1` (native `1.6666666666666667`), in `console.log` AND in `const r: f64 = m / n`. The same on the old compiler, so not new; the test corpus works around it by convention (`(a / b) \| 0`, testing.md). Whether `i32 / i32` should produce an f64 (TypeScript's meaning) or stay integer division (and be refused or documented) is a language decision, not a fix | wasic + console_log `/` |
 | sw24 | `console.log("C:\\tmp")` double-decoded: `C:\tmp` → `C:<TAB>mp` | console_log per-iov |
 | sw25 | `console.log(n > 0 ? true : false)`: `true` → `1` | console_log |
 | sw26 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `"x" + (a < b ? "lo" : "hi")`: `xlo` → `x0` | console_log |
