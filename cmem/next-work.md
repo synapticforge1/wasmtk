@@ -28,8 +28,12 @@
 >    modules). Link messages for case 2: V8 names the memory import (#1, same wording as wrong kind);
 >    JSC names the placeholder ("imported global … must be a number"), as they said. All 12 lowered
 >    modules validate (IR, `wasmValidate`, V8). `deno.lock` restored after the scratch probes.
-> 2. **Our `assert_trap` kind check** (`src/wast.ts`): spec message → V8 wording per trap kind.
->    Own branch, full gate, on the current pin (1.7.1).
+> 2. ✅ **DONE 2026-09-30: `assert_trap` checks the trap KIND** (`src/wast.ts` `TRAP_KINDS` /
+>    `trapKindVerdict`; compiler-bugs.md entry). Built from a measured table: 5,263 corpus trap
+>    passes in 39 (expected, V8) pairs, all already the right kind, so the gate stayed 64,473 / 0 /
+>    66. Wrong kind is a FAILURE, an unmapped message a SKIP. New `tests/wast_runner_tests.ts` 4/4
+>    (the old runner fails all 4). The 1.8.0-lowered `custom-page-sizes.wast` now reads 27 / 4
+>    wrong-kind failures (was 31/31); 1.8.1's reads 31/31.
 > 3. **Pin binaryang 1.8.1**: all three specifiers, `-Oz` guard, full gate; the wast oracle guard
 >    (0 valid modules rejected) must hold.
 > 4. **Wire the lowering into the runner** for `proposals/custom-page-sizes/` only: passes

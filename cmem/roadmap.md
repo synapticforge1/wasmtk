@@ -67,6 +67,10 @@
    (`ok ? "pass" : "fail: " + msg` printed `passboom`), and `x instanceof Y` inside a console
    expression is resolved instead of stubbed to 0. Tests `7b_ConsoleTernaryBeforeOperators`,
    `15_ConsoleInstanceofCondition`. Open silent-wrong in the compiler 30 → 28.
+8. **wast: `assert_trap` checks the trap kind (2026-09-30).** It passed on ANY trap; a trap of
+   another kind now fails, naming both, and an unmapped message skips. The spec-to-V8 table was
+   measured on the corpus (5,263 trap passes, all right, so the gate is unchanged at 64,473 / 0 /
+   66). Found by the binaryang 1.8.0 lowering check. Test `tests/wast_runner_tests.ts`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
