@@ -373,6 +373,30 @@ change, list the rest) showed 2 real changes, and one of them carried a pre-exis
 (`(;? e instanceof Error ;) (i32.const 0)`), filed as sw34. Re-recording on the first line alone
 would have frozen that stub into the golden snapshot without anyone seeing it.
 
+**A check that "nothing went wrong" also passes when NOTHING HAPPENED; assert the thing happened
+too.** [wasmtk, 2026-09-30] "The lowered module passes binaryang's validator" was
+`validatorRejectedValid.length === 0`. Against the runner WITHOUT lowering it passed, because an
+empty rejection list is exactly what no lowering looks like. Only the inversion run showed it; it
+now also requires `lowered.modules === 1`. **Every absence assertion needs a presence beside it.**
+
+**Build a classifier from LOGGED data, not from what you remember the messages to be.**
+[wasmtk, 2026-09-30] Before making `assert_trap` check the trap kind, every trap pass of the corpus
+was logged as (spec message, V8 message): 5,263 passes in 39 pairs. That one measurement gave the
+mapping, showed the gap was latent (all 39 already the right kind), predicted the gate would not
+move (it did not), and surfaced V8's one ambiguity (overflow and NaN conversion share a message)
+before it could be mistaken for a bug.
+
+**When a dependency changes an output you PARSE, diff it at token level before you pin, whatever
+the changelog says it covers.** [wasmtk, 2026-09-30] binaryang 1.7.2's notes described the new
+text layout as `wasm2wat`'s; measuring the compat `readWasm(…).toText()` we actually call showed it
+changed too (124/124 texts), and that the token streams were identical. That turned "might break
+the merge regexes" into a checkable prediction the gate then confirmed.
+
+**Take a fixture's expected outcome from the spec's own file.** [wasmtk, 2026-09-30] A fixture
+asserted `(pagesize 3)` INVALID; the spec calls it MALFORMED (a parse error, `assert_malformed`),
+and the runner rightly refused to score a parse failure as a validation verdict. The spec's
+`assert_invalid` form is `(pagesize 2)`. Copy the form; do not reconstruct it.
+
 ### 🔁 STANDING QUESTION, both projects: *where is this construct USED, not where is it NAMED?*
 
 [binaryang + wasmtk, adopted 2026-08-27 — carried in binaryang's handoff and here, deliberately in
