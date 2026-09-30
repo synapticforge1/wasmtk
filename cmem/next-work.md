@@ -73,10 +73,11 @@
 > superset `WastOptions`: compatible, unprovable by text). **Owner decision 2026-09-30: reviewed
 > exceptions** — `api-surface.review.json`, hash-pinned to the exact change, written by
 > `deno task api-surface --review`; both reviewed `minor`. **The floor since v2.0.3 is now MINOR**
-> (next release 2.1.0 at the least). Self-test 13/13. Earlier plan text: H6.3 the compatibility
-> gate for the package surface (floor from the diff against the LAST RELEASE TAG's snapshot, since
-> Rule 5 re-baselines before the bump; bootstrap v2.0.3's snapshot from its tag) · H6.4 the CLI
-> surface · H6.5 Rule 3 behaviour checks · H6.6 memory layout with H4.
+> (next release 2.1.0 at the least). · **H6.4 ✅ DONE 2026-09-30: the CLI surface** as `(cli)` in
+> the same snapshot (22 dispatched commands with their usage shapes, 14 flags with aliases, exit
+> codes; 141 symbols in all); unchanged since v2.0.3, so the floor stays MINOR. Self-test 15/15.
+> **Open: H6.5** Rule 3 behaviour checks (previous tag's tests against new src; the loaders'
+> fixture suites, read-only) · **H6.6** memory layout with H4.
 >
 > **H6 is workable now (owner asked 2026-09-30); it never depended on binaryang.** wasmtk's part
 > (`../cmem/open-work.md`): (1) SemVer in `scripts/bump.ts` (drop `MAX_COMPONENT = 9` and the

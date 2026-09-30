@@ -132,7 +132,115 @@ async function symbolsOf(cwd: string, file: string): Promise<Record<string, Surf
   return out;
 }
 
-/** Generate the surface of the tree at `dir` from ITS deno.json `exports` map. */
+/**
+ * The CLI surface (H6.4, 2026-09-30), as the pseudo-entrypoint `(cli)`: what a SCRIPT that calls
+ * `wasmtk` depends on. Read from the code where the code is the contract, and from `--help` only for
+ * usage shapes:
+ *   command:<name>   every `case "<name>":` of main.ts's dispatcher (the commands it ACCEPTS), with
+ *                    its `wasmtk <name> …` usage line(s) from `--help` as members
+ *   flag:<name>      every flag in main.ts's `parseArgs` config: boolean or string, and its aliases
+ *   (exit)           every `Deno.exit(<literal>)` code, and each command with a computed exit code
+ * A removed command / flag / alias / exit code is major, an added one minor, a changed usage shape
+ * major (reviewable). A command in `--help` but not in the dispatcher, or the reverse, is a warning.
+ */
+async function cliSurface(
+  dir: string,
+): Promise<{ symbols: Record<string, SurfaceSymbol>; notes: string[] }> {
+  const src = (await Deno.readTextFile(`${dir}/main.ts`)).replace(/\r\n/g, "\n");
+  const notes: string[] = [];
+  const symbols: Record<string, SurfaceSymbol> = {};
+
+  // Commands: the dispatcher's case labels (4-space indent: the only switch at that depth).
+  const lines = src.split("\n");
+  const caseAt: { line: number; name: string }[] = [];
+  lines.forEach((l, i) => {
+    const m = l.match(/^ {4}case "([a-z0-9-]+)":/);
+    if (m) caseAt.push({ line: i, name: m[1]! });
+  });
+  if (caseAt.length === 0) throw new Error("main.ts: no dispatcher `case` labels found");
+
+  // Usage shapes: `wasmtk <name> …   description` lines of `--help`, run in `dir`.
+  const h = await new Deno.Command(Deno.execPath(), {
+    args: ["run", "-A", "main.ts", "--help"],
+    cwd: dir,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  const help = new TextDecoder().decode(h.stdout).replace(/\r\n/g, "\n");
+  const usage = new Map<string, string[]>();
+  for (const l of help.split("\n")) {
+    const m = l.match(/^\s*wasmtk ([a-z0-9-]+)(.*)$/);
+    if (!m) continue;
+    // After the name: skip the column alignment, take the text up to the wide gap before the
+    // description, and keep it only if it reads as arguments (`<file>`, `[dir]`, `--lang=…`).
+    const shape = m[2]!.trimStart().split(/\s{2,}/)[0]!.trim();
+    const argsText = /^[<[-]/.test(shape) ? ` ${shape.replace(/\s+/g, " ")}` : "";
+    (usage.get(m[1]!) ?? usage.set(m[1]!, []).get(m[1]!)!).push(`wasmtk ${m[1]}${argsText}`);
+  }
+  const dispatched = new Set(caseAt.map((c) => c.name));
+  for (const name of [...dispatched].sort()) {
+    const members: Record<string, string> = { "(dispatch)": "accepted" };
+    for (const [i, u] of (usage.get(name) ?? []).sort().entries()) members[`usage:${i}`] = u;
+    symbols[`command:${name}`] = { kind: "command", members };
+  }
+  for (const name of usage.keys()) {
+    if (!dispatched.has(name)) {
+      notes.push(`--help lists \`wasmtk ${name}\`, which main.ts does not dispatch`);
+    }
+  }
+  for (const name of dispatched) {
+    if (!usage.has(name)) notes.push(`main.ts dispatches \`${name}\`, which --help does not list`);
+  }
+
+  // Flags: the parseArgs config.
+  const pa = src.match(/parseArgs\(Deno\.args,\s*\{([\s\S]*?)\n\s*\}\);/);
+  if (!pa) throw new Error("main.ts: parseArgs(Deno.args, { … }) not found");
+  const list = (key: string) =>
+    [...(pa[1]!.match(new RegExp(`${key}:\\s*\\[([^\\]]*)\\]`))?.[1] ?? "").matchAll(/"([^"]+)"/g)]
+      .map((m) => m[1]!);
+  const aliases: Record<string, string[]> = {};
+  for (
+    const m of (pa[1]!.match(/alias:\s*\{([^}]*)\}/)?.[1] ?? "").matchAll(/(\w+):\s*"([^"]+)"/g)
+  ) {
+    (aliases[m[2]!] ??= []).push(`-${m[1]}`);
+  }
+  for (const [type, names] of [["boolean", list("boolean")], ["string", list("string")]] as const) {
+    for (const f of names) {
+      symbols[`flag:--${f}`] = {
+        kind: `flag:${type}`,
+        members: Object.fromEntries((aliases[f] ?? []).sort().map((a) => [`alias:${a}`, "alias"])),
+      };
+    }
+  }
+
+  // Exit codes, from main.ts AND src/ (the CLI's exits are spread over both, `Deno.exit` and the
+  // runtime wrapper `rt.exit`): every literal code, and each FILE that exits with a computed code
+  // (e.g. `wasmtk run` passing the program's own status through, src/utils.ts). Keyed by file, not
+  // line, so moving code does not read as a surface change. Comment lines are skipped.
+  const exits: Record<string, string> = {};
+  const files = [
+    "main.ts",
+    ...[...Deno.readDirSync(`${dir}/src`)]
+      .filter((e) => e.isFile && e.name.endsWith(".ts")).map((e) => `src/${e.name}`).sort(),
+  ];
+  for (const f of files) {
+    for (const l of (await Deno.readTextFile(`${dir}/${f}`)).split("\n")) {
+      if (/^\s*(\/\/|\*|\/\*)/.test(l)) continue;
+      for (const m of l.matchAll(/\b(?:Deno|rt)\.exit\(([^)]*)\)/g)) {
+        const arg = m[1]!.trim();
+        if (/^\d+$/.test(arg)) exits[`code:${arg}`] = "literal";
+        else exits[`computed:${f}`] = "computed";
+      }
+    }
+  }
+  symbols["(exit)"] = { kind: "exit-codes", members: exits };
+  return { symbols, notes };
+}
+
+/** Warnings from the last {@link generateSurface} (the CLI's help/dispatch mismatches). */
+export const surfaceNotes: string[] = [];
+
+/** Generate the surface of the tree at `dir` from ITS deno.json `exports` map, plus its CLI. */
 export async function generateSurface(dir: string): Promise<Surface> {
   const cfg = JSON.parse(await Deno.readTextFile(`${dir}/deno.json`));
   const exp: Record<string, string> = typeof cfg.exports === "string"
@@ -140,6 +248,10 @@ export async function generateSurface(dir: string): Promise<Surface> {
     : cfg.exports ?? {};
   const entrypoints: Surface["entrypoints"] = {};
   for (const key of Object.keys(exp).sort()) entrypoints[key] = await symbolsOf(dir, exp[key]!);
+  const cli = await cliSurface(dir);
+  entrypoints["(cli)"] = cli.symbols;
+  surfaceNotes.length = 0;
+  surfaceNotes.push(...cli.notes);
   return { tool: "wasmtk api-surface 1", entrypoints };
 }
 
@@ -355,6 +467,7 @@ if (import.meta.main) {
     console.log(
       "   A re-baseline goes in its OWN commit, stating the reason, before any bump (Rule 5).",
     );
+    for (const n of surfaceNotes) console.log(`   note: ${n}`);
   } else if (mode === "--check") {
     let committed = "";
     try {
