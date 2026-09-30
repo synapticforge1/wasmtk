@@ -69,10 +69,11 @@
 > verbatim, stamped, at the end of best-practices.md) · H6.3 ✅ DONE 2026-09-30, the gate for the
 > package surface (`scripts/api-surface.ts`, `api-surface.json` 16 entrypoints / 104 symbols, `bump`
 > enforces the floor, `scripts/check_compat_gate.ts` 10/10; rules in design-decisions.md).
-> **Its first reading: the floor since v2.0.3 is MAJOR**, set by `runWast` / `runWastPath`, whose
-> options parameter changed from an inline type to the named `WastOptions` (a superset: compatible
-> in practice, unprovable by text). Owner decision pending: accept 3.0.0, or a reviewed-exception
-> mechanism. Earlier plan text: H6.3 the compatibility
+> **Its first reading was MAJOR**, set by `runWast` / `runWastPath` (options type → the named
+> superset `WastOptions`: compatible, unprovable by text). **Owner decision 2026-09-30: reviewed
+> exceptions** — `api-surface.review.json`, hash-pinned to the exact change, written by
+> `deno task api-surface --review`; both reviewed `minor`. **The floor since v2.0.3 is now MINOR**
+> (next release 2.1.0 at the least). Self-test 13/13. Earlier plan text: H6.3 the compatibility
 > gate for the package surface (floor from the diff against the LAST RELEASE TAG's snapshot, since
 > Rule 5 re-baselines before the bump; bootstrap v2.0.3's snapshot from its tag) · H6.4 the CLI
 > surface · H6.5 Rule 3 behaviour checks · H6.6 memory layout with H4.

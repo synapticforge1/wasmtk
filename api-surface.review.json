@@ -1,0 +1,24 @@
+{
+  "reviews": [
+    {
+      "entrypoint": "./wast",
+      "symbol": "runWast",
+      "member": "(whole)",
+      "before": "2a5164b5d2de507ca73cc49b5002b1bb93ab5b02514bb878624c380720ddd4ab",
+      "after": "bbe2e39af49fb18c146cfd6e8d157247a4e244ba564d4958adb3761a7d48cca6",
+      "kind": "minor",
+      "reason": "the options parameter changed from the inline type { verbose?, maxFailures? } to the named WastOptions, which has the same two optional fields plus an optional lowerCustomPageSizes: every call valid against v2.0.3 is still valid",
+      "date": "2026-09-30"
+    },
+    {
+      "entrypoint": "./wast",
+      "symbol": "runWastPath",
+      "member": "(whole)",
+      "before": "3b7bfab79f03fc206a4020293fb75aa0e41558824c373bf137d2b7ef636d62b6",
+      "after": "5ffdde311e7ac73a93a73b269542dc4f01ba3cd472dd9548026ff6c6683cf43b",
+      "kind": "minor",
+      "reason": "the options parameter changed from the inline type { verbose?, maxFailures? } to the named WastOptions, which has the same two optional fields plus an optional lowerCustomPageSizes: every call valid against v2.0.3 is still valid",
+      "date": "2026-09-30"
+    }
+  ]
+}
