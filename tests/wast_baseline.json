@@ -621,19 +621,16 @@
     "skip": 1
   },
   "proposals/custom-page-sizes/custom-page-sizes-invalid.wast": {
-    "pass": 19,
-    "skip": 3,
-    "unbuilt": 1
+    "pass": 21,
+    "skip": 0
   },
   "proposals/custom-page-sizes/custom-page-sizes.wast": {
-    "pass": 1,
-    "skip": 43,
-    "unbuilt": 12
+    "pass": 32,
+    "skip": 0
   },
   "proposals/custom-page-sizes/memory_max.wast": {
     "pass": 2,
-    "skip": 4,
-    "unbuilt": 4
+    "skip": 0
   },
   "proposals/custom-page-sizes/memory_max_i64.wast": {
     "pass": 2,

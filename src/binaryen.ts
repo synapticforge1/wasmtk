@@ -79,6 +79,28 @@ export function binaryenOptimize(
 }
 
 /**
+ * binaryang's `LowerCustomPageSizes` over raw wasm bytes (binaryang ≥ 1.8.1): a memory with a
+ * custom page size becomes a 64 KiB-page memory with explicit bounds checks, so V8, which does not
+ * implement the proposal, runs the module with the proposal's behaviour. A lowered memory is
+ * exported as `<name>#pagesize=<ps>` beside `<name>#pages` and a placeholder global under
+ * `<name>`. Used by the wast runner's gate only (2026-09-30), and checked on five engines first
+ * (next-work.md). **Throws** on failure; the caller reports the module as unbuilt.
+ */
+export function binaryenLowerCustomPageSizes(bytes: Uint8Array): Uint8Array {
+  const m = lib.readBinary(bytes);
+  try {
+    const feat = (lib as Record<string, unknown>)["Features"] as Record<string, number> | undefined;
+    if (typeof (m as Record<string, unknown>)["setFeatures"] === "function") {
+      (m as { setFeatures(n: number): void }).setFeatures(feat?.["All"] ?? 0x7FFFFFFF);
+    }
+    (m as { runPasses(p: string[]): void }).runPasses(["LowerCustomPageSizes"]);
+    return m.emitBinary();
+  } finally {
+    m.dispose();
+  }
+}
+
+/**
  * Binaryen Asyncify + `-Oz` over raw wasm bytes — the in-house replacement for
  * `wasm-opt --asyncify -Oz`. Runs the Asyncify pass (which resolves TinyGo's
  * in-wasm `asyncify.*` control imports), then `-Oz`. Used by the Go producer so

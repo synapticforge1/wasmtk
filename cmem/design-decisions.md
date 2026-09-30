@@ -876,6 +876,20 @@ silently break (all `src/wasic.ts`):
       bytes, because `wasmValidate` pools decode and validation errors; (2) every module the spec
       asserts VALID is validated too, and the gate FAILS if binaryang rejects one
       (`validatorRejectedValid`). Take `allFeatures` from binaryang, never a hand-written list (H10).
+    - **Custom-page-sizes LOWERING in the wast runner (2026-09-30)**, `binaryenLowerCustomPageSizes`
+      in `src/binaryen.ts`, driven by `WastOptions.lowerCustomPageSizes` in `src/wast.ts`. Four
+      rules, each tested in `tests/wast_runner_tests.ts` and inversion-checked: (1) **gate-only**,
+      like the experimental V8 flags: `wast_tests.ts` turns it on, the `wasmtk wast` CLI and
+      `engine_tests` do not; (2) **a retry, not a pre-pass**: a module is lowered only when V8
+      REFUSES it and `explainEngineRejection` names "custom page sizes", so no other module is
+      touched and no module is compiled twice; (3) **never for `assert_invalid` /
+      `assert_malformed`**, whose question is validity (lowering can make an invalid module
+      valid): only `module`, `module definition`, `assert_trap` on a module and
+      `assert_unlinkable`; (4) **reported apart and guarded**: `WastResult.lowered` counts the
+      modules and the passes that depended on one (the gate prints them on their own line), and
+      every lowered module goes through `binaryangInvalid`, a rejection failing the gate. It was
+      verified on five engines against a native-wasmtime reference before it was wired in
+      (next-work.md).
 
     ⚠️ **The alias is `binaryen-backend`, not `binaryen`** — see the invariant below. This block is
     the live shape; keep it in step with `deno.json` or it becomes the thing people copy.
