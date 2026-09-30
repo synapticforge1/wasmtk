@@ -841,13 +841,22 @@ silently break (all `src/wasic.ts`):
   - **Rule 5, re-baseline in its own commit:** `bump` refuses outright if `api-surface.json` does not
     match the code, before computing any floor. `deno task api-surface` re-records; `--check`
     verifies; `--floor` prints the floor without bumping.
-  - **Proven to fail on purpose:** `scripts/check_compat_gate.ts` (13 cases, 10 + 3 for reviews, in a throwaway clone of
+  - **Proven to fail on purpose:** `scripts/check_compat_gate.ts` (15 cases: 10, + 3 for reviews, + 2 for the CLI; in a throwaway clone of
     the current branch; never touches the real version or tags). Re-run it whenever either script
     changes. Its first version passed two cases VACUOUSLY: its edit to un-export `isList` matched
     nothing, so the test now asserts that its own edits happened.
-  - **Not yet (H6.4 / H6.5):** the CLI surface (commands, flags, exit codes), Rule 3's behaviour
-    checks (the previous tag's `tests/` against new `src/`; the loaders' fixture suites as
-    consumers), Rule 4 (deprecate before remove), and a CI repeat on the tagged commit.
+  - **The CLI surface (H6.4, 2026-09-30)** is the pseudo-entrypoint `(cli)` in the same snapshot,
+    read from the CODE where the code is the contract: `command:<name>` = every `case` of main.ts's
+    dispatcher (the commands it ACCEPTS, 22), with its `wasmtk <name> …` usage line(s) from `--help`
+    as members; `flag:--<name>` = every flag in the `parseArgs` config, boolean or string, with its
+    aliases (14); `(exit)` = every literal `Deno.exit` / `rt.exit` code in main.ts and `src/`, and
+    each FILE that exits with a computed code (`src/utils.ts` is `wasmtk run` passing the program's
+    status through), keyed by file so moving code is not a change. 37 CLI symbols; unchanged since
+    v2.0.3. The Rust-only verbs (`add` `remove` `list` `fmt` `clean`) are dispatched but appear in
+    `--help` only in prose, so they carry no usage line; `--record` prints that as a note.
+  - **Not yet (H6.5):** Rule 3's behaviour checks (the previous tag's `tests/` against new `src/`;
+    the loaders' fixture suites as consumers), Rule 4 (deprecate before remove), and a CI repeat on
+    the tagged commit. Output text a script may parse is not snapshotted beyond usage shapes.
   - **Retired by this (history, do not reinstate):** the 2026-07-30 rules that versions were "a
     sequential counter with no compatibility meaning", that `patch`/`minor`/`major` named only a
     position, and the ODOMETER (minor and patch capped at 9, carrying left, `bump` refusing to run

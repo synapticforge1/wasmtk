@@ -10,6 +10,7 @@
  *   A  against the real last release tag: a kind below the floor is refused, nothing written;
  *      a kind at the floor is written
  *   B  Rule 5: a surface change without its re-baseline commit is refused before any floor
+ *   E  the CLI surface: a flag removed → major; a dispatcher command added → minor
  *   D  reviewed changes: the committed reviews lower the floor; an edited signature voids its
  *      review; a review cannot excuse a removal
  *   C  against a tag on a KNOWN surface: no change → patch; an export removed → patch refused,
@@ -181,6 +182,41 @@ check(
   r.out,
 );
 await reset();
+
+// E. The CLI surface (H6.4), against a tag on a known surface again.
+await run("git", ["tag", "v99.0.0"]);
+const mainPath = `${clone}/main.ts`;
+const mainSrc = (await Deno.readTextFile(mainPath)).replace(/\r\n/g, "\n");
+// Remove the `--auto` boolean flag from parseArgs: a script passing `--auto` breaks → MAJOR.
+const noAuto = mainSrc.replace(`"dry-run", "auto", "verbose"`, `"dry-run", "verbose"`);
+if (noAuto === mainSrc) {
+  throw new Error("test edit did nothing: the parseArgs boolean list not found");
+}
+await Deno.writeTextFile(mainPath, noAuto);
+await surface("--record");
+r = await surface("--floor");
+check(
+  "E1 a CLI flag REMOVED: floor MAJOR, `(cli) flag:--auto REMOVED` named",
+  /floor since v99\.0\.0.*MAJOR/.test(r.out) && /\(cli\) flag:--auto REMOVED/.test(r.out),
+  r.out,
+);
+await reset();
+// Add a dispatcher command: additive → MINOR.
+const withCmd = mainSrc.replace(
+  `    case "clean":`,
+  `    case "gate-probe":\n      break;\n    case "clean":`,
+);
+if (withCmd === mainSrc) throw new Error('test edit did nothing: `case "clean":` not found');
+await Deno.writeTextFile(mainPath, withCmd);
+await surface("--record");
+r = await surface("--floor");
+check(
+  "E2 a CLI command ADDED: floor MINOR, `(cli) command:gate-probe added` named",
+  /floor since v99\.0\.0.*MINOR/.test(r.out) && /\(cli\) command:gate-probe added/.test(r.out),
+  r.out,
+);
+await reset();
+await run("git", ["tag", "-d", "v99.0.0"]);
 
 function bumpOf(v: string, k: string): string {
   const [a, b, c] = v.split(".").map(Number) as [number, number, number];
