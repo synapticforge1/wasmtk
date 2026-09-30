@@ -1085,8 +1085,10 @@ function parseSingleArg(
 
   // ── Function call: name(arg, arg, ...)
   // Look up the callee's parameter types so each argument gets the correct const kind.
+  // The `(` must close at the END: `f(a) + f(b)` is not one call with the argument `a) + f(b`
+  // (H12, found with sw05, 2026-09-30).
   const callMatch = token.match(/^(\w+)\s*\((.*)?\)$/);
-  if (callMatch) {
+  if (callMatch && parenDepthNeverNegative(callMatch[2] ?? "")) {
     const callee = callMatch[1];
     const rawArgs = callMatch[2]?.trim() ?? "";
     const argList = rawArgs ? splitTopLevelArgs(rawArgs) : [];
@@ -1742,7 +1744,16 @@ function exprToWat(
       const [offset, len] = allocString(litMatch[1]);
       return `(i32.const ${offset}) (i32.const ${len})`;
     }
-    // Fallback: null string
+    // `null` / `undefined` for a `string | null` parameter: the null string, ptr 0 and len 0.
+    if (expr === "null" || expr === "undefined") return `(i32.const 0) (i32.const 0)`;
+    // Any other string-valued form (`names[1]`, `obj.f`, `s.slice(1)`, a string-returning call):
+    // wasic's emitStringPtrLen, via the resolver. H12 sw05, 2026-09-30: this fell straight to a
+    // null string, so `count(names[1])` passed "" and printed 0, silently.
+    const resolved = expr ? _stringExprResolver?.(expr, locals) : undefined;
+    if (resolved) return `${resolved.ptrWat} ${resolved.lenWat}`;
+    _diagnosticSink?.(
+      `console argument: cannot emit the string expression '${expr.slice(0, 60) || "(empty)"}'.`,
+    );
     return `(i32.const 0) (i32.const 0)`;
   }
 
@@ -2284,8 +2295,9 @@ function exprToWat(
   }
 
   // Nested function call: name(args)
+  // Only a WHOLE call: `f(a) + f(b)` falls through to the operators (see parseSingleArg).
   const callMatch = expr.match(/^(\w+)\s*\((.*)?\)$/);
-  if (callMatch) {
+  if (callMatch && parenDepthNeverNegative(callMatch[2] ?? "")) {
     const callee = callMatch[1];
     const rawArgs = callMatch[2]?.trim() ?? "";
     const argList = rawArgs ? splitTopLevelArgs(rawArgs) : [];
@@ -2346,13 +2358,26 @@ function exprToWat(
         }
       }
     }
-    return watArgsList.length > 0
+    const callWat = watArgsList.length > 0
       ? `(call $${callee} ${watArgsList.join(" ")})`
       : `(call $${callee})`;
+    // The result at the type the caller expects: `count(a) + count(b)` in an f64 sum was an i32
+    // on an f64 stack, an invalid module (ld05 `tag() + 7`, H12 2026-09-30).
+    const numeric = ["i32", "i64", "f32", "f64"];
+    const res = sig?.result;
+    if (res && res !== expectedType && numeric.includes(res) && numeric.includes(expectedType)) {
+      const widened = widenNumeric(callWat, res, expectedType);
+      if (widened !== null) return widened;
+      _diagnosticSink?.(
+        `console argument: '${callee}(…)' returns ${res}, which does not fit ${expectedType} here.`,
+      );
+    }
+    return callWat;
   }
 
-  // Parenthesised sub-expression — unwrap and recurse
-  if (expr.startsWith("(") && expr.endsWith(")")) {
+  // Parenthesised sub-expression — unwrap and recurse, only when the outer pair matches:
+  // `(a+1)*(a+2)` is a product, not `a+1)*(a+2` (sw21, H12 2026-09-30).
+  if (expr.startsWith("(") && expr.endsWith(")") && parenDepthNeverNegative(expr.slice(1, -1))) {
     return exprToWat(
       expr.slice(1, -1),
       locals,
@@ -2510,6 +2535,12 @@ function exprToWat(
       // $__str_op_len, so a console.* line with a string-equality op pre-declares that temp.
       const resolved = _stringExprResolver?.(e, locals);
       if (resolved) return [resolved.ptrWat, resolved.lenWat];
+      if (e === "null" || e === "undefined") return [`(i32.const 0)`, `(i32.const 0)`];
+      // Comparing against "" instead would print a wrong boolean with no error (H12, found with
+      // sw05, 2026-09-30).
+      _diagnosticSink?.(
+        `console argument: cannot emit the string operand '${e.slice(0, 60) || "(empty)"}'.`,
+      );
       return [`(i32.const 0)`, `(i32.const 0)`];
     };
     const [lPtr, lLen] = getStrPL(strLhs);
@@ -2733,10 +2764,14 @@ function isWholeStringLiteral(token: string, q: string): boolean {
 
 /** True if scanning `s` never drives `()`/`[]` depth below zero — i.e. a greedy `(.+)` arg capture
  *  didn't swallow a following `)`/`]`. Mirrors wasic.ts's guard so method handlers can fall through
- *  on an over-greedy match (e.g. `s.at(i) === t.at(j)`) instead of mis-emitting. */
+ *  on an over-greedy match (e.g. `s.at(i) === t.at(j)`) instead of mis-emitting. Skips string
+ *  literals (2026-09-30), so a `)` inside `")"` is not counted. */
 function parenDepthNeverNegative(s: string): boolean {
+  const inStr = literalMask(s);
   let d = 0;
-  for (const ch of s) {
+  for (let i = 0; i < s.length; i++) {
+    if (inStr[i]) continue;
+    const ch = s[i];
     if (ch === "(" || ch === "[") d++;
     else if (ch === ")" || ch === "]") {
       if (--d < 0) return false;
