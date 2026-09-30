@@ -110,7 +110,16 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-09-30, binaryang **1.7.1**; latest release v2.0.3)
+## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
+
+> **2026-09-30, binaryang 1.8.1 pinned (from 1.7.1), full gate green, every prediction held.**
+> `-Oz` guard 42/42 · wasi **432/432** · golden-WAT **489 / 0** after RE-RECORDING 60 entries whose
+> change is layout and `;;` comments ONLY, checked token by token (0 token changes): the bundle
+> pipelines and the programs that merge the math library, whose merged WAT includes compat
+> `toText` output, which 1.7.2 re-laid-out (design-decisions.md); the other 429 byte-identical ·
+> engine 1149 on baseline, 0 regressed, 0 improved · wast **64,473 / 0 / 66** unchanged, the
+> validator-oracle guard at 0 · Go 7/7/12 · merge, bundle, mod, wasmmerge_guard (the merge paths,
+> run first as the at-risk set) and every other suite green, `wast_runner_tests` 4/4.
 
 > **2026-09-30, wast `assert_trap` checks the trap KIND.** New suite `wast_runner_tests.ts`
 > **4/4** (fails 4/4 on the old runner). wast **64,473 / 0 / 66** unchanged (all 5,263 trap passes

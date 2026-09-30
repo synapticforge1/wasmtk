@@ -198,7 +198,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 #    go_bindgen go_merge go_asyncify
 
 # 4. wast_tests   → expect 288 files / 64473 assertions / 0 failures / 66 skipped / 0 unrunnable
-#    (as of 2026-09-29, binaryang 1.7.1) → "✅ ALL CLEAN". Should a known failure ever be pinned
+#    (as of 2026-09-30, binaryang 1.8.1) → "✅ ALL CLEAN". Should a known failure ever be pinned
 #    again, "✅ ON BASELINE — N known failure(s) still standing" is the pass condition.
 #    The known failures print in red every run by design; the gate fails only if a count MOVES.
 

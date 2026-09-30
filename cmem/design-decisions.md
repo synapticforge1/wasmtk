@@ -864,9 +864,9 @@ silently break (all `src/wasic.ts`):
     pointing at one dependency at one version** (the third added 2026-09-29):
 
     ```jsonc
-    "binaryen-backend":   "jsr:@jrmarcum/binaryang@1.7.1/compat/binaryen",
-    "binaryang-validate": "jsr:@jrmarcum/binaryang@1.7.1/wasm-validate",
-    "wabt":               "jsr:@jrmarcum/binaryang@1.7.1/compat/wabt"
+    "binaryen-backend":   "jsr:@jrmarcum/binaryang@1.8.1/compat/binaryen",
+    "binaryang-validate": "jsr:@jrmarcum/binaryang@1.8.1/wasm-validate",
+    "wabt":               "jsr:@jrmarcum/binaryang@1.8.1/compat/wabt"
     ```
 
     - **`binaryang-validate` is the wast runner's second `assert_invalid` oracle** (`src/wast.ts`
@@ -897,7 +897,7 @@ silently break (all `src/wasic.ts`):
       nodes). Always import a **compat subpath** (or a tool subpath such as `./wasm-validate`, which
       exports no IR); never the bare package.
   - 🔒 **THE RULE: `@jrmarcum/binaryang` is EXACT-pinned (no caret), every subpath at the same
-    version, and it moves only with a full gate** (currently `1.7.1`, 2026-09-29). Both
+    version, and it moves only with a full gate** (currently `1.8.1`, 2026-09-30). Both
     halves are code generators whose *output text* we parse, so the pin is a CORRECTNESS pin, not a
     compatibility range. Never reintroduce a caret.
     - History, for the reasoning only: `^1.3.5` let wabt-ts 1.4.0 (a stricter validator rejecting
@@ -1008,6 +1008,16 @@ silently break (all `src/wasic.ts`):
     throw when the printer changes — it silently reports "no data segments", which collapses data
     relocation and seats the heap inside static data. It cost a hung suite to find; see
     compiler-bugs.md.
+  - **The printer's LAYOUT moves too; read its tokens, not its lines (measured 2026-09-30).**
+    binaryang 1.7.2 changed compat `readWasm(…).toText()` for EVERY module read from binary (124/124
+    measured, both `readDebugNames` settings): one expression per line where siblings shared a line
+    (`(global.get 2)) (local.set 2` became two lines), and `;; label = @N` after every unnamed
+    `block` / `loop` / `if`. The token stream is identical once `;;` comments and whitespace are
+    dropped. Our merge paths passed unchanged on 1.8.1, and golden-WAT's 60 merged entries changed
+    in layout only (0 token changes). So: a regex over printed WAT must not depend on what shares a
+    line or on a line ending after `(block`, and must tolerate a `;;` comment there. To check a
+    future printer change, compare token streams (`scratchpad` recipe: strip `;;…$`, collapse
+    whitespace), not text.
   - **`deno.json` MUST STAY STRICT JSON — no JSONC comments (learned 2026-08-25).** Deno itself
     accepts comments, but `scripts/sync-version.ts` reads the file with `JSON.parse`, and
     `deno task install` chains `update-version` → that script. Adding one `//` comment to document a
