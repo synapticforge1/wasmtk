@@ -21200,6 +21200,7 @@ export async function compileWasi(path: string, outPath?: string): Promise<void>
 
   if (!path.endsWith(".ts")) {
     console.error(`❌ wasic expects a .ts or .wat file. Got: ${path}`);
+    rt.exit(1); // it returned, so `wasmtk wasic x.js` exited 0 (2026-09-30), unlike a failed build
     return;
   }
 

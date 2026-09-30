@@ -54,11 +54,14 @@ import { rt } from "./rt.ts";
  * @param path    - Path to the source `.ts` file.
  * @param outPath - Optional output path; defaults to `<name>.wasm` in the
  *                  same directory as the source file.
+ * @returns `true` when the library was built, `false` when it was not (the reason is printed).
+ *          It returned nothing until 2026-09-30, so `wasmtk modc` exited 0 on a failed build,
+ *          and a caller could not tell; the CLI now exits 1 on `false`.
  */
-export async function compileModule(path: string, outPath?: string): Promise<void> {
+export async function compileModule(path: string, outPath?: string): Promise<boolean> {
   if (path.endsWith(".wasm") || path.endsWith(".wat")) {
     console.error(`❌ Input Error: modc expects a TypeScript (.ts) file.`);
-    return;
+    return false;
   }
 
   const name = basename(path).replace(/\.[^/.]+$/, "");
@@ -73,8 +76,11 @@ export async function compileModule(path: string, outPath?: string): Promise<voi
     const result = await compileLibTs(path, out);
     if (!result.success) {
       console.error(`❌ modc: ${result.error}`);
+      return false;
     }
+    return true;
   } catch (err) {
     console.error(`❌ modc Exception: ${err}`);
+    return false;
   }
 }

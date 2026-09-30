@@ -489,6 +489,9 @@ export async function showInfo(path: string): Promise<void> {
     module.dispose();
   } catch (err) {
     console.error("❌ Info error: " + err);
+    // Exit 1 like `callExport` does. It returned, so `wasmtk info` and `wasmtk mod <file>` exited
+    // 0 on a missing or unreadable module (found by the 2026-09-30 exit sweep).
+    rt.exit(1);
   }
 }
 

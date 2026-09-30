@@ -854,6 +854,14 @@ silently break (all `src/wasic.ts`):
     status through), keyed by file so moving code is not a change. 37 CLI symbols; unchanged since
     v2.0.3. The Rust-only verbs (`add` `remove` `list` `fmt` `clean`) are dispatched but appear in
     `--help` only in prose, so they carry no usage line; `--record` prints that as a note.
+  - 🔒 **EVERY FAILED COMMAND EXITS NON-ZERO; a library entry point reports failure by its RETURN
+    VALUE (2026-09-30).** `compileModule` returned `void` and `showInfo` caught and returned, so
+    `wasmtk modc`, `info` and `mod <file>` exited 0 on failure, and `wasic`'s input-error path
+    returned before its `rt.exit(1)`: a script, CI step or test could not tell a failure from a
+    success, which hid a broken `modc` build for five weeks. The check is a SWEEP, not a reading:
+    every command with a missing input must exit non-zero (all 17 cases do). A new command, or a
+    new failure path in an old one, keeps that true; a new exported build function returns its
+    success (as `compileModule`'s `boolean`), never `void`.
   - **Not yet (H6.5):** Rule 3's behaviour checks (the previous tag's `tests/` against new `src/`;
     the loaders' fixture suites as consumers), Rule 4 (deprecate before remove), and a CI repeat on
     the tagged commit. Output text a script may parse is not snapshotted beyond usage shapes.

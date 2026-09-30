@@ -801,6 +801,38 @@ export function mergeWasmWat(
   const dataParts: string[] = [];
   let hasMutableGlobals = false;
 
+  // The SOURCE module's function types, by index: `(type (;N;) (func (param …) (result …)))` →
+  // `(param …) (result …)`. The merged module's type section is rebuilt by the assembler, so a copied
+  // `(type N)` means nothing there (see `inlineImportType`).
+  const sourceTypes = new Map<number, string>();
+  for (const form of forms) {
+    if (formKind(form) !== "type") continue;
+    const m = form.match(/^\(\s*type\s+\(;(\d+);\)\s+\(func\s*([\s\S]*)\)\s*\)$/);
+    if (m) sourceTypes.set(Number(m[1]), m[2]!.trim());
+  }
+  /**
+   * An imported function copied from the source module must not keep its `(type N)`: N indexes the
+   * SOURCE module's type section, which does not survive the merge, and the merged module's type N
+   * is some other signature. binaryang refuses the mismatch ("inline function type does not match
+   * explicit type"); before it did, the import could silently take the wrong signature. (2026-09-30:
+   * `modc` of every dynrt-merged library failed this way, hidden by `modc` exiting 0.) When the
+   * import ALSO spells its signature inline, the `(type N)` is dropped; when it has ONLY the index,
+   * the index is replaced by the source type's signature, since dropping it would silently mean
+   * "no params, no results". An index with no source type is refused loudly.
+   */
+  const inlineImportType = (imp: string): string =>
+    imp.replace(/\s*\(type\s+(\d+)\)/, (_m, n: string, at: number) => {
+      const rest = imp.slice(at + _m.length);
+      if (/^\s*\((?:param|result)\b/.test(rest)) return "";
+      const sig = sourceTypes.get(Number(n));
+      if (sig === undefined) {
+        throw new Error(
+          `wasmmerge: import refers to type ${n}, which the source module does not define`,
+        );
+      }
+      return sig ? ` ${sig}` : "";
+    });
+
   for (const form of forms) {
     const kind = formKind(form);
 
@@ -817,7 +849,9 @@ export function mergeWasmWat(
       // Use a function callback to avoid JavaScript's $1/$2 backreference substitution
       // in the replacement string — critical when newName starts with $1x (e.g. $18_prefix_...).
       // Route to importParts (NOT funcParts) — imports must precede all definitions in the module.
-      importParts.push(form.replace(/\(func\s+\(;(\d+);\)/, () => `(func ${newName}`));
+      importParts.push(
+        inlineImportType(form.replace(/\(func\s+\(;(\d+);\)/, () => `(func ${newName}`)),
+      );
       continue;
     }
 

@@ -742,12 +742,16 @@ export async function runHybrid(
       await rt.remove(coreWitPath);
     } catch { /* not present */ }
     await rt.writeTextFile(coreTsPath, generateCoreModule(funcs));
+    // Success needs BOTH: compileModule's own verdict (it reports failure since 2026-09-30) and the
+    // .wit on disk. The .wit alone was the only signal before, and a .wit can be written by a build
+    // that then fails to assemble.
+    let built = false;
     try {
-      await compileModule(coreTsPath);
-    } catch { /* fall through to the file-existence check */ }
+      built = await compileModule(coreTsPath);
+    } catch { /* fall through */ }
     try {
       await rt.stat(coreWitPath);
-      return true;
+      return built;
     } catch {
       return false;
     }
@@ -762,13 +766,14 @@ export async function runHybrid(
       await rt.remove(probeWit);
     } catch { /* not present */ }
     await rt.writeTextFile(probeTs, generateCoreModule(funcs));
+    let built = false;
     try {
-      await compileModule(probeTs);
+      built = await compileModule(probeTs);
     } catch { /* fall through */ }
     let ok = false;
     try {
       await rt.stat(probeWit);
-      ok = true;
+      ok = built; // both signals, as in compileCore
     } catch { /* failed */ }
     for (const ext of [".ts", ".wasm", ".wat", ".wit"]) {
       try {

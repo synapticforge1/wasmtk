@@ -25,11 +25,6 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     Bootstrap (INDEX + CLAUDE.md) is 14.5 KB against a ~10 KB guideline; the rest is the INDEX's
     policy section, which is the owner's to trim.
   - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
-- 🔴 **`modc` of a dynrt-merged library fails to assemble, `wasmtk modc` EXITS 0 on it, and
-  `bindgen_tests` has graded a stale `fnany_50.wasm` (from 2026-08-25) for five weeks**
-  (compiler-bugs.md, OPEN 2026-09-30; found by H6.5a). Fix order: the exit code and the test first
-  (make it loud; no stale bytes), then the merged imports' `(type N)`, minding the recorded
-  `internalizeDynrtHostImports` history.
 - ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **19 open silent-wrong, 21 open
   loud** (2026-09-30). NEXT: **sw05** (a string argument that is not a plain var or literal
   prints `0`). Three loud rows (sw18, sw22, sw23) share one root: an operator split hands the
@@ -55,10 +50,20 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   floor since v2.0.3 is MINOR (next ≥ 2.1.0; `deno task api-surface --floor`); the Deno floor is
   written then (workflow.md, release step 2b).
 
+- **Review WasmEdge's AOT shared-library output** (owner, 2026-09-30):
+  https://github.com/WasmEdge/WasmEdge. How a wasm module becomes a native library through
+  `wasmedge compile app.wasm app_aot.so` (`.so` / `.dylib` / `.dll` by extension), run as
+  `wasmedge app_aot.so`. Its own docs say the output "is only for WasmEdge use and cannot be used
+  by other WebAssembly runtimes", so the question is whether it yields a C library a host can link
+  (exported symbols, ABI, whether the WasmEdge runtime must be linked beside it) or only a WasmEdge
+  artifact, and what that means for wasmtk's "TypeScript as a DLL" goal (vision.md). Scoping
+  only: not started.
+
 ## Waiting on others
 
 - **H10** (generated opcode / feature tables) waits on **H9**: binaryang 1.8.1 exports no
-  `./definitions`.
+  `./definitions`. Our exact request (D2 + D3 first, then D1; field lists; a pinned subpath) was
+  SENT 2026-09-30, and is in `scripts/binaryang-report.md`.
 - **H4 and H11** are answered here (H4 re-verified item by item 2026-09-30); the workspace closes
   them in `../cmem/handoffs.md`.
 - **binaryang: nothing of ours is open.** Every report and reply is marked SENT in
@@ -70,6 +75,12 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 - **The P2 component container**: waits on browser-native WASI P2 / the Component Model.
 
 ## Completed — dated summaries (details in the files named)
+
+- **2026-09-30 — the `modc` / exit-code defect** found by H6.5a (compiler-bugs.md, FIXED):
+  `modc` of a dynrt-merged library assembles again (`wasmmerge` resolves a copied import's
+  `(type N)`); `modc`, `info`, `mod <file>` and `wasic x.js` exit 1 on failure (an exit sweep of
+  every command); `bindgen_tests` can no longer grade a stale fixture (two had been, for five
+  weeks). `compileModule` returns `boolean` (re-baselined, reviewed `minor`).
 
 - **2026-09-30 — H6.1–H6.4** (above). The SemVer bump, the ★ block, the compatibility gate with
   reviewed exceptions (the floor since v2.0.3 is MINOR), the CLI surface. Self-test
