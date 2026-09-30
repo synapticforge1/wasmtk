@@ -1729,6 +1729,11 @@
     "wasmer": "match",
     "wazero": "match"
   },
+  "7b_ConsoleExprFallback": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
   "7b_ConsoleStringTernary": {
     "wasmtime": "match",
     "wasmer": "match",
