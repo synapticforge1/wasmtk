@@ -112,6 +112,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-09-30, H12 sw18 + sw22 + sw23 (operator split in `console.log`), full gate green.** wasi
+> **435/435** (+`7b_ConsoleOperatorSplit`) · golden-WAT **492 / 0** after a deliberate re-record:
+> 490 identical, ONE changed correctly (`38_MathTrig`: `-Math.PI / 2` now `(-π) / 2`,
+> bit-identical), +1 new · engine 1152 on baseline, 0 regressed · wast 64,506 / 0 / 16 · Go
+> 7/7/12 · every other suite as before. Round-1 repros: sw18/sw22/sw23 MATCH; ld06 stays RUN-FAIL
+> (checked: a mid-fix widening had made it print `ok: 1`); 19 DIFFER = open silent-wrong 19.
+>
 > **2026-09-30, H12 sw05 + sw35 + sw21 (calls in `console.log`), full gate green.** wasi
 > **434/434** (+`7b_ConsoleStringCallArg`) · golden-WAT **491 / 0** after a deliberate re-record:
 > 465 identical, 25 differ ONLY by an unused `$__str_op_ptr/len` declaration (a script ignoring
@@ -731,9 +738,12 @@ from rsxtk!")/`build`→`.wasm`/`add`/`list`/`clean`. Manual verify command is i
   Used by the capability pipelines and Phase 18 bundle tests.
 - **Self-checking driver pattern** (capability fixtures): a `guard: i32[] = [0]` + `check(cond)`
   that does `guard[5000000]` (OOB read → trap → nonzero exit) on failure. A passing `run` proves
-  semantics. Do NOT use `throw` to fail a pipeline (wasic uncaught throw exits 0).
+  semantics. (Written when a wasic uncaught `throw` exited 0; since sw01, 2026-09-29, it exits 1,
+  but the guard pattern is still the one the fixtures use.)
 - **Integer division** in tests: `(a / b) | 0` to match TS float-`number` semantics (Binaryen -Oz
-  elides the `| 0` no-op).
+  elides the `| 0` no-op). This convention WORKS AROUND a divergence: `/` of two `i32` operands
+  is `i32.div_s` (truncating), where TypeScript divides as floats. Logged as sw36
+  (compiler-bugs.md), awaiting the owner's ruling (2026-09-30).
 
 ## Single-test quick loop
 

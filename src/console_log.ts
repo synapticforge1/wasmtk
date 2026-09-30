@@ -2239,8 +2239,17 @@ function exprToWat(
 
   // Simple identifier — check locals first, then module globals, then function table
   if (/^\w+$/.test(expr)) {
-    if (locals.has(expr)) return `(local.get $${expr})`;
-    if (globals?.has(expr)) return `(global.get $${expr})`;
+    // At the expected type when the widening is lossless: `-n` of an i32 `n` in an f64 sum was
+    // `f64.neg` of an i32, an invalid module (H12, found with sw23, 2026-09-30). A mismatch here
+    // always produced an invalid module, so no valid output changes.
+    const asExpected = (wat: string, t: string | undefined): string =>
+      t !== undefined && t !== expectedType &&
+        ["i32", "i64", "f32", "f64"].includes(t) && // never a `bool`: it would print 1 for true
+        ["i32", "i64", "f32", "f64"].includes(expectedType)
+        ? (widenNumeric(wat, t, expectedType) ?? wat)
+        : wat;
+    if (locals.has(expr)) return asExpected(`(local.get $${expr})`, locals.get(expr));
+    if (globals?.has(expr)) return asExpected(`(global.get $${expr})`, globals.get(expr));
     // Function reference passed as a callback argument
     const funcIdx = _funcTableLookup?.(expr);
     if (funcIdx !== undefined) return `(i32.const ${funcIdx})`;
@@ -2362,10 +2371,14 @@ function exprToWat(
       ? `(call $${callee} ${watArgsList.join(" ")})`
       : `(call $${callee})`;
     // The result at the type the caller expects: `count(a) + count(b)` in an f64 sum was an i32
-    // on an f64 stack, an invalid module (ld05 `tag() + 7`, H12 2026-09-30).
+    // on an f64 stack, an invalid module (sw35, H12 2026-09-30). A `boolean` result is never
+    // widened: as a number it would print `1` for `true`.
     const numeric = ["i32", "i64", "f32", "f64"];
     const res = sig?.result;
-    if (res && res !== expectedType && numeric.includes(res) && numeric.includes(expectedType)) {
+    if (
+      res && res !== expectedType && numeric.includes(res) && numeric.includes(expectedType) &&
+      sig?.resultTsName !== "boolean"
+    ) {
       const widened = widenNumeric(callWat, res, expectedType);
       if (widened !== null) return widened;
       _diagnosticSink?.(
@@ -2426,8 +2439,10 @@ function exprToWat(
     } (i32.const -1))`;
   }
 
-  // Unary - on a non-literal (e.g. -x, -(a+b))
-  if (expr.startsWith("-") && !/^-\d/.test(expr)) {
+  // Unary - on a non-literal (e.g. -x, -(a+b)). Unary minus binds tighter than every binary
+  // operator, so it applies only when none sits at top level: `-n + m` is `(-n) + m`, not
+  // `-(n + m)` (an invalid module: `f64.neg` of an i32 sum; H12, found with sw23, 2026-09-30).
+  if (expr.startsWith("-") && !/^-\d/.test(expr) && !hasTopLevelBinaryOp(expr)) {
     const inner = expr.slice(1).trim();
     if (isFloat) {
       return `(${expectedType}.neg ${
@@ -2698,11 +2713,26 @@ function exprToWat(
       : opType === "i64"
       ? i32op.replace(/^i32\./, "i64.")
       : i32op;
-    return `(${watOp} ${
+    const opWat = `(${watOp} ${
       exprToWat(lhs, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals)
     } ${
       exprToWat(rhs, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals)
     })`;
+    // The result at the type the caller expects. A comparison yields i32 whatever its operands;
+    // `1 << n` is i32 even where the caller asked for f64 (a literal-led print, a concat operand),
+    // and returning it unconverted put an i32 on an f64 stack, an invalid module (H12, found with
+    // sw18, 2026-09-30). Only a lossless widening is applied; anything else is left as it was.
+    // A comparison's i32 is a BOOLEAN and is never widened: into a number it prints `1` for `true`
+    // (`"ok: " + (a > b)` → `ok: 1`, ld06), so it stays the loud type mismatch it was.
+    const isComparison = /^[if](32|64)\.(eq|ne|[lg][te])/.test(watOp);
+    if (
+      !isComparison && opType !== expectedType &&
+      ["i32", "i64", "f32", "f64"].includes(expectedType)
+    ) {
+      const widened = widenNumeric(opWat, opType, expectedType);
+      if (widened !== null) return widened;
+    }
+    return opWat;
   }
 
   // `x instanceof Y` inside an expression (a ternary condition, an && operand). wasic owns the
@@ -2834,6 +2864,38 @@ function splitTernary(expr: string): [string, string, string] | null {
   return null;
 }
 
+/** Every binary operator exprToWat splits on (its binOps table), for the unary-operator guard. */
+const TOP_LEVEL_BINARY_OPS = [
+  "||",
+  "&&",
+  "|",
+  "^",
+  "&",
+  "===",
+  "!==",
+  "==",
+  "!=",
+  "<=",
+  ">=",
+  "<",
+  ">",
+  ">>>",
+  ">>",
+  "<<",
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+  "**",
+];
+
+/** True if `expr` has a binary operator at top level (outside brackets and string literals).
+ *  findTopLevelOp does not match a unary `+` / `-`, so `-n` alone is false and `-n + m` true. */
+function hasTopLevelBinaryOp(expr: string): boolean {
+  return TOP_LEVEL_BINARY_OPS.some((op) => findTopLevelOp(expr, op) > 0);
+}
+
 function findTopLevelOp(expr: string, op: string): number {
   let depth = 0;
   // Brackets INSIDE a string literal must not count toward depth, and an operator inside one is
@@ -2855,7 +2917,19 @@ function findTopLevelOp(expr: string, op: string): number {
     if (depth === 0 && i <= maxStart && expr.slice(i, i + op.length) === op) {
       const after = expr[i + op.length] ?? "";
       const before = i > 0 ? expr[i - 1] : "";
-      if (op === "<" && (after === "=" || after === "<")) continue;
+      // `<` inside `<<` from EITHER side: the scan runs right to left, so the second `<` of `n << 2`
+      // is met first, and `n <` / `2` became a comparison with an empty operand (sw18, H12).
+      if (op === "<" && (after === "=" || after === "<" || before === "<")) continue;
+      // `*` inside `**` (sw22): `a ** 2` split into `a *` and `2`. `**` is not in the console table;
+      // it reaches wasic's emitExpr through the fallback resolver.
+      if (op === "*" && (after === "*" || before === "*")) continue;
+      // A UNARY `-` / `+` is not a binary operator: `n * -2` split at the `-` into `n *` and `2`
+      // (sw23). Unary when nothing, or another operator or an opening bracket, precedes it, or
+      // when it is the sign of an exponent (`1e-5`).
+      if (op === "-" || op === "+") {
+        const prev = expr.slice(0, i).trimEnd();
+        if (prev === "" || /[-+*/%<>=!&|^~?:(,[]$/.test(prev) || /\d[eE]$/.test(prev)) continue;
+      }
       if (op === ">" && (after === "=" || after === ">" || before === ">")) continue;
       if (op === "=" && after === "=") continue;
       if (op === "!" && after === "=") continue;

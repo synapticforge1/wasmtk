@@ -419,6 +419,14 @@ emitted text in a benign way (here an unused local on 25 golden entries), classi
 diffs with a script that ignores exactly that delta and nothing else. Then "0 real diffs" is a
 measurement, not a skim of 27 first-differing lines.
 
+**A fix that makes an invalid module VALID can turn a loud bug silent. Compare every repro's
+CLASS before and after, not just the rows you meant to fix.** [wasmtk, 2026-09-30] Widening a
+binary op's i32 result to the f64 a caller asked for fixed `1 << n`. It also made
+`"ok: " + (a > b)` (ld06), a module V8 used to refuse, load and print `ok: 1`: a comparison's
+i32 is a boolean, and no numeric conversion of it is right. The targeted rows all flipped to
+MATCH; only the full verifier run showed ld06 moving from RUN-FAIL to DIFFER. A LOUD → SILENT
+move is a regression even when the count of passing rows goes up.
+
 ### 🔁 STANDING QUESTION, both projects: *where is this construct USED, not where is it NAMED?*
 
 [binaryang + wasmtk, adopted 2026-08-27 — carried in binaryang's handoff and here, deliberately in

@@ -92,6 +92,11 @@
     was read as one call; `(a+1)*(a+2)` lost its outer parens. All three print the right value
     now, and a string argument nothing can build is a compile error. Open silent-wrong 19 → 18
     (sw35 was found and fixed in the same change). Test `7b_ConsoleStringCallArg`.
+14. **H12 sw18 + sw22 + sw23: operators inside `console.log` (2026-09-30).** `n << 2`, `a ** 2`
+    and `n * -2` were split at the wrong character (compile errors since that morning, wrong
+    numbers before). Also fixed: `-n + m` was negated whole, and integer results where a float
+    was expected built invalid modules. Open loud 20 → 17. Found: sw36, `i32 / i32` truncates;
+    awaiting the owner's ruling. Test `7b_ConsoleOperatorSplit`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

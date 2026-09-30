@@ -25,11 +25,14 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     Bootstrap (INDEX + CLAUDE.md) is 14.5 KB against a ~10 KB guideline; the rest is the INDEX's
     policy section, which is the owner's to trim.
   - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **18 open silent-wrong, 20 open
-  loud** (2026-09-30, after sw05 / sw35 / sw21). NEXT: three loud rows (sw18, sw22, sw23) share
-  one root: an operator split hands the console fallback an EMPTY operand (`'(empty)'` in the
-  diagnostic). Then the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool
-  branches, sw32), then the wasic operator rows (sw10–sw17), then Phase 0b audit round 2.
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **19 open silent-wrong, 17 open
+  loud** (2026-09-30, after sw18 / sw22 / sw23, and sw36 found).
+  - **OWNER RULING NEEDED — sw36:** `i32 / i32` truncates (`i32.div_s`); TypeScript divides as
+    floats. Tests work around it with `(a / b) | 0`. Produce an f64, or keep integer division and
+    refuse / document it?
+  - NEXT: the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool branches, sw32),
+    then the wasic operator rows (sw10–sw17; sw15, an operator typed from its LEFT operand, also
+    breaks `x * -k` in `console.log`), then Phase 0b audit round 2.
 - ⏳ **wast: 7 `(module definition …)`s V8 refuses for its own size caps** (`memory64` 1, `table`
   1, `table64` 1, `memory_max_i64` 4). A definition asserts only validity, so binaryang's
   `wasmValidate` ACCEPTING it can be the verdict; its soundness condition is the mirror of the
@@ -93,8 +96,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   66 → 16 (`709a596`); reply SENT (`2e7db63`). design-decisions.md and testing.md hold the rules.
 - **2026-09-29/30 — H12 fixes**: sw01 + sw33 (`a58a426`), sw02 (`d8f8e7b`), sw03 + sw34
   (`673d7e3`), the console fallback delegates or aborts: sw04 + sw27 fixed, 7 rows loud
-  (`b4cebd6`); sw05 + sw35 found with it, sw21 (2026-09-30, `fix/h12-sw05`). Open silent-wrong
-  31 → 18.
+  (`b4cebd6`); sw05 + sw35 found with it, sw21 (`cec1606`); sw18 + sw22 + sw23, loud rows (2026-09-30,
+  `fix/h12-sw18-sw22-sw23`). Open silent-wrong 31 → 18, then 19 with sw36 found.
 - **2026-09-29 — binaryang 1.7.1 and the validator oracle** (`230f45a`): wast 64,434 / 105 →
   64,473 / 66, the guard at 0 valid modules rejected.
 - **2026-09-30 — stale-item sweep** (`02dcb7c`): every open marker re-checked against code or a
