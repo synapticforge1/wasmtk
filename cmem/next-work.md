@@ -57,10 +57,21 @@
 >    the compat API too (harmless here; worth a line in their changelog). Also closed on the way:
 >    `src/binaryen.ts` `deno doc --lint` clean (a pre-existing missing JSDoc on `lib`).
 >
-> **THE ORDER is complete. NEXT: H12 sw04** (`Math.abs(s.charCodeAt(0) - 100)` in console: an
-> operand becomes 0), then down the round-1 table (28 open silent-wrong). Most console rows share
-> the `exprToWat` terminal stub; wiring it to `setConsoleDiagnosticSink`, a test per row, is the
-> suggested path.
+> **THE ORDER is complete.** Then (2026-09-30) **H12: the console fallback was wired** as
+> suggested: it delegates to wasic's `emitExpr`, else ABORTS naming the expression. sw04 + sw27
+> fixed; sw18, sw21, sw22, sw23, sw26, sw30, sw31 now LOUD (open). Open silent-wrong **28 → 19**,
+> loud 14 → 21. **NEXT: sw05**, then down the table; the three `'(empty)'` rows (sw18, sw22,
+> sw23) share one root, an operator split handing over an empty operand.
+>
+> **H6 is workable now (owner asked 2026-09-30); it never depended on binaryang.** wasmtk's part
+> (`../cmem/open-work.md`): (1) SemVer in `scripts/bump.ts` (drop `MAX_COMPONENT = 9` and the
+> carry; `patch|minor|major`; retire the "versions carry no compatibility meaning" bullet in
+> design-decisions.md, superseded by the owner's 🔒 2026-09-20 decision); (2) the ★ convergent-rules
+> block into best-practices.md under a dated stamp; (3) the compatibility gate (API-surface snapshot
+> of the 16 entrypoints from `deno doc --json`, `bump.ts` enforces the floor, proven to fail on
+> purpose; consumers = the loaders' fixture suites, run read-only); (4) memory layout per
+> `../cmem/memory-conventions.md` (overlaps H4). **H10 still waits on H9**: binaryang 1.8.1
+> exports no `./definitions`.
 
 > ## 2026-09-29 — H12 sw01 fixed (+ sw33); binaryang answered the 11-skip letter
 >

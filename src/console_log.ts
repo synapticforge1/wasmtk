@@ -339,6 +339,39 @@ export function setStringExprResolver(
   _stringExprResolver = fn;
 }
 
+/** Delegates an expression `exprToWat` cannot emit to wasic's `emitExpr`, the more complete of the
+ *  two parallel expression emitters (a speculative probe on wasic's side: no diagnostic survives
+ *  it). Returns the WAT and its numeric type, or undefined. Set by wasic.ts around
+ *  parseConsoleLogArgs. Added 2026-09-30 (H12): it runs only where `exprToWat` would otherwise emit
+ *  its silent `(;? … ;) 0` stub. */
+let _exprFallbackResolver:
+  | ((token: string, locals: Map<string, string>) => { wat: string; type: string } | undefined)
+  | undefined = undefined;
+/**
+ * Inject the callback `exprToWat` asks, as a last resort, to emit an expression it has no handler
+ * for; it returns `{ wat, type }` or `undefined`. Pass `undefined` to clear it.
+ */
+export function setExprFallbackResolver(
+  fn:
+    | ((token: string, locals: Map<string, string>) => { wat: string; type: string } | undefined)
+    | undefined,
+): void {
+  _exprFallbackResolver = fn;
+}
+
+/** Widen `wat` from numeric type `from` to `to`, or null when that would lose information (a float
+ *  into an integer, i64 into i32). A lossy request means the console path guessed the argument's
+ *  type wrong, which must be reported, not truncated. */
+function widenNumeric(wat: string, from: string, to: string): string | null {
+  const f = from === "bool" ? "i32" : from;
+  if (f === to) return wat;
+  if (f === "i32" && to === "i64") return `(i64.extend_i32_s ${wat})`;
+  if (f === "i32" && (to === "f64" || to === "f32")) return `(${to}.convert_i32_s ${wat})`;
+  if (f === "i64" && (to === "f64" || to === "f32")) return `(${to}.convert_i64_s ${wat})`;
+  if (f === "f32" && to === "f64") return `(f64.promote_f32 ${wat})`;
+  return null;
+}
+
 /** Reports an argument this module cannot emit correctly. Set by wasic.ts around
  *  parseConsoleLogArgs; wasic turns it into a compile-aborting diagnostic (unless it is inside a
  *  speculative quietEmit probe). Added 2026-09-29 (H12 sw02): before it, this module had NO error
@@ -2654,6 +2687,23 @@ function exprToWat(
         : iw;
     }
   }
+
+  // Last resort before the stub (H12, 2026-09-30): wasic's emitExpr, when it can emit the expression
+  // at a type that widens to the one expected here without loss.
+  const leftover = expr.trim();
+  if (leftover && _exprFallbackResolver) {
+    const r = _exprFallbackResolver(leftover, locals);
+    const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
+    if (widened !== null) return widened;
+  }
+  // Nothing can emit it. This used to be SILENT: a `(;? … ;)` comment and a 0, so the program
+  // printed a wrong number with no error (the root of most console rows in H12's round-1 table).
+  // It is now a diagnostic, which aborts the compile. The stub is still returned so emission can
+  // finish and report every such argument in one pass.
+  _diagnosticSink?.(
+    `console argument: cannot emit the expression '${leftover.slice(0, 60) || "(empty)"}'` +
+      ` as ${expectedType}.`,
+  );
 
   // Fallback: emit a comment and a zero of the expected type
   const zeroType = isFloat ? expectedType : expectedType === "i64" ? "i64" : "i32";

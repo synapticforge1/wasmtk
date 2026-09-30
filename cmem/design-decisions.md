@@ -105,8 +105,14 @@ high-value subset.
   then it had NO error path: every argument it could not emit became `""` or a `0` in the output,
   which is the shared root of most console silent-wrong rows. wasic sets the sink around both
   `parseConsoleLogArgs` calls and drops messages inside a `quietEmit` probe. **A new console
-  fallback reports through the sink; it never returns a stub silently.** The remaining stubs
-  (`exprToWat`'s terminal `(;? … ;)`) are the next place to wire it, row by row, each with a test.
+  fallback reports through the sink; it never returns a stub silently.** Wired into `exprToWat`'s
+  terminal fallback 2026-09-30: an expression it has no handler for goes first to wasic's
+  `emitExpr` (`setExprFallbackResolver`: a speculative probe, diagnostics rolled back, a stub or
+  `unreachable` in its output is a refusal, a STRING is never returned as a number), accepted only if
+  it WIDENS to the expected type without loss (`widenNumeric`: a float into an integer, or i64 into
+  i32, is refused, because it means the console path guessed the type wrong); otherwise the sink
+  reports `cannot emit the expression …` and the compile aborts. Do not reintroduce a silent
+  `(;? … ;) 0`: 0 of the corpus's 489 golden outputs reached it, and 9 round-1 bugs did.
 - **The conditional operator is RIGHT-associative; binary operators are left.** `findTopLevelOp`
   returns the LAST match, which is right for `a - b - c` and wrong for `a ? b : c ? d : e`. Split a
   ternary with `splitTernary` (first `?`, then the `:` that matches it), never with
