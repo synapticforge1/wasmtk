@@ -1,5 +1,35 @@
 # Next-work planning note
 
+> ## ▶ THE ORDER (owner, 2026-09-30) — binaryang 1.8.1, then back to H12
+>
+> binaryang **1.8.1** (2026-09-29) answers our five-engine letter and SUPERSEDES 1.8.0 as the next
+> pin. It fixes all three findings: (1) an out-of-range access now does a 4-byte load at the
+> all-ones address, so every engine raises its OWN out-of-bounds trap (loads, stores, atomics,
+> SIMD, `memory.fill`/`copy`/`init`); their gate now checks trap KIND, the same gap ours has;
+> (2) a lowered memory also exports, under its original name, an immutable i32 placeholder
+> global, imported first by a lowered importer. Case 1 of `custom-page-sizes-invalid.wast` is now
+> "incompatible import type"; case 2 CANNOT be on wasmtime (it resolves every import name before
+> any type, and a native exporter never has `…#pagesize=N`), so strict wasmtime still says
+> "unknown import" there, explained, and the link still fails everywhere; (3) `getFunctionInfo`
+> returns packed `params`/`results` again (a breaking shape change shipped in a patch; checked
+> 2026-09-30: nothing in `src/` calls `getFunctionInfo`, so it does not reach us). A lowered
+> exporter now has THREE exports per memory: `mem` (placeholder), `mem#pagesize=N`, `mem#pages`.
+>
+> Each step alone, so every change has one cause:
+>
+> 1. **Re-run the five-engine check on 1.8.1** (scratch `cps/` scripts). Expected: strict
+>    wasmtime passes all 4 `assert_trap`s and unlinkable case 1; case 2 still "unknown import".
+> 2. **Our `assert_trap` kind check** (`src/wast.ts`): spec message → V8 wording per trap kind.
+>    Own branch, full gate, on the current pin (1.7.1).
+> 3. **Pin binaryang 1.8.1**: all three specifiers, `-Oz` guard, full gate; the wast oracle guard
+>    (0 valid modules rejected) must hold.
+> 4. **Wire the lowering into the runner** for `proposals/custom-page-sizes/` only: passes
+>    labelled separately, the valid-module guard covering lowered modules, `register`/imports
+>    passing all three exports. Measure the skip count (expected 66 → 16).
+> 5. **Reply to binaryang with that count** (they asked for it).
+>
+> Then H12: **sw04**.
+
 > ## 2026-09-29 — H12 sw01 fixed (+ sw33); binaryang answered the 11-skip letter
 >
 > - 📬 **binaryang 1.8.0 (2026-09-29) SUPERSEDES 1.7.2 as the next pin.** Their letter: none of
@@ -19,7 +49,7 @@
 >   "assert_trap"`: any `WebAssembly.RuntimeError` passes). Map the spec's trap message to V8's
 >   wording per kind. A false-pass class beyond custom page sizes; do it as its own fix with the
 >   full gate, BEFORE wiring the lowering in, so its 4 trap passes are real.
-> - ⏳ **NEXT ROUND, first step: pin binaryang 1.8.0** (not 1.7.2). Its fixes are for items
+> - (superseded 2026-09-30 by THE ORDER above: the pin is 1.8.1) **NEXT ROUND, first step: pin binaryang 1.8.0** (not 1.7.2). Its fixes are for items
 >   found ELSEWHERE; every wasmtk item was closed in 1.7.1 (owner, 2026-09-29). So nothing of ours
 >   is expected to move: read the changelog (§ 1.8.0) FIRST, write down any of our numbers a fix
 >   could still touch, then gate: all three specifiers together, `-Oz` guard, full gate, wast
