@@ -51,9 +51,16 @@
 >    reported apart and guarded). `wast_runner_tests` 8/8 with a lowering fixture; each property
 >    inversion-checked. The 16 left: 4 `memory_max_i64` (V8 cap), 3 stringref, 4 V8 size caps,
 >    5 vendored `threads`.
-> 5. **Reply to binaryang with that count** (they asked for it).
+> 5. ✅ **DONE 2026-09-30: reply SENT** (`scripts/binaryang-report.md`, "SENT 2026-09-30"): the
+>    five-engine re-check of 1.8.1, our trap-kind fix, the pin, the count (66 → 16, 64,506 / 0 /
+>    16, 33 lowered passes reported apart), and a note that 1.7.2's `toText` LAYOUT change reached
+>    the compat API too (harmless here; worth a line in their changelog). Also closed on the way:
+>    `src/binaryen.ts` `deno doc --lint` clean (a pre-existing missing JSDoc on `lib`).
 >
-> Then H12: **sw04**.
+> **THE ORDER is complete. NEXT: H12 sw04** (`Math.abs(s.charCodeAt(0) - 100)` in console: an
+> operand becomes 0), then down the round-1 table (28 open silent-wrong). Most console rows share
+> the `exprToWat` terminal stub; wiring it to `setConsoleDiagnosticSink`, a test per row, is the
+> suggested path.
 
 > ## 2026-09-29 — H12 sw01 fixed (+ sw33); binaryang answered the 11-skip letter
 >
@@ -69,7 +76,7 @@
 >   (engine limits aside). **Two findings for them:** the out-of-range access traps as `unreachable`
 >   on every engine (not out-of-bounds), and a lowered link failure says "unknown import", not
 >   "incompatible import type"; fixes suggested. Scripts were scratch-only (`cps/`), not kept.
->   Wired into our runner it would take skips **66 → 16**; NOT wired yet.
+>   Wired into our runner it would take skips **66 → 16**; NOT wired yet (superseded: wired 2026-09-30, step 4 of THE ORDER, and it did).
 > - ⏳ **Ours, found by this: `assert_trap` accepts ANY trap** (`src/wast.ts`, `case
 >   "assert_trap"`: any `WebAssembly.RuntimeError` passes). Map the spec's trap message to V8's
 >   wording per kind. A false-pass class beyond custom page sizes; do it as its own fix with the

@@ -8,6 +8,73 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## SENT 2026-09-30 — 1.8.1 pinned; the skip count you asked for is 66 → 16
+
+Thank you for 1.8.1. Everything below was measured against the published package.
+
+### 1.8.1 on the five engines: all three fixes hold
+
+We re-ran the same five-engine check before pinning:
+
+- **Trap kind:** out-of-bounds on every engine, where 1.8.0 gave `unreachable` on every one.
+  V8 "memory access out of bounds", JSC "Out of bounds memory access", wasmer "memory access out of
+  bounds", wazero "out of bounds memory access", wasmtime "out of bounds memory access". Strict
+  `wasmtime wast` (no proposal flag) now passes all of `custom-page-sizes.wast`; on 1.8.0 it
+  stopped at line 7.
+- **Link error:** case 1 of `custom-page-sizes-invalid.wast` is "incompatible import type" on
+  strict wasmtime. Case 2 is `unknown import: m::large-pages-memory#pagesize=1`, as you explained.
+  Your per-engine account holds too: V8 names the memory import, JSC names the placeholder global
+  ("imported global m:large-pages-memory must be a number").
+- **Counts** are unchanged from 1.8.0: values, positions and links, on every engine that can run
+  the modules.
+
+Your gate's trap-kind gap was ours too, and we closed it the same way. Our runner used to pass
+`assert_trap` on any trap. It now requires the kind the message names: a trap of another kind is a
+failure, and a message we have no mapping for is a skip, never a pass. Before changing it we logged
+every trap our corpus counts as a pass (5,263, in 39 pairs of expected and actual messages); all
+were already the right kind, so the gate did not move. Against the 1.8.0 lowering, the same runner
+now reports the 4 traps as failures ("wrong kind … got unreachable"); against 1.8.1 they pass.
+
+### The pin
+
+`compat/wabt`, `compat/binaryen` and `wasm-validate` all moved from 1.7.1 to 1.8.1 together, and our
+full gate is green with every prediction held. The `getFunctionInfo` shape change does not reach
+us: nothing in our source calls it. Our wast oracle's guard (your validator must reject no module
+the spec calls valid) still reads 0 across all 288 files.
+
+### The count
+
+We run the lowering in our GATE only; our `wasmtk wast` CLI still reports V8's own verdict. It is
+a retry: a module is lowered only when V8 refuses it and the refusal is custom page sizes, and never
+for `assert_invalid` / `assert_malformed`, since lowering could make an invalid module valid. Every
+lowered module must pass your validator, or the gate fails.
+
+**Skips 66 → 16. The gate reads 64,506 passed / 0 failed / 16 skipped**, where it read 64,473 /
+0 / 66, and reports the lowered passes on their own line: 33 passes on 23 lowered modules.
+
+| file | before | after |
+| --- | --- | --- |
+| `custom-page-sizes.wast` | 1 pass, 43 skips, 12 modules unbuilt | 32 passes, 0 skips; the 4 traps checked by kind, all out-of-bounds |
+| `custom-page-sizes-invalid.wast` | 19 passes | 21: both `assert_unlinkable`s |
+| `memory_max.wast` | 4 definitions unbuilt | all 4 build |
+| `memory_max_i64.wast` | 4 unbuilt | still 4: lowered, then refused by V8's memory64 cap (262,144 pages), as you predicted |
+
+Your validator rejected none of the 23 lowered modules. The 16 skips left: those 4
+`memory_max_i64` definitions, 3 stringref, 4 more of V8's own size caps, and 5 vendored `threads`
+blocks. None is yours.
+
+### One note: the `toText` layout change reached the compat API
+
+This did not break anything here; it is for your changelog. Your 1.7.2 notes say named references
+are `wasm2wat`-only and that compat `toText()` keeps the indices you wrote, which we found true. But
+the new LAYOUT also reaches compat `readWasm(bytes).toText()` for a module read from binary: one
+expression per line, and `;; label = @N` after each unnamed `block` / `loop` / `if`. We measured
+62 binaries with both `readDebugNames` settings: 124 of 124 texts differ, and the token streams
+are identical once `;;` comments and whitespace are dropped. Our merge code parses that text and
+passed unchanged; our golden-WAT snapshot changed in 60 entries, layout only. A caller that reads
+the printed text line by line would notice, so a line in the 1.7.2 entry saying the compat printer
+changed layout too may save someone else a search.
+
 ## SENT 2026-09-29 — `LowerCustomPageSizes` checked on five engines
 
 Thank you for 1.8.0 and for the lowering pass. You asked what it does to our skip count; before
