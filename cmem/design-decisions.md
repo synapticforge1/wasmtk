@@ -264,6 +264,24 @@ high-value subset.
 
 ## Numeric / codegen correctness
 
+- **Wasm types in TypeScript: the user's declared type decides, not TypeScript's `number` (owner
+  ruling, 2026-09-30).** "It isn't a compiler issue. It is a typescript issue. And is based on
+  what the user can ultimately expect to see in typescript versus wasm." TypeScript has no `i32`,
+  `u32` or `f32`: `type i32 = number` is erased, and Deno runs it as an f64. wasic honours the
+  declared type, so a Deno run is NOT the reference for those types, and a difference there is
+  not a compiler bug by itself.
+  - **`/` follows its operand types:** `i32 / i32` is `i32.div_s` (truncating), in
+    `console.log(a / b)` and in `const x: i32 = a / b`.
+  - **An explicitly declared float destination makes it a float division:** `const r: f64 = m /
+    n` is 1.666…, and so are `let` and `var` (`var` not preferred). "The const case noted is very
+    explicit on the return value."
+  - **The `Math` functions are f64 by definition,** so their arguments are f64 contexts:
+    `Math.floor(a / b)` divides as floats, then floors.
+  - Functions that TypeScript's `Math` lacks, for the wasm operations with no JS spelling, are
+    being scoped. The plan, open questions and bugs: [wasm-math-plan.md](wasm-math-plan.md).
+  - Test corpus consequence: a test that prints an `i32 / i32` must write `(a / b) | 0` or carry
+    `// @allow-output-diff`. That is a genuine by-design divergence, the case that marker exists for.
+
 - **Every variable declaration states its type (owner ruling, 2026-09-28). BREAKING.** "We should
   require the types in all variable declarations. When for loops syntax is involved the integer
   state is observed standardly, and an error thrown if anything other than an integer is found."
