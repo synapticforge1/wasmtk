@@ -7,11 +7,11 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 28 | 41 | 2 | 13 |
+| SILENT-WRONG | 28 | 41 | 2 | 14 |
 | LOUD | 14 | 13 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-78 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
+79 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
@@ -102,6 +102,32 @@ exports `DATA_BASE` / `SCRATCH_SLOTS` / `ArrayLookup` (console_log.ts); the unus
 `watToOptimisedWasm` vs `binaryenOptimize`.
 
 Classified 2026-09-28 from each entry's own text; re-tally whenever an entry is added or closed.
+
+## wast: `assert_trap` passed on ANY trap, whatever its kind (FIXED 2026-09-30)
+
+**Class:** SILENT-WRONG · **Status:** FIXED 2026-09-30 · **Scope:** other (the `.wast` runner)
+
+Found by the five-engine check of binaryang 1.8.0's custom-page-sizes lowering (next-work.md):
+the lowered modules trapped with `unreachable` where the spec says "out of bounds memory access",
+strict `wasmtime wast` and a plain-JS harness on JSC saw it, and our runner scored all 4 as
+passes. `src/wast.ts` accepted any `WebAssembly.RuntimeError` at all three trap sites (a trapping
+module instantiation, a direct invoke, the SIMD/NaN trampoline).
+
+**Latent in the gate, measured before the fix:** every trap pass of the 288-file corpus was logged
+as (expected, V8 message): 5,263 passes in 39 pairs, ALL of the right kind. So no gate number was
+false; the runner simply could not have noticed a wrong one.
+
+**Fix:** `TRAP_KINDS` maps each spec message to V8's wording, built from those 39 pairs, and
+`trapKindVerdict` scores a trap `ok` (pass), `wrong` (a FAILURE naming both messages) or
+`unmapped` (a labelled SKIP, never a pass). Keys match as prefixes, as the spec interpreter does
+("uninitialized element 2"). One stated limit: V8 words integer overflow and NaN conversion alike,
+so those two kinds cannot be told apart.
+
+**Tests:** new `tests/wast_runner_tests.ts` with a fixture whose outcomes are planted
+(`tests/wast_runner/trap_kind.wast`): right kind passes, `unreachable` for an out-of-bounds message
+fails, an unmapped message skips. 4/4; the old runner fails all 4. The real case: the 1.8.0-lowered
+`custom-page-sizes.wast` now reads 27 pass / 4 fail ("wrong kind … got unreachable") where it read
+31/31; the 1.8.1 lowering reads 31/31. Corpus gate unchanged at 64,473 / 0 / 66, as predicted.
 
 ## wast: 24 passes rested on V8's own limitations; users now told when the engine is the reason (FIXED 2026-09-28)
 

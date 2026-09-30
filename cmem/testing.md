@@ -89,6 +89,7 @@ batch, where all three tests passed first try and a full run was started needles
 | `hybrid_tests` | `src/hybrid.ts` parser/scanners (unit) | `src/hybrid.ts` |
 | `jstyper_tests` | `src/jstyper.ts` (unit; emits `.ts`, never compiles) | `src/jstyper.ts` |
 | `wast_tests` | `src/wast.ts` → `wabt` only | **any `binaryang` backend bump** (one package since 2026-08-27 — a bump moves the assembler AND the optimiser together), `src/wast.ts`. A bump makes this gate go RED by design — `GAINED COVERAGE` and/or `failures N → M` — see next-work.md |
+| `wast_runner_tests` (2026-09-30) | the wast RUNNER against fixtures with PLANTED outcomes (`tests/wast_runner/`): today the trap-kind check (right kind passes, wrong kind FAILS, unmapped message SKIPS). The corpus gate cannot show a runner is too lenient; this can. `deno run`, 4/4 | `src/wast.ts` |
 | `engine_cross_check_tests` | the built `.wasm` corpus → standalone engines | **any codegen change** (`src/wasic.ts`, `src/console_log.ts`), any backend bump, any WASI-ABI change. Run it after `wasi_tests` regenerates the corpus |
 | `varscope_tests` | `src/varscope.ts` | `src/varscope.ts` |
 | `wasmmerge_guard_tests` | `src/wasmmerge.ts` | `src/wasmmerge.ts` — **and wasic merge-path changes**, which call into it |
@@ -109,7 +110,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-09-29, binaryang **1.7.1**; latest release v2.0.3)
+## Current pass counts (2026-09-30, binaryang **1.7.1**; latest release v2.0.3)
+
+> **2026-09-30, wast `assert_trap` checks the trap KIND.** New suite `wast_runner_tests.ts`
+> **4/4** (fails 4/4 on the old runner). wast **64,473 / 0 / 66** unchanged (all 5,263 trap passes
+> were already the right kind, measured). A `src/wast.ts`-only change: `main.ts` and three test
+> files import it and nothing on the compile path does, so the gate was `wast_tests`,
+> `engine_tests` 11/11, `wast_runner_tests`, plus a reinstall and the `^15_` wasi phase (12/12) as
+> a CLI smoke. wasi, golden-WAT, Go, engine cross-check and the rest are out of reach.
 
 > **2026-09-29, H12 sw03 + sw34 fixed, full gate green.** wasi **432/432** (+`7b_ConsoleTernaryBeforeOperators`,
 > `15_ConsoleInstanceofCondition`) · golden-WAT **489 / 0**, one existing entry changed

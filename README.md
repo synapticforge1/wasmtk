@@ -938,7 +938,9 @@ wasmtk wast file.wast --verbose               # show skip/toolchain-gap detail
 > test gate enables V8's experimental wide-arithmetic for every file, and custom-descriptors for
 > that proposal's own files only, and reads 64,473 / 66 on binaryang 1.7.1, where binaryang's
 > validator also decides the `assert_invalid` modules V8 cannot judge; the CLI uses the stable
-> engine and V8's verdicts only.) When V8 itself is the reason a module is refused — a proposal it does not implement,
+> engine and V8's verdicts only.) An `assert_trap` passes only when the trap is the kind the script
+> names: a module that traps for another reason (say `unreachable` where the script expects an
+> out-of-bounds access) is reported as a failure that names both. When V8 itself is the reason a module is refused — a proposal it does not implement,
 > such as custom page sizes, or a size above its own cap — `wasmtk wast` and `wasmtk run` say so
 > in plain words, naming the V8 version, and `wast` never counts such a refusal as a pass.
 

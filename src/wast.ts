@@ -443,6 +443,61 @@ function isJsBoundaryRefusal(e: unknown): boolean {
   return /type incompatibility when transforming/i.test(e instanceof Error ? e.message : String(e));
 }
 
+/**
+ * The TRAP KIND check (2026-09-30). `assert_trap` used to pass on ANY `WebAssembly.RuntimeError`,
+ * so a module that trapped for the wrong reason passed: binaryang 1.8.0's custom-page-sizes
+ * lowering trapped with `unreachable` where the spec says "out of bounds memory access", and this
+ * runner could not see it (strict wasmtime and a plain-JS harness on JSC could).
+ *
+ * Each spec message maps to V8's wording for the same trap. The table is MEASURED, not recalled:
+ * every trap pass of the 288-file corpus was logged as (expected, actual), 5,263 passes in 39
+ * pairs, all of the right kind. The spec interpreter matches an expected message as a PREFIX of its
+ * own ("uninitialized element 2" is "uninitialized element"), so keys match as prefixes, longest
+ * first. V8 words integer overflow and NaN conversion the same ("float unrepresentable in integer
+ * range"), so those two kinds cannot be told apart here; that is V8's limit, stated rather than hidden.
+ */
+const TRAP_KINDS: ReadonlyArray<readonly [string, RegExp]> = [
+  ["unreachable", /\bunreachable\b/],
+  [
+    "out of bounds memory access",
+    /memory access out of bounds|data segment( \d+)?( is)? out of bounds/,
+  ],
+  ["out of bounds table access", /table index is out of bounds|element segment out of bounds/],
+  [
+    "out of bounds array access",
+    /array element access out of bounds|element segment out of bounds/,
+  ],
+  ["undefined element", /table index is out of bounds/],
+  ["uninitialized element", /null function/],
+  ["indirect call type mismatch", /function signature mismatch/],
+  ["integer divide by zero", /divide by zero|remainder by zero/],
+  ["integer overflow", /divide result unrepresentable|float unrepresentable in integer range/],
+  ["invalid conversion to integer", /float unrepresentable in integer range/],
+  ["descriptor cast failure", /illegal cast/],
+  ["cast failure", /illegal cast/],
+  ["null descriptor reference", /dereferencing a null pointer/],
+  ["null function reference", /dereferencing a null pointer/],
+  ["null structure reference", /dereferencing a null pointer/],
+  ["null array reference", /dereferencing a null pointer/],
+  ["null i31 reference", /dereferencing a null pointer/],
+  ["null reference", /dereferencing a null pointer/],
+  ["unaligned atomic", /operation does not support unaligned accesses/],
+  ["call stack exhausted", /Maximum call stack size exceeded/],
+];
+
+/**
+ * Judge a trap against the spec's expected message: `ok` (right kind), `wrong` (a known kind, and
+ * V8's message is another kind: a FAILURE), or `unmapped` (no entry for this message: a labelled
+ * SKIP, never a pass, so a new proposal's trap cannot pass unchecked).
+ */
+function trapKindVerdict(expected: string, e: unknown): "ok" | "wrong" | "unmapped" {
+  const actual = e instanceof Error ? e.message : String(e);
+  const entry = [...TRAP_KINDS].sort((a, b) => b[0].length - a[0].length)
+    .find(([key]) => expected.startsWith(key));
+  if (!entry) return "unmapped";
+  return entry[1].test(actual) ? "ok" : "wrong";
+}
+
 /** Compare an actual WebAssembly result value against an expected const node. Returns true on match. */
 function resultMatches(expected: SexpList, actual: unknown): boolean {
   const h = head(expected);
@@ -1392,6 +1447,19 @@ export async function runWast(
         case "assert_trap":
         case "assert_exhaustion": {
           const action = cmd.list[1];
+          // A trap passes only if it is the KIND the spec names (see TRAP_KINDS, 2026-09-30).
+          const wantTrap = typeof cmd.list[2] === "string" ? watStrToJs(cmd.list[2] as string) : "";
+          const scoreTrap = (e: unknown) => {
+            const verdict = trapKindVerdict(wantTrap, e);
+            if (verdict === "ok") res.passed++;
+            else if (verdict === "wrong") {
+              fail(
+                `${h} trapped with the wrong kind: expected "${wantTrap}", got "${
+                  e instanceof Error ? e.message : e
+                }": ${src.slice(cmd.start, cmd.start + 80)}`,
+              );
+            } else skip(`${h}: trap kind not mapped ("${wantTrap}")`);
+          };
           if (!isList(action) || (head(action) !== "invoke" && head(action) !== "get")) {
             // The argument is a MODULE: `assert_trap` on instantiation. It MUST be run, because
             // instantiation gets part-way before trapping — element and data segments that precede
@@ -1405,6 +1473,7 @@ export async function runWast(
               noteWellFormedParseError(e); // handled below as unbuilt
             }
             let outcome: "trapped" | "instantiated" | "other" = "other";
+            let trapError: unknown = null;
             if (bytes) {
               try {
                 await instantiate(bytes);
@@ -1413,9 +1482,10 @@ export async function runWast(
                 const trap = e instanceof WebAssembly.RuntimeError ||
                   (h === "assert_exhaustion" && e instanceof RangeError);
                 outcome = trap ? "trapped" : "other";
+                trapError = e;
               }
             }
-            if (outcome === "trapped") res.passed++;
+            if (outcome === "trapped") scoreTrap(trapError);
             else if (outcome === "instantiated") {
               fail(
                 `${h} module instantiated without trapping: ${
@@ -1454,7 +1524,7 @@ export async function runWast(
                 break;
               }
               if (isTrap(e)) {
-                res.passed++;
+                scoreTrap(e);
                 break;
               }
               if (!(isJsBoundaryRefusal(e) && head(action) === "invoke")) {
@@ -1485,6 +1555,7 @@ export async function runWast(
             ];
             let outcome: "trapped" | "returned" | "unlinked" | "error" = "unlinked";
             let error = "";
+            let trapError: unknown = null;
             for (const rt of candidates) {
               try {
                 runTrampolined(action, rt);
@@ -1496,10 +1567,11 @@ export async function runWast(
                 // scored as one.
                 outcome = isTrap(e) ? "trapped" : "error";
                 error = e instanceof Error ? e.message : String(e);
+                trapError = e;
               }
               break;
             }
-            if (outcome === "trapped") res.passed++;
+            if (outcome === "trapped") scoreTrap(trapError);
             else if (outcome === "returned") {
               fail(`${h} did not trap: ${src.slice(cmd.start, cmd.start + 100)}`);
             } else if (outcome === "error") fail(`${h} threw a non-trap: ${error}`);
