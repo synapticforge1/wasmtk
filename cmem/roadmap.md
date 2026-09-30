@@ -71,6 +71,10 @@
    another kind now fails, naming both, and an unmapped message skips. The spec-to-V8 table was
    measured on the corpus (5,263 trap passes, all right, so the gate is unchanged at 64,473 / 0 /
    66). Found by the binaryang 1.8.0 lowering check. Test `tests/wast_runner_tests.ts`.
+9. **Backend → binaryang 1.8.1 (2026-09-30).** No change in behaviour on our side: wasi 432/432,
+   engine 1149 on baseline, wast 64,473 / 0 / 66. The printed WAT of modules read from binary is
+   laid out one expression per line with `;; label` comments (binaryang 1.7.2); our merge paths
+   read it unchanged. Brings `LowerCustomPageSizes`, not yet used.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
