@@ -811,6 +811,32 @@ silently break (all `src/wasic.ts`):
   - **"Backward compatible" is a gate result, not a judgment** (the compatibility gate, H6.3): the
     surface diff against the last release sets the minimum kind, and `bump` refuses a bump below
     it.
+- 🔒 **THE COMPATIBILITY GATE (H6.3, 2026-09-30; workspace `layout-and-packaging.md` Rules 1, 2,
+  5).** `scripts/api-surface.ts` + `scripts/bump.ts`:
+  - **Rule 1, the snapshot:** `api-surface.json` (committed) = every entry of deno.json's
+    `exports` map (16) × every symbol and signature `deno doc --json` reports, normalized (source
+    locations and doc comments dropped, keys sorted), one symbol per line. Interfaces, classes and
+    enums are stored MEMBER by member; functions, type aliases and variables whole. 104 symbols at
+    introduction. Generated, never hand-edited.
+  - **Rule 2, the floor:** removed or changed anything → `major`; only added → `minor`; nothing →
+    `patch`. `bump` prints the floor WITH the symbols that set it and refuses a kind below it; a kind
+    above it is allowed. A changed function signature counts as `major` even when it is compatible,
+    because text cannot prove compatibility. **Stated judgment:** a new REQUIRED interface property
+    is `minor` with a printed warning (additive for readers, breaking for constructors).
+  - **The floor is measured against the LAST `v*` RELEASE TAG's snapshot, not the working one**:
+    Rule 5 re-baselines before the bump, so a working-snapshot diff would always read `patch`. A tag
+    without a snapshot (v2.0.3 and earlier) is measured from a temporary detached worktree of the
+    tag, always removed afterwards; from the next release on, tags carry the file.
+  - **Rule 5, re-baseline in its own commit:** `bump` refuses outright if `api-surface.json` does not
+    match the code, before computing any floor. `deno task api-surface` re-records; `--check`
+    verifies; `--floor` prints the floor without bumping.
+  - **Proven to fail on purpose:** `scripts/check_compat_gate.ts` (10 cases, in a throwaway clone of
+    the current branch; never touches the real version or tags). Re-run it whenever either script
+    changes. Its first version passed two cases VACUOUSLY: its edit to un-export `isList` matched
+    nothing, so the test now asserts that its own edits happened.
+  - **Not yet (H6.4 / H6.5):** the CLI surface (commands, flags, exit codes), Rule 3's behaviour
+    checks (the previous tag's `tests/` against new `src/`; the loaders' fixture suites as
+    consumers), Rule 4 (deprecate before remove), and a CI repeat on the tagged commit.
   - **Retired by this (history, do not reinstate):** the 2026-07-30 rules that versions were "a
     sequential counter with no compatibility meaning", that `patch`/`minor`/`major` named only a
     position, and the ODOMETER (minor and patch capped at 9, carrying left, `bump` refusing to run
