@@ -220,6 +220,10 @@ git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
 # 2. SemVer bump (2026-09-30, H6): the KIND is required and is a compatibility statement.
 #    patch = fixes only; minor = new capability, compatible; major = anything breaking (+ a README
 #    Breaking Changes row). Writes deno.json and propagates to package.json + src/utils.ts.
+#    THE COMPATIBILITY GATE runs first (H6.3): it refuses if api-surface.json is stale (re-baseline
+#    in its own commit: `deno task api-surface`, stating why), prints the floor since the last v*
+#    tag with the symbols that set it, and refuses a kind below it. `deno task api-surface --floor`
+#    previews it. If api-surface.ts or bump.ts changed: `deno run -A scripts/check_compat_gate.ts`.
 deno task bump patch|minor|major
 #    (`deno task update-version` alone only propagates a version already edited by hand.)
 # 2b. DENO FLOOR (REVISED by the owner 2026-09-28, see design-decisions.md § Tooling): while

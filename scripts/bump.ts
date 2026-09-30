@@ -16,20 +16,32 @@
  * The kind is REQUIRED; there is no default. A default of `patch` let a bump happen without anyone
  * stating what kind of release it is, which is the decision this script exists to force.
  *
- * "Backward compatible" is a gate result, not a judgment (the compatibility gate, H6.3): the surface
- * diff against the last release computes the minimum kind, and a bump below it is refused. Until
- * that gate lands, the README's `### ⚠️ Breaking Changes` table is the check a human makes.
+ * "Backward compatible" is a gate result, not a judgment (the compatibility gate, H6.3,
+ * `scripts/api-surface.ts`). Before writing anything this script (1) refuses if the committed
+ * `api-surface.json` no longer matches the code (Rule 5: a surface change is re-baselined in its OWN
+ * commit first), (2) computes the FLOOR, the minimum kind, from the surface at the last `v*` tag to
+ * the surface now, and (3) refuses a kind below the floor, printing the symbols that set it. A kind
+ * ABOVE the floor is allowed (a major the gate did not require is the owner's call).
  *
  * Unlike `update-version` (which only COPIES the existing deno.json version out to
  * package.json/src/utils.ts), this RAISES the deno.json version first. Must be run from the project
  * root (deno task does this automatically).
  */
 
+import {
+  diffSurfaces,
+  generateSurface,
+  type Kind,
+  KIND_RANK,
+  printFloor,
+  serialize,
+  surfaceAtLastTag,
+} from "./api-surface.ts";
+
 const root = Deno.cwd();
 const denoJsonPath = `${root}/deno.json`;
 
 const KINDS = ["patch", "minor", "major"] as const;
-type Kind = typeof KINDS[number];
 
 const arg = Deno.args[0]?.toLowerCase();
 if (!arg || !(KINDS as readonly string[]).includes(arg)) {
@@ -42,6 +54,36 @@ if (!arg || !(KINDS as readonly string[]).includes(arg)) {
   Deno.exit(1);
 }
 const kind = arg as Kind;
+
+// ── The compatibility gate (H6.3). Nothing is written unless it passes.
+const current = await generateSurface(root);
+let committed = "";
+try {
+  committed = (await Deno.readTextFile(`${root}/api-surface.json`)).replace(/\r\n/g, "\n");
+} catch {
+  console.error("❌ bump: api-surface.json is missing. Run `deno task api-surface` and commit it.");
+  Deno.exit(1);
+}
+if (committed !== serialize(current)) {
+  console.error("❌ bump: api-surface.json does not match the code:");
+  printFloor(diffSurfaces(JSON.parse(committed), current), "the committed snapshot");
+  console.error(
+    "   Re-baseline in its OWN commit first (`deno task api-surface`), stating the reason (Rule 5).",
+  );
+  Deno.exit(1);
+}
+const { tag, surface: released, source } = await surfaceAtLastTag();
+const floor = diffSurfaces(released, current);
+printFloor(floor, `${tag} (${source})`);
+if (KIND_RANK[kind] < KIND_RANK[floor.kind]) {
+  console.error(
+    `❌ bump: a ${kind} release is below the surface floor (${floor.kind}) since ${tag}. ` +
+      `Use \`deno task bump ${floor.kind}\`${
+        floor.kind === "major" ? " and add a README Breaking Changes row" : ""
+      }.`,
+  );
+  Deno.exit(1);
+}
 
 const text = await Deno.readTextFile(denoJsonPath);
 const m = text.match(/("version"\s*:\s*)"(\d+)\.(\d+)\.(\d+)"/);
