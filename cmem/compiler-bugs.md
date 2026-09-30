@@ -7,11 +7,11 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 19 | 43 | 1 | 16 |
+| SILENT-WRONG | 19 | 43 | 0 | 17 |
 | LOUD | 21 | 13 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, OPEN, SILENT-WRONG, other, 2026-09-30) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
+80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
@@ -108,9 +108,32 @@ exports `DATA_BASE` / `SCRATCH_SLOTS` / `ArrayLookup` (console_log.ts); the unus
 
 Classified 2026-09-28 from each entry's own text; re-tally whenever an entry is added or closed.
 
-## `modc` of a dynrt-merged library fails to assemble, exits 0, and `bindgen_tests` grades a stale binary (OPEN 2026-09-30)
+## `modc` of a dynrt-merged library fails to assemble, exits 0, and `bindgen_tests` grades a stale binary (FIXED 2026-09-30)
 
-**Class:** SILENT-WRONG · **Status:** OPEN · **Scope:** other (the merge path, the CLI exit, a test)
+**Class:** SILENT-WRONG · **Status:** FIXED 2026-09-30 · **Scope:** other (the merge path, the CLI exit, a test)
+
+**Fixed, in the recorded order:**
+- **(2) exit codes.** `compileModule` (`./modc`) returns `boolean` (it returned `void`, so no caller
+  could tell); `wasmtk modc` exits 1 on `false`; `hybrid.ts` needs both that verdict and the `.wit`.
+  An EXIT SWEEP (every command, a missing input) then found two more commands exiting 0 on failure,
+  `wasmtk info` and `wasmtk mod <file>` (`showInfo` caught and returned; it now exits 1 like
+  `callExport`), and `wasmtk wasic x.js` (its input-error path returned). All 17 cases now non-zero.
+- **(3) the test.** `bindgen_tests`' new `compileFixture` deletes the old `.wasm` / `.wit` first and
+  needs BOTH a zero exit and a freshly written `.wasm`. Run before (1) was fixed, it read honestly:
+  2 compile failures, `fnany_50` AND `hostfn_50` (both merge dynrt's host-call imports; both had
+  been graded from stale binaries).
+- **(1) the merge.** `wasmmerge` resolves a copied import's `(type N)` against the SOURCE module's
+  type section (`inlineImportType`): dropped when the import spells its signature inline, replaced
+  by the source signature when it carries only the index, refused loudly when the source has no
+  such type. The recorded `internalizeDynrtHostImports` hazard no longer applies: its patterns
+  tolerate both spellings since 2026-08-25, and library builds keep the host imports anyway.
+  `bindgen_tests` 142/142 on fixtures built today, whose sections run the host bridge end to end
+  (e.g. `getDoubler()(21) = 42`), so an empty output would show. Inversion: without the merge fix,
+  127 / 2 failed, loudly. Golden-WAT 490 / 0: no corpus output changed.
+- `compileModule`'s return type is a surface change: re-baselined in its own commit and reviewed
+  `minor` (`void` → `boolean`; a caller that ignored the result is unaffected).
+
+The original report, as found:
 
 Found by H6.5a (`scripts/check_prev_tests.ts`: the previous release's tests in a FRESH clone).
 `bindgen_tests` failed 12 of 142 there, all in the `fnany_50` integration, while the real repo

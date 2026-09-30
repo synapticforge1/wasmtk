@@ -392,6 +392,19 @@ text layout as `wasm2wat`'s; measuring the compat `readWasm(…).toText()` we ac
 changed too (124/124 texts), and that the token streams were identical. That turned "might break
 the merge regexes" into a checkable prediction the gate then confirmed.
 
+**A suite that passes in the working tree has not been shown to pass in a FRESH CLONE:
+gitignored build artifacts can stand in for a build that fails.** [wasmtk, 2026-09-30]
+`bindgen_tests` read 142/142 for five weeks while `modc` could not build two of its fixtures: the
+suite trusted `modc`'s exit code (0 on failure) and graded the `.wasm` files a successful build had
+left on 2026-08-25. Only running the tests in a fresh clone (H6.5a) showed it. **A test that reads a
+build output must delete it first and require a fresh one**, and a release check runs the suites
+somewhere no old artifact can exist.
+
+**An exit-code contract is checked by a SWEEP, not by reading one handler.** [wasmtk, 2026-09-30]
+Fixing `modc`'s exit code, then running every command against a missing input, found three more
+commands that printed ❌ and exited 0 (`info`, `mod <file>`, `wasic x.js`). The defect was a
+pattern (a `void` function that catches and returns), so it was never in one place.
+
 **Take a fixture's expected outcome from the spec's own file.** [wasmtk, 2026-09-30] A fixture
 asserted `(pagesize 3)` INVALID; the spec calls it MALFORMED (a parse error, `assert_malformed`),
 and the runner rightly refused to score a parse failure as a validation verdict. The spec's

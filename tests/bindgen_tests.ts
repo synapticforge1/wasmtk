@@ -54,6 +54,33 @@ async function run(
   };
 }
 
+/**
+ * Compile a fixture library with `wasmtk modc`, never grading a STALE build (2026-09-30). The
+ * fixture's `.wasm` / `.wit` are gitignored and survive between runs, and `modc` used to exit 0 on a
+ * failed build, so for five weeks the fnany_50 section graded a `.wasm` from 2026-08-25 while every
+ * rebuild failed. Now the old outputs are deleted first, and success needs BOTH a zero exit and a
+ * freshly written `.wasm`.
+ */
+async function compileFixture(
+  src: string,
+  wasm: string,
+): Promise<{ success: boolean; stdout: string; stderr: string }> {
+  for (const stale of [wasm, wasm.replace(/\.wasm$/, ".wit")]) {
+    try {
+      await Deno.remove(stale);
+    } catch { /* not there */ }
+  }
+  const r = await run(WASMTK_BIN, ["modc", src, "-n", wasm]);
+  let written = false;
+  try {
+    written = (await Deno.stat(wasm)).isFile;
+  } catch { /* not written */ }
+  if (r.success && !written) {
+    return { ...r, success: false, stderr: `${r.stderr}\nmodc exited 0 but wrote no ${wasm}` };
+  }
+  return { ...r, success: r.success && written };
+}
+
 // ── 1. parseWit — basic math (exports only) ──────────────────────────────────
 
 function testParseWitMath() {
@@ -290,7 +317,7 @@ async function testIntegrationMath() {
   const hostRunner = join(FIXTURES, "math_50_host.ts");
 
   // Step 1: compile TypeScript to WASM library
-  const compileResult = await run(WASMTK_BIN, ["modc", fixtureSrc, "-n", fixtureWasm]);
+  const compileResult = await compileFixture(fixtureSrc, fixtureWasm);
   ok("modc compile succeeded", compileResult.success);
   if (!compileResult.success) {
     console.log(red("    stderr: " + compileResult.stderr.slice(0, 300)));
@@ -339,7 +366,9 @@ console.log(m.square(5));
 // ── 9b. Integration: capital-heavy export names resolve via the _ex kebab fallback ──
 
 async function testIntegrationKebab() {
-  console.log(yellow(bold("\n── Integration: kebabcase_50 (readID/toHTML) resolve via _ex fallback")));
+  console.log(
+    yellow(bold("\n── Integration: kebabcase_50 (readID/toHTML) resolve via _ex fallback")),
+  );
 
   const fixtureSrc = join(FIXTURES, "kebabcase_50.ts");
   const fixtureWasm = join(FIXTURES, "kebabcase_50.wasm");
@@ -347,7 +376,7 @@ async function testIntegrationKebab() {
   const fixtureBinding = join(FIXTURES, "kebabcase_50.bindings.ts");
   const hostRunner = join(FIXTURES, "kebabcase_50_host.ts");
 
-  const compileResult = await run(WASMTK_BIN, ["modc", fixtureSrc, "-n", fixtureWasm]);
+  const compileResult = await compileFixture(fixtureSrc, fixtureWasm);
   ok("modc compile succeeded", compileResult.success);
   if (!compileResult.success) {
     console.log(red("    stderr: " + compileResult.stderr.slice(0, 300)));
@@ -401,7 +430,7 @@ async function testIntegrationBool() {
   const fixtureBinding = join(FIXTURES, "booleans_50.bindings.ts");
   const hostRunner = join(FIXTURES, "booleans_50_host.ts");
 
-  const compileResult = await run(WASMTK_BIN, ["modc", fixtureSrc, "-n", fixtureWasm]);
+  const compileResult = await compileFixture(fixtureSrc, fixtureWasm);
   ok("modc compile succeeded", compileResult.success);
   if (!compileResult.success) {
     console.log(red("    stderr: " + compileResult.stderr.slice(0, 300)));
@@ -457,7 +486,7 @@ async function testIntegrationStrings() {
   const fixtureBinding = join(FIXTURES, "strings_50.bindings.ts");
   const hostRunner = join(FIXTURES, "strings_50_host.ts");
 
-  const compileResult = await run(WASMTK_BIN, ["modc", fixtureSrc, "-n", fixtureWasm]);
+  const compileResult = await compileFixture(fixtureSrc, fixtureWasm);
   ok("modc compile succeeded", compileResult.success);
   if (!compileResult.success) {
     console.log(red("    stderr: " + compileResult.stderr.slice(0, 300)));
@@ -510,7 +539,7 @@ async function testIntegrationImports() {
   const fixtureBinding = join(FIXTURES, "imports_50.bindings.ts");
   const hostRunner = join(FIXTURES, "imports_50_host.ts");
 
-  const compileResult = await run(WASMTK_BIN, ["modc", fixtureSrc, "-n", fixtureWasm]);
+  const compileResult = await compileFixture(fixtureSrc, fixtureWasm);
   ok("modc compile succeeded", compileResult.success);
   if (!compileResult.success) {
     console.log(red("    stderr: " + compileResult.stderr.slice(0, 300)));
@@ -566,7 +595,7 @@ async function testIntegrationFnAny() {
   const hostRunner = join(FIXTURES, "fnany_50_host.ts");
 
   // 1. compile the lib (uses `any` + `Function(...)` → auto-merges dynrt)
-  const compileResult = await run(WASMTK_BIN, ["modc", fixtureSrc, "-n", fixtureWasm]);
+  const compileResult = await compileFixture(fixtureSrc, fixtureWasm);
   ok("modc compile succeeded", compileResult.success);
   if (!compileResult.success) {
     console.log(red("    stderr: " + compileResult.stderr.slice(0, 300)));
@@ -619,7 +648,7 @@ async function testIntegrationHostFn() {
   const hostRunner = join(FIXTURES, "hostfn_50_host.ts");
 
   // 1. compile the lib (any params that are functions → host callbacks via env.__host_call)
-  const compileResult = await run(WASMTK_BIN, ["modc", fixtureSrc, "-n", fixtureWasm]);
+  const compileResult = await compileFixture(fixtureSrc, fixtureWasm);
   ok("modc compile succeeded", compileResult.success);
   if (!compileResult.success) {
     console.log(red("    stderr: " + compileResult.stderr.slice(0, 300)));

@@ -82,6 +82,11 @@
 11. **H12: the console fallback no longer prints a silent `0` (2026-09-30).** It delegates to
     wasic's `emitExpr`, else aborts naming the expression. sw04 and sw27 fixed; 7 rows turned
     loud. Open silent-wrong in the compiler 28 → 19. Test `7b_ConsoleExprFallback`.
+12. **CLI failures exit non-zero; `modc` of dynrt-merged libraries works again (2026-09-30).**
+    `wasmtk modc`, `info`, `mod <file>` and `wasic <non-.ts>` exited 0 on failure; `modc` of a
+    library using `any` + `Function(…)` failed to assemble (the merged imports kept dynrt's own
+    `(type N)`), hidden by that exit code and by `bindgen_tests` reading stale fixtures. Found by
+    the Rule 3 check (H6.5a). `compileModule` now returns `boolean`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

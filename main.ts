@@ -316,7 +316,9 @@ Options:
         if (r.outputPath) await emitWitBeside(r.outputPath, `go ${goModcTarget}, optimised`);
         break;
       }
-      await compileModule(target, outPath);
+      // A failed library build EXITS 1 (2026-09-30). It exited 0, so scripts, CI and
+      // `bindgen_tests` took a failed `modc` for a success.
+      if (!(await compileModule(target, outPath))) Deno.exit(1);
       break;
     case "wasic":
       if (lang === "go") {
