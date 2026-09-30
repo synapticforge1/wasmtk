@@ -10,6 +10,8 @@
  *                                    Rule 5 says it goes in its OWN commit, stating the reason,
  *                                    before any bump)
  *   deno task api-surface --check    exit 1 if api-surface.json does not match the working tree
+ *   deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>
+ *                                    record a REVIEWED change (see `Review`)
  *   deno task api-surface --floor    print the minimum release kind since the last `v*` tag, and
  *                                    the symbols that set it (what `deno task bump` enforces)
  *
@@ -171,10 +173,59 @@ export interface Floor {
   warnings: string[];
 }
 
-/** Rule 2: the minimum release kind from `before` to `after`, with the symbols that set it. */
-export function diffSurfaces(before: Surface, after: Surface): Floor {
+/**
+ * A REVIEWED change (owner decision 2026-09-30): a member whose signature text CHANGED, judged by a
+ * person to be compatible, e.g. an options parameter whose type became a named superset. It lowers
+ * that one change from `major` to `kind`, and ONLY while the member's text is exactly `before` →
+ * `after` (SHA-256 of each): edit the symbol again and the review stops applying, so the new change
+ * is judged afresh. It never touches a REMOVED or ADDED classification. Stored in the committed
+ * `api-surface.review.json`, written by `--review` (which computes the hashes), never by hand.
+ */
+export interface Review {
+  entrypoint: string;
+  symbol: string;
+  member: string;
+  before: string;
+  after: string;
+  kind: Kind;
+  reason: string;
+  date: string;
+}
+
+export const REVIEW_FILE = "api-surface.review.json";
+
+/** The committed reviews, or none. */
+export async function loadReviews(root: string): Promise<Review[]> {
+  try {
+    const r = JSON.parse(await Deno.readTextFile(`${root}/${REVIEW_FILE}`)).reviews ?? [];
+    for (const x of r) {
+      if (!(x.kind in KIND_RANK)) throw new Error(`${REVIEW_FILE}: bad kind "${x.kind}"`);
+    }
+    return r;
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return [];
+    throw e;
+  }
+}
+
+async function sha256(s: string): Promise<string> {
+  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Rule 2: the minimum release kind from `before` to `after`, with the symbols that set it. A CHANGED
+ * member with a matching {@link Review} takes the review's kind; reviews that match nothing are
+ * reported (a stale review is a note to delete it, not an error).
+ */
+export async function diffSurfaces(
+  before: Surface,
+  after: Surface,
+  reviews: Review[] = [],
+): Promise<Floor> {
   const reasons: Floor["reasons"] = [];
   const warnings: string[] = [];
+  const used = new Set<Review>();
   const eps = new Set([...Object.keys(before.entrypoints), ...Object.keys(after.entrypoints)]);
   for (const ep of [...eps].sort()) {
     const a = before.entrypoints[ep], b = after.entrypoints[ep];
@@ -209,9 +260,31 @@ export function diffSurfaces(before: Surface, after: Surface): Floor {
                   `that constructs it. Choose major if consumers build ${n} values.`,
               );
             }
-          } else reasons.push({ kind: "major", what: `${label} CHANGED` });
+          } else {
+            const [hb, ha] = [await sha256(ma), await sha256(mb)];
+            const review = reviews.find((r) =>
+              r.entrypoint === ep && r.symbol === n && r.member === m && r.before === hb &&
+              r.after === ha
+            );
+            if (review) {
+              used.add(review);
+              reasons.push({
+                kind: review.kind,
+                what:
+                  `${label} CHANGED — REVIEWED ${review.date} as ${review.kind}: ${review.reason}`,
+              });
+            } else reasons.push({ kind: "major", what: `${label} CHANGED` });
+          }
         }
       }
+    }
+  }
+  for (const r of reviews) {
+    if (!used.has(r)) {
+      warnings.push(
+        `review of ${r.entrypoint} ${r.symbol} ${r.member} (${r.date}) matches no change here: stale ` +
+          `once released, or the symbol changed again and must be re-reviewed.`,
+      );
     }
   }
   const kind: Kind = reasons.some((r) => r.kind === "major")
@@ -291,7 +364,7 @@ if (import.meta.main) {
       Deno.exit(1);
     }
     if (committed.replace(/\r\n/g, "\n") !== serialize(current)) {
-      const f = diffSurfaces(JSON.parse(committed), current);
+      const f = await diffSurfaces(JSON.parse(committed), current);
       console.error("❌ api-surface.json does not match the working tree:");
       printFloor(f, "the committed snapshot");
       console.error(
@@ -302,9 +375,54 @@ if (import.meta.main) {
     console.log("✅ api-surface.json matches the working tree");
   } else if (mode === "--floor") {
     const { tag, surface, source } = await surfaceAtLastTag();
-    printFloor(diffSurfaces(surface, current), `${tag} (${source})`);
+    printFloor(await diffSurfaces(surface, current, await loadReviews(root)), `${tag} (${source})`);
+  } else if (mode === "--review") {
+    // --review <entrypoint> <symbol> <member> <kind> <reason…>: record a person's judgment of ONE
+    // changed member since the last release tag. The hashes are computed here, never typed.
+    const [ep, symbol, member, k, ...why] = Deno.args.slice(1);
+    const reason = why.join(" ").trim();
+    if (!ep || !symbol || !member || !k || !(k in KIND_RANK) || !reason) {
+      console.error(
+        "❌ usage: deno task api-surface --review <entrypoint> <symbol> <member> <patch|minor|major> <reason>\n" +
+          '   e.g. --review ./wast runWast "(whole)" minor "options type became a named superset"',
+      );
+      Deno.exit(1);
+    }
+    const { tag, surface } = await surfaceAtLastTag();
+    const was = surface.entrypoints[ep]?.[symbol]?.members[member];
+    const now = current.entrypoints[ep]?.[symbol]?.members[member];
+    if (was === undefined || now === undefined || was === now) {
+      console.error(
+        `❌ ${ep} ${symbol} ${member} is not a CHANGED member since ${tag} (a review applies only to ` +
+          `a change; it cannot excuse a removal or an addition).`,
+      );
+      Deno.exit(1);
+    }
+    const reviews = (await loadReviews(root)).filter((r) =>
+      !(r.entrypoint === ep && r.symbol === symbol && r.member === member)
+    );
+    reviews.push({
+      entrypoint: ep,
+      symbol,
+      member,
+      before: await sha256(was),
+      after: await sha256(now),
+      kind: k as Kind,
+      reason,
+      date: new Date().toISOString().slice(0, 10),
+    });
+    reviews.sort((a, b) =>
+      `${a.entrypoint} ${a.symbol} ${a.member}`.localeCompare(
+        `${b.entrypoint} ${b.symbol} ${b.member}`,
+      )
+    );
+    await Deno.writeTextFile(`${root}/${REVIEW_FILE}`, JSON.stringify({ reviews }, null, 2) + "\n");
+    console.log(`✅ ${REVIEW_FILE}: ${ep} ${symbol} ${member} reviewed as ${k} (since ${tag})`);
+    console.log("   Commit it with its reason, like a re-baseline (Rule 5).");
   } else {
-    console.error(`❌ api-surface: unknown mode ${mode} — use --record | --check | --floor`);
+    console.error(
+      `❌ api-surface: unknown mode ${mode} — use --record | --check | --floor | --review`,
+    );
     Deno.exit(1);
   }
 }

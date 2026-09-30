@@ -223,7 +223,9 @@ git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
 #    THE COMPATIBILITY GATE runs first (H6.3): it refuses if api-surface.json is stale (re-baseline
 #    in its own commit: `deno task api-surface`, stating why), prints the floor since the last v*
 #    tag with the symbols that set it, and refuses a kind below it. `deno task api-surface --floor`
-#    previews it. If api-surface.ts or bump.ts changed: `deno run -A scripts/check_compat_gate.ts`.
+#    previews it. A compatible change the diff calls CHANGED can be reviewed:
+#    `deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>` (committed).
+#    If api-surface.ts or bump.ts changed: `deno run -A scripts/check_compat_gate.ts`.
 deno task bump patch|minor|major
 #    (`deno task update-version` alone only propagates a version already edited by hand.)
 # 2b. DENO FLOOR (REVISED by the owner 2026-09-28, see design-decisions.md § Tooling): while

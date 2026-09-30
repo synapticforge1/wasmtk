@@ -823,6 +823,17 @@ silently break (all `src/wasic.ts`):
     above it is allowed. A changed function signature counts as `major` even when it is compatible,
     because text cannot prove compatibility. **Stated judgment:** a new REQUIRED interface property
     is `minor` with a printed warning (additive for readers, breaking for constructors).
+  - 🔒 **REVIEWED EXCEPTIONS (owner decision 2026-09-30).** A CHANGED member a person has judged
+    compatible is recorded in the committed `api-surface.review.json` by
+    `deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>`, which stores the
+    SHA-256 of the member's exact text before (at the last tag) and after. The floor then uses the
+    review's kind for THAT change, printed as `CHANGED — REVIEWED <date> as <kind>: <reason>`.
+    Three limits, each tested: it applies only while both hashes match (edit the symbol again and it
+    is judged afresh, and the unused review is reported); it cannot excuse a REMOVED or ADDED
+    member (`--review` refuses); nobody types a hash. Commit a review with its reason, like a
+    re-baseline. **First use:** `./wast` `runWast` and `runWastPath`, whose options parameter went
+    from the inline `{ verbose?, maxFailures? }` to `WastOptions` (the same fields plus an optional
+    `lowerCustomPageSizes`): reviewed `minor`, so the floor since v2.0.3 is MINOR, not MAJOR.
   - **The floor is measured against the LAST `v*` RELEASE TAG's snapshot, not the working one**:
     Rule 5 re-baselines before the bump, so a working-snapshot diff would always read `patch`. A tag
     without a snapshot (v2.0.3 and earlier) is measured from a temporary detached worktree of the
@@ -830,7 +841,7 @@ silently break (all `src/wasic.ts`):
   - **Rule 5, re-baseline in its own commit:** `bump` refuses outright if `api-surface.json` does not
     match the code, before computing any floor. `deno task api-surface` re-records; `--check`
     verifies; `--floor` prints the floor without bumping.
-  - **Proven to fail on purpose:** `scripts/check_compat_gate.ts` (10 cases, in a throwaway clone of
+  - **Proven to fail on purpose:** `scripts/check_compat_gate.ts` (13 cases, 10 + 3 for reviews, in a throwaway clone of
     the current branch; never touches the real version or tags). Re-run it whenever either script
     changes. Its first version passed two cases VACUOUSLY: its edit to un-export `isList` matched
     nothing, so the test now asserts that its own edits happened.
