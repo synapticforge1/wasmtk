@@ -742,8 +742,9 @@ from rsxtk!")/`build`→`.wasm`/`add`/`list`/`clean`. Manual verify command is i
   but the guard pattern is still the one the fixtures use.)
 - **Integer division** in tests: `(a / b) | 0` to match TS float-`number` semantics (Binaryen -Oz
   elides the `| 0` no-op). This convention WORKS AROUND a divergence: `/` of two `i32` operands
-  is `i32.div_s` (truncating), where TypeScript divides as floats. Logged as sw36
-  (compiler-bugs.md), awaiting the owner's ruling (2026-09-30).
+  is `i32.div_s` (truncating), where TypeScript divides as floats. RULED BY DESIGN (owner,
+  2026-09-30; design-decisions.md § "Wasm types in TypeScript"): a Deno run is not the reference
+  for `i32`, so the convention (or `// @allow-output-diff`) stays. The declared-f64 case is sw36.
 
 ## Single-test quick loop
 
