@@ -217,8 +217,11 @@ Only when the owner asks. Steps, in order:
 
 ```bash
 git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
-# 2. bump "version" in deno.json ONLY, then:
-deno task update-version        # propagates to package.json + src/utils.ts VERSION
+# 2. SemVer bump (2026-09-30, H6): the KIND is required and is a compatibility statement.
+#    patch = fixes only; minor = new capability, compatible; major = anything breaking (+ a README
+#    Breaking Changes row). Writes deno.json and propagates to package.json + src/utils.ts.
+deno task bump patch|minor|major
+#    (`deno task update-version` alone only propagates a version already edited by hand.)
 # 2b. DENO FLOOR (REVISED by the owner 2026-09-28, see design-decisions.md § Tooling): while
 #     fixes are in flight the floor IS the installed Deno and moves up with each install, so
 #     nothing is written. Once we are OUT OF FIXES, write the TESTED minimum:

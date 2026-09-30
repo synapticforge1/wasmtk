@@ -633,7 +633,7 @@ deno run -A tests/bindgen_tests.ts     # 142/142
 deno run -A tests/jstyper_tests.ts     # 73/73
 ```
 
-Publish flow: **`deno task bump`** (`scripts/bump.ts`; patch default, or `bump minor`/`major`)
+Publish flow: **`deno task bump patch|minor|major`** (`scripts/bump.ts`; SemVer since 2026-09-30, the kind is required)
 raises the `deno.json` version and propagates it to `package.json` + `src/utils.ts` — JSR rejects
 re-publishing the same version (`1.6.2` was the last published; `bump` took it to `1.6.3`). Then
 `deno task publish` → `scripts/publish.ts` re-syncs the version, commits `bump version to vX.Y.Z`,

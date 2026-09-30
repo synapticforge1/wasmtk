@@ -303,7 +303,7 @@ and JSR reports **0 dependents**. `./utils` remains a published entrypoint and k
 counter, **not** a semver compatibility signal — but this number was **deliberately advanced to a
 round value to mark the breaking change**, so a user seeing `2.0.0` has an obvious prompt to go read
 why. The owner may do the same for future breaking changes; it is a discretionary choice, not an
-automatic rule (full statement in design-decisions.md § versions carry no compatibility meaning).
+automatic rule (full statement in design-decisions.md § versions carry no compatibility meaning; SUPERSEDED 2026-09-30 by plain SemVer, H6: see design-decisions.md § Semantic Versioning).
 
 Because a round number can ALSO arise from an ordinary carry, the number cannot distinguish the two
 cases on its own — which is exactly why the README's `### ⚠️ Breaking Changes` table was created:
