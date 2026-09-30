@@ -46,6 +46,11 @@
 // deno-lint-ignore-file no-explicit-any
 import * as ns from "binaryen-backend";
 
+/**
+ * The Binaryen API of whichever backend `binaryen-backend` names in deno.json: `npm:binaryen`'s
+ * `.default` factory, or binaryang's compat namespace itself (see the module comment above).
+ * Typed `any` because the two backends share a surface but no type declarations.
+ */
 const lib: any = (ns as any).default ?? ns;
 
 export default lib;
