@@ -89,7 +89,7 @@ batch, where all three tests passed first try and a full run was started needles
 | `hybrid_tests` | `src/hybrid.ts` parser/scanners (unit) | `src/hybrid.ts` |
 | `jstyper_tests` | `src/jstyper.ts` (unit; emits `.ts`, never compiles) | `src/jstyper.ts` |
 | `wast_tests` | `src/wast.ts` → `wabt` only | **any `binaryang` backend bump** (one package since 2026-08-27 — a bump moves the assembler AND the optimiser together), `src/wast.ts`. A bump makes this gate go RED by design — `GAINED COVERAGE` and/or `failures N → M` — see next-work.md |
-| `wast_runner_tests` (2026-09-30) | the wast RUNNER against fixtures with PLANTED outcomes (`tests/wast_runner/`): today the trap-kind check (right kind passes, wrong kind FAILS, unmapped message SKIPS). The corpus gate cannot show a runner is too lenient; this can. `deno run`, 4/4 | `src/wast.ts` |
+| `wast_runner_tests` (2026-09-30) | the wast RUNNER against fixtures with PLANTED outcomes (`tests/wast_runner/`): the trap-kind check (right kind passes, wrong kind FAILS, unmapped message SKIPS) and the custom-page-sizes lowering (on: lowered and run; off: engine skip; `assert_invalid` never lowered). The corpus gate cannot show a runner is too lenient; this can. `deno run`, 8/8 (2026-09-30) | `src/wast.ts` |
 | `engine_cross_check_tests` | the built `.wasm` corpus → standalone engines | **any codegen change** (`src/wasic.ts`, `src/console_log.ts`), any backend bump, any WASI-ABI change. Run it after `wasi_tests` regenerates the corpus |
 | `varscope_tests` | `src/varscope.ts` | `src/varscope.ts` |
 | `wasmmerge_guard_tests` | `src/wasmmerge.ts` | `src/wasmmerge.ts` — **and wasic merge-path changes**, which call into it |

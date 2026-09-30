@@ -74,7 +74,7 @@
 9. **Backend → binaryang 1.8.1 (2026-09-30).** No change in behaviour on our side: wasi 432/432,
    engine 1149 on baseline, wast 64,473 / 0 / 66. The printed WAT of modules read from binary is
    laid out one expression per line with `;; label` comments (binaryang 1.7.2); our merge paths
-   read it unchanged. Brings `LowerCustomPageSizes`, not yet used.
+   read it unchanged. Brings `LowerCustomPageSizes` (used from item 10).
 10. **The wast GATE runs custom-page-size modules on V8 (2026-09-30)** through binaryang's
     `LowerCustomPageSizes`, gate-only, when V8 refuses a module for that reason; never for validity
     assertions. wast 64,506 / 0 / 16 (skips 66 → 16); the 33 lowered passes are reported apart.
