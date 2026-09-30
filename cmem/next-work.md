@@ -77,7 +77,7 @@
 >   on every engine (not out-of-bounds), and a lowered link failure says "unknown import", not
 >   "incompatible import type"; fixes suggested. Scripts were scratch-only (`cps/`), not kept.
 >   Wired into our runner it would take skips **66 → 16**; NOT wired yet (superseded: wired 2026-09-30, step 4 of THE ORDER, and it did).
-> - ⏳ **Ours, found by this: `assert_trap` accepts ANY trap** (`src/wast.ts`, `case
+> - ✅ **(DONE 2026-09-30, THE ORDER step 2)** **Ours, found by this: `assert_trap` accepts ANY trap** (`src/wast.ts`, `case
 >   "assert_trap"`: any `WebAssembly.RuntimeError` passes). Map the spec's trap message to V8's
 >   wording per kind. A false-pass class beyond custom page sizes; do it as its own fix with the
 >   full gate, BEFORE wiring the lowering in, so its 4 trap passes are real.
@@ -338,7 +338,7 @@ lesson — hours earlier the identical reasoning ("the resolver cannot find it, 
 was CORRECT and kept us off an unresolvable pin. **The tell is which side of the cache you are
 reading from, not how confident the error sounds. Reload before concluding a version does not exist.**
 
-## Open as of 2026-08-27 — after the backend merge
+## (historical, re-checked 2026-09-30: every item ✅ or superseded) Open as of 2026-08-27 — after the backend merge
 
 Both backends moved on 2026-08-25 (**wabt-ts → `1.4.1`, binaryen-ts → `1.5.0`**) and then **merged
 into `@jrmarcum/binaryang@1.5.1` on 2026-08-27** — one package, two compat subpaths, one exact
@@ -446,7 +446,7 @@ version ([design-decisions.md](design-decisions.md)).
   upstream tells you where a behaviour came from, **not whether anyone will fix it**; re-measure such
   claims on every bump rather than carrying them forward as settled.
 
-## Open as of 2026-07-30 (v2.0.0)
+## (historical, re-checked 2026-09-30: every item ✅ or superseded; the one live rule, the Deno floor, is in design-decisions.md) Open as of 2026-07-30 (v2.0.0)
 
 - ✅ **DONE 2026-08-31 — `"binaryen"` is now `"binaryen-backend"`; `"wabt"` stays.** Upstream's note
   turned out not to be about our manifest at all (their broken printout), but the merits stood:
@@ -672,7 +672,18 @@ Gate: **63,986 passed / 0 failed / 618 skipped**. (The unflagged `wasmtk wast` C
 - ✅ **wide-arithmetic (101) — owner decision: experimental V8 flags ON for the GATE only.**
   `tests/wast_tests.ts` detects the feature and re-runs itself with `GATE_V8_FLAGS`, and its
   `--scan-chunk` children carry the flag. The CLI is unchanged. `wide-arithmetic.wast` 8 → 107.
-- ⏳ **Definitions V8 refuses for implementation limits (12)** — `table` 1, `table64` 1, `memory64` 2,
+- ⏳ **RE-CHECKED 2026-09-30 — the blocker is gone, the work is NOT done; 7 definitions remain.**
+  binaryang 1.7.0 exported `allFeatures`, and the oracle was then built for `assert_invalid` ONLY:
+  a `(module definition …)` V8 refuses for a size cap is still an engine skip. The lowering (step 4
+  of THE ORDER) built `memory_max`'s 4. Left: `memory64` 1 (`(memory i64 0x1_0000_0000_0000)`),
+  `table` 1 (`(table 0xffff_ffff funcref)`), `table64` 1, `memory_max_i64` 4 (lowered, then V8's
+  memory64 cap). The plan below still stands: a definition asserts only VALIDITY, so binaryang's
+  `wasmValidate` accepting it is the verdict. **Its soundness condition is the mirror of the
+  existing guard:** that guard shows binaryang rejects no VALID module; this needs evidence that it
+  accepts no INVALID one, e.g. over every corpus `assert_invalid` module that decodes. A plain
+  `memory64.wast` module, `(module (memory i64 0 0x1_0000_0000_0000))`, must INSTANTIATE, which a
+  validator cannot vouch for: it stays an engine skip. Original entry:
+- **Definitions V8 refuses for implementation limits (12)** — `table` 1, `table64` 1, `memory64` 2,
   `memory_max*` 8. V8's limits here are hard-coded: `--wasm-max-table-size` was tried and has no
   effect. A `(module definition …)` asserts only VALIDITY, so the sound oracle is binaryang's
   published `wasmValidate` (`./wasm-validate`). But it needs `allFeatures`, which binaryang does not
@@ -807,7 +818,7 @@ one specific name. `ref_is_null` 1 is probably class A.
 3. **Only then ask a third engine**, and give it the same setup. Same bytes is not the same test.
 4. Re-measure per file; do not project a total.
 
-## CORRECTIONS SCOPED — 2026-08-24 (while binaryen-ts + wabt-ts land their fixes)
+## (historical, re-checked 2026-09-30: all resolved — §A `try_table` 2026-08-25, §C `ref.null` 2026-08-31, §D the 15 failures superseded) CORRECTIONS SCOPED — 2026-08-24 (while binaryen-ts + wabt-ts land their fixes)
 
 Everything wasmtk must change from the 2026-08-20/24 exchange, split by whether it is blocked on the
 sibling projects.
@@ -1074,7 +1085,7 @@ baselines. The "entire suite set" gate has no hole on this machine again.
   (see [testing.md](testing.md)), so leaving them red silently drops `wasic` coverage too. That is
   the real cost of tolerating this, and the reason to fix it rather than wait it out.
 
-### External / decisions — no work, just tracking
+### (historical, re-checked 2026-09-30: wabt-ts `ref.null` FIXED 2026-08-31; `*.wast text eol=lf` PINNED 2026-09-19) External / decisions — no work, just tracking
 
 - **wabt-ts `ref.null`** — filed in `scripts/wabt-ts-bug-report.md`; waiting on them. The other two
   gaps are upstream-wabt parity and will not move on a wabt-ts release.
@@ -1090,7 +1101,7 @@ baselines. The "entire suite set" gate has no hole on this machine again.
   tables gap upstream remains optional. See testing.md.
 - **`*.wast text eol=lf`** — one-line decision, deliberately deferred; see design-decisions.md.
 
-## Recommended next pickup (updated 2026-07-28)
+## (historical, superseded by THE ORDER at the top; re-checked 2026-09-30) Recommended next pickup (updated 2026-07-28)
 
 - **THE BIG TRACK: wasic modularization** — see [wasic-modularization-plan.md](wasic-modularization-plan.md).
   **Phase 0 = "look for code issues" audit, run as a loop to ZERO (HARD GATE)** before any module
@@ -1127,7 +1138,7 @@ baselines. The "entire suite set" gate has no hole on this machine again.
 - **B6** — asyncify list↔binary-parse name retention: still deferred (no consumer).
   (A + B3/B4/B5 all DONE 2026-07-09.)
 
-## A. Feature work (optional, self-contained)
+## (historical: all DONE by 2026-07-09) A. Feature work (optional, self-contained)
 
 1. **Utility-types batch — ✅ DONE (2026-07-08).** The core (`Partial`/`Readonly`/`Required`/
    `NonNullable` pass-through; `Pick`/`Omit`/`Record` synthetic structs) was already implemented
@@ -1145,7 +1156,7 @@ baselines. The "entire suite set" gate has no hole on this machine again.
    init-guard sits at fixed address 65536). Test `go_merge_tests.ts` (7/7). Caveat: host must not use
    page 1 — small hosts only; else use reactor/bindgen. See polyglot-producers.md § "Mergeable Go leaf".
 
-## B. Hardening / follow-ups from the 2026-07-08 asyncify work (small)
+## (historical: B1–B5 DONE; B6 still deferred, no consumer; re-checked 2026-09-30) B. Hardening / follow-ups from the 2026-07-08 asyncify work (small)
 
 3. **Broaden goroutine-Go validation — ✅ DONE (2026-07-09).** `tests/go_asyncify_tests.ts` is now
    table-driven over the full goroutine surface through the forced in-house path: worker-pool
@@ -1175,14 +1186,14 @@ baselines. The "entire suite set" gate has no hole on this machine again.
    module (the binary reader drops the name section). Only needed if we ever expose asyncify lists
    on parsed input — the TinyGo path doesn't use lists. Deferred until there's a consumer.
 
-## C. Blocked / deferred (not actionable now)
+## (still deferred, re-checked 2026-09-30: the P2 component container waits on browser-native WASI P2) C. Blocked / deferred (not actionable now)
 
 7. **P2 component container** — waiting on browser-native WASI P2 / Component Model support. The ABI
    is already forward-aligned (callee-allocated string returns + `cabi_post_<name>`), so it's a thin
    terminal `wasm-tools component new` wrap when the time comes; today a P2 wrap buys browser
    consumers nothing (they'd `jco transpile` it back to core wasm anyway). See roadmap.md P2 row.
 
-## Published state (2026-07-09)
+## (historical: v1.11.5 era; latest release is v2.0.3, and JSR provenance is attested since v2.0.1) Published state (2026-07-09)
 
 - **binaryen-ts 1.4.3** is live on JSR (liveness-minimized asyncify saving + the **WT-2k
   binary-decoder reorder fix** that made NESTED goroutines work — the true root cause of the nested

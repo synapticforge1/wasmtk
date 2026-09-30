@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 28 | 41 | 2 | 14 |
+| SILENT-WRONG | 28 | 41 | 0 | 16 |
 | LOUD | 14 | 13 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
@@ -1134,7 +1134,7 @@ fixes Wasmtime and does not change Wasmer. Not a reason to defer; Wasmtime is th
 
 ### The wabt-ts `KNOWN_INVALID` list is STALE — do not act on it (checked 2026-08-24)
 
-**Class:** SILENT-WRONG · **Status:** OPEN (fix is on the wabt-ts side, per this entry) · **Scope:** other
+**Class:** SILENT-WRONG · **Status:** CLOSED 2026-09-30 (superseded: the `KNOWN_INVALID` list lives in wabt-ts, FROZEN since the 2026-08-27 merge into binaryang; nothing in wasmtk reads it. If binaryang still carries it, retiring it is theirs) · **Scope:** other
 
 The same report repeats seven modules as "genuinely invalid wasm … V8, Wasmtime and Wasmer all
 reject them". **Not reproducible here.** Against artifacts regenerated from current `wasic`, all
@@ -1586,9 +1586,9 @@ minutes earlier. The count only moved after the file was deleted and regenerated
 rule in [testing.md](testing.md) exists for exactly this, and it nearly banked a fix as verified on a
 test that never re-ran the compiler.
 
-#### Blocker 1b — 1.4.0 dync output is EMPTY (OPEN, cause not established)
+#### Blocker 1b — 1.4.0 dync output is EMPTY (CLOSED 2026-09-30, resolved: see Status)
 
-**Class:** SILENT-WRONG · **Status:** OPEN (cause not established; suspected `wasmmerge`) · **Scope:** other
+**Class:** SILENT-WRONG · **Status:** CLOSED 2026-09-30 (resolved: the 1.4.0 attempt that printed nothing was REVERTED; the later 1.4.x bump landed only after the three malformations it exposed were fixed, with both dync suites green, and both pass 3/3 on binaryang 1.8.1, 2026-09-30. The UTF-16 hypothesis below was never confirmed and no longer needs to be) · **Scope:** other
 
 With blocker 1 fixed the module assembles on 1.4.0 and still prints nothing. Same input yields a
 structurally IDENTICAL module — same section counts, 157 data segments, 34 globals — but **774 bytes
@@ -1865,7 +1865,7 @@ literal now compiles correctly.
 
 ## FIXED — wasmmerge placed a merged module's non-WASI import AFTER function definitions (#14 Phase 2, 2026-06-24)
 
-**Class:** LOUD · **Status:** PARTIAL — fixed 2026-06-24 in `wasmmerge`; `wasmbundle` still does not route `importWat` (documented follow-up) · **Scope:** other
+**Class:** LOUD · **Status:** PARTIAL — fixed 2026-06-24 in `wasmmerge`; `wasmbundle` still does not route `importWat` (documented follow-up; RE-VERIFIED STILL OPEN 2026-09-30: `src/wasmbundle.ts` never reads `importWat`) · **Scope:** other
 
 Surfaced building #14 Phase 2 (host→core callbacks): the dynrt lib gained ONE `env.__host_call` import
 (its first import). Adding it broke `18l` (explicit-path dynrt merge) with a runtime "memory access out
