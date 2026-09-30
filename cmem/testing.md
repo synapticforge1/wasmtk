@@ -286,7 +286,7 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 >
 > ⚠️ **This can fail a release gate.** If a publish run trips it, re-run rather than investigating
 > the Go producer. A retry-with-backoff around the asyncify write in `src/gowasic.ts` would remove it
-> for good; deliberately NOT done inside a release batch — see [next-work.md](next-work.md).
+> for good; deliberately NOT done inside a release batch — see [next-work.md](next-work.md) (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`).
 >
 > **Runner note:** a full `tests/wasi/wasm_wasi` pass now exceeds 10 minutes on this machine; run it
 > backgrounded or with a raised timeout. Beware the shell idiom `… ; grep -c "FAILED"` as the last

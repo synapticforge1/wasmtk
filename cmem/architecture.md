@@ -28,8 +28,8 @@ specifiers in `deno.json`; no source change needed.
 **Current (2026-09-28):** ONE package, `@jrmarcum/binaryang@1.6.0`, EXACT-pinned (no caret) at both
 compat subpaths, which must move together and only with a full gate — see
 [design-decisions.md](design-decisions.md) § Tooling. `wabt-ts` and `binaryen-ts` are the FROZEN
-predecessors, merged into binaryang on 2026-08-27. `wast` gate today: **288 files / 63,800 passing / 804 skipped
-/ 0 failures / 0 unrunnable — ALL CLEAN** (2026-09-28; see [testing.md](testing.md)).
+predecessors, merged into binaryang on 2026-08-27. The `wast` gate's current counts live in ONE
+place, [testing.md](testing.md) § Current pass counts (one number, one place; H4 T7, 2026-09-30).
 
 **History (pre-merge, kept for the version floors' reasoning).** As of 2026-07-09 the pins were
 `wabt-ts@^1.3.5/compat` + `binaryen-ts@^1.4.3/compat`. **binaryen-ts

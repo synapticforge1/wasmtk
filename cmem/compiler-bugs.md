@@ -7,11 +7,11 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 19 | 43 | 0 | 16 |
+| SILENT-WRONG | 19 | 43 | 1 | 16 |
 | LOUD | 21 | 13 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-79 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
+80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, OPEN, SILENT-WRONG, other, 2026-09-30) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
@@ -108,6 +108,34 @@ exports `DATA_BASE` / `SCRATCH_SLOTS` / `ArrayLookup` (console_log.ts); the unus
 
 Classified 2026-09-28 from each entry's own text; re-tally whenever an entry is added or closed.
 
+## `modc` of a dynrt-merged library fails to assemble, exits 0, and `bindgen_tests` grades a stale binary (OPEN 2026-09-30)
+
+**Class:** SILENT-WRONG · **Status:** OPEN · **Scope:** other (the merge path, the CLI exit, a test)
+
+Found by H6.5a (`scripts/check_prev_tests.ts`: the previous release's tests in a FRESH clone).
+`bindgen_tests` failed 12 of 142 there, all in the `fnany_50` integration, while the real repo
+reads 142/142. Three linked defects, each confirmed 2026-09-30:
+
+1. **`wasmtk modc tests/module/bindgen_fixtures/fnany_50.ts` does not assemble.** It auto-merges
+   dynrt (`any` + `Function(…)`), and the merged import lines keep the dynrt MODULE'S type indices:
+   `(import "env" "__host_call" (func $dynrt___host_call (type 0) (param i32 i32) (result i32)))`,
+   where `(type 0)` is not that signature in the merged module; the assembler now refuses it
+   ("inline function type does not match explicit type", lines 3 and 4). ⚠️ History of this very
+   path: on the wabt-ts 1.4.0 attempt, stripping the `(type N)` made it compile and then produced
+   EMPTY OUTPUT, because a regex in `internalizeDynrtHostImports` started matching a line it had
+   been skipping (next-work.md before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`). A fix
+   must check the host-import internalization, and the output, not just the assembly.
+2. **`wasmtk modc` exits 0 when assembly fails** and writes no `.wasm`. SILENT-WRONG in the CLI's exit
+   contract: a script or CI step calling `modc` believes it succeeded.
+3. **`bindgen_tests` trusts that exit code, then reads `fnany_50.wasm` without checking it was
+   rebuilt.** The real repo's copy is gitignored and dates from 2026-08-25 13:24 (its `.wat` is
+   regenerated each run; today 12:53), so the suite has graded a FIVE-WEEK-OLD binary. The
+   stale-artifact trap in testing.md, in a suite, for five weeks.
+
+Not a regression since v2.0.3: v2.0.3's `bindgen_tests` and today's fail identically in a fresh
+clone. When the assembly started failing (after 2026-08-25) is not bisected. Fix order: (2) and (3)
+first, so the failure is LOUD and the suite cannot pass on stale bytes; then (1) with its history.
+
 ## wast: `assert_trap` passed on ANY trap, whatever its kind (FIXED 2026-09-30)
 
 **Class:** SILENT-WRONG · **Status:** FIXED 2026-09-30 · **Scope:** other (the `.wast` runner)
@@ -171,7 +199,7 @@ valid twin (here: V8 refuses `(memory i64 0x1_0000_0000_0000)`, which is valid) 
 
 **Class:** LOUD · **Status:** FIXED 2026-09-28 · **Scope:** compiler (+ docs)
 
-Found by the branch audit (next-work.md § "Branch audit 2026-09-28"). Phase 36
+Found by the branch audit (next-work.md § "Branch audit 2026-09-28" (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`)). Phase 36
 (`type Toggle<T> = T extends i32 ? f64 : i32`, resolved at compile time by
 `expandConditionalTypes`) was built on branch `1.4.1` (a85d8bfc9b8, 2026-04-29) and **never
 merged**. The README's feature table and roadmap row described it as shipped, with four named tests
@@ -321,7 +349,7 @@ corrected to `reject`. The VANISHED check was inversion-tested by planting a mod
 
 **How found:** an audit of what each permissive pass path actually passed on, counted with temporary
 instrumentation over the whole corpus (not by reading). Full table in next-work.md § "FALSE-PASS
-AUDIT". Gate 63,986 → **63,800 passed**, 618 → 804 skipped, 0 failed.
+AUDIT" (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`). Gate 63,986 → **63,800 passed**, 618 → 804 skipped, 0 failed.
 
 **Root cause:** four handlers were written as `catch { passed++ }` or "any throw counts". The
 `assert_malformed` stage split of 2026-09-19 fixed this class for ONE directive; the others were
@@ -453,7 +481,7 @@ Three defects in `src/wast.ts`, none in the compiler or binaryang. Corpus 37,370
 
 **Lesson.** The runner reported all 100 as conformance gaps, and for a month they read as
 GC/ref-types work waiting on the toolchain. Before attributing a failure to the thing under test,
-check that the harness gave it the same SETUP the spec did (the method note in next-work.md § A,
+check that the harness gave it the same SETUP the spec did (the method note in next-work.md § A, before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`;
 now proven on the whole set).
 
 ## binaryang 1.6.0 honoured `readDebugNames: true`, and the merge path broke (FIXED 2026-09-28)
@@ -1257,7 +1285,7 @@ tested `pick(1 === 1)` and it printed 10/20 correctly — an earlier branch catc
 **Structural gap, flagged not fixed: `zigwasic.ts` (286 lines) and `rustwasic.ts` (64) have NO test
 suite**, while `zig`, `cargo` and `rustc` are all installed and working here and Zig fixtures sit in
 the corpus. Two of the findings above live in exactly that unguarded code. A small suite would have
-caught the `report()` bug automatically. See [next-work.md](next-work.md).
+caught the `report()` bug automatically. See [next-work.md](next-work.md) (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`).
 
 ### `fd_write` short writes — ✅ FIXED 2026-08-24 (found by the multi-engine gate on run one)
 
@@ -1369,7 +1397,7 @@ not parse, which is expected: that one really is upstream-wabt parity.
 
 **Corpus effect, measured:** passes **27,983 → 37,247** (+9,264), skips **37,252 → 27,275**
 (−9,977), unrunnable **1 → 0**, files **287 → 288**. Failures went 12 → 102, every one of them in a
-file that had been DARK. Scoped in [next-work.md](next-work.md).
+file that had been DARK. Scoped in [next-work.md](next-work.md) (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`).
 
 #### Blocker 1 of 3 — `unknown type` — ✅ FIXED 2026-08-25 (and it was not what it looked like)
 
@@ -1676,7 +1704,7 @@ alone. Same class as the `ref.null` encode bug below: same message, same writer,
 is exposed on neither `/compat` nor `wat2wasm`. **Plausibly one fix for both.**
 
 **Expected to be fixed in wabt-ts 1.4.0** (owner, 2026-08-24). Verify with the encoder probe BEFORE
-re-recording anything — see [next-work.md](next-work.md) § "THE NEXT BUMP IS wabt-ts 1.4.0".
+re-recording anything — see [next-work.md](next-work.md) § "THE NEXT BUMP IS wabt-ts 1.4.0" (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`).
 
 **Why it blocks us:** wasic's pipeline is WAT text → **wabt** → binary → binaryen
 (`watToOptimisedWasm`, `src/wasic.ts:205–240`). wabt is unavoidable, so wasic cannot emit

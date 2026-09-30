@@ -47,7 +47,7 @@
    change: output only.
 2. **wast: 24 false passes removed** (the same refusals had counted as `assert_invalid` verdicts);
    gate 64,434 / 0 / 105. `tests/engine_tests.ts` (11).
-3. Two binaryang items found and handed over (next-work.md census): limits above u32 fail in the
+3. Two binaryang items found and handed over (next-work.md census (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`)): limits above u32 fail in the
    encoder; a branch hint on a non-branch is accepted. ✅ Closed 2026-09-29 by item 5.
 4. **H12 sw01 + sw33 (2026-09-29):** `throw new TypeError(…)` / `throw 42` exited 0 with no catch
    run; now catchable, an uncaught one exits 1, and throwing an object is a compile error.
@@ -97,7 +97,7 @@ and 11), both in that table under `2.0.3`. User-facing summary: `CHANGELOG.md`.
     `tests/typed_decl_tests.ts`. Landing it fixed an i32-call-in-f64-context invalid module and an
     annotated 2D array that read as empty, and filed sw30–32 / ld09–14 (compiler-bugs.md).
 12. **Phase 36 conditional types restored** from the never-merged `1.4.1` branch (branch audit,
-    next-work.md), hardened so string literals are not rewritten.
+    next-work.md (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`)), hardened so string literals are not rewritten.
 13. **Backend → binaryang 1.7.0** (after 1.6.0, item 1). All five items of our report fixed; the
     wast gate scopes the custom-descriptors V8 flag to its proposal → 64,458 / 0 / 81.
 14. **H12 Phase 0a/0b:** golden-WAT harness (483 entries) and audit round 1 (compiler-bugs.md).
@@ -116,7 +116,7 @@ Items 1–10 below were the earlier unreleased block, carried into this release:
    group was then fixed (script grammar, `either`, `assert_exception`, GC results, trap trampoline) →
    726, none of them ours; then `exnref` via the trampoline and the gate's experimental V8 flag → 618;
    then a false-pass audit demoted 186 passes that rested on the wrong failure → 63,800 / 804.
-   See [next-work.md](next-work.md).
+   See [next-work.md](next-work.md) (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`).
 5. **Workspace letter H4** (memory drift T1–T11) closed in `cmem/`.
 6. ⚠️ **BREAKING: `wasmtk run` exit status at parity with wasmtime.** An uncaught exception → 1,
    `proc_exit(N)` → N, and `run x.ts` propagates the program's exit code. It also closed the README's
@@ -544,11 +544,11 @@ separate trigger, so "outlier" is relative to which FILE changed, never absolute
 
 **v1.11.5 released to JSR** (score 100). On backend **wabt-ts 1.3.5 + binaryen-ts 1.4.3**.
 Regression gate green: wasi **375/375**, `go_merge` 7/7, `go_bindgen` 7/7, **`go_asyncify` 12/12**
-(now incl. `nested`), `hybrid` 10/10. The "B-items" backlog from `next-work.md` (B3/B4/B5) is done;
+(now incl. `nested`), `hybrid` 10/10. The "B-items" backlog from `next-work.md` (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`) (B3/B4/B5) is done;
 B6 stays deferred (no consumer). (v1.11.4 shipped the same code but scored 94 — `src/wast.ts` lacked
 an `@module` tag so JSR's `allEntrypointsDocs` was false; v1.11.5 added it, restoring 100. JSR
 provenance is absent since ≥v1.11.3 — a GitHub org OIDC-policy infra issue, not a code fix; see
-next-work.md "Published state".)
+next-work.md (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`) "Published state".)
 
 ### v1.11.7 (2026-07-28) — producer/dync/README pass
 
