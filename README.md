@@ -1149,13 +1149,13 @@ Changes that can require a source edit when upgrading. **Everything in the Featu
 below is additive** — only entries listed here can break existing code. Each row states the exact
 replacement.
 
-> **Read this table, not the version number.** wasmtk version numbers are a sequential counter: each
-> component runs `0`–`9` and rolls over into the one on its left, so `1.2.9` is followed by `1.3.0`
-> and `1.9.9` by `2.0.0`. A change in the leading number can mean either of two things — the counter
-> simply rolled over (which happens about every 100 releases), or we **deliberately advanced to a
-> round number to mark a breaking change**, as with `2.0.0` below. The number alone cannot tell you
-> which; **this table can, and it is the only place breakage is announced.** If a release is not
-> listed here, it is safe to upgrade to.
+> **wasmtk follows [Semantic Versioning 2.0.0](https://semver.org/)** (from the release after
+> `2.0.3`). A **major** version change (`2.x` → `3.0.0`) means something below broke, and this table
+> says what and how to migrate. A **minor** change (`2.0.x` → `2.1.0`) adds capability without
+> breaking anything, and a **patch** (`2.0.3` → `2.0.4`) only fixes bugs. So a `^2.0.3` dependency
+> keeps receiving compatible releases and stops at the first breaking one. Versions up to `2.0.3`
+> were numbered by an older scheme (a counter whose digits rolled over), and for those this table,
+> not the number, is the record of what broke.
 
 | Version | What changed | How to migrate |
 | --- | --- | --- |
