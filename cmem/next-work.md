@@ -17,8 +17,17 @@
 >
 > Each step alone, so every change has one cause:
 >
-> 1. **Re-run the five-engine check on 1.8.1** (scratch `cps/` scripts). Expected: strict
->    wasmtime passes all 4 `assert_trap`s and unlinkable case 1; case 2 still "unknown import".
+> 1. ✅ **DONE 2026-09-30: the five-engine check on 1.8.1, the prediction held exactly.** Strict
+>    `wasmtime wast` (no proposal flag) now passes all of `custom-page-sizes.wast` (it stopped at
+>    line 7 on 1.8.0) and unlinkable case 1; case 2 is `unknown import:
+>    m::large-pages-memory#pagesize=1`, as binaryang explained; relaxed passes all 4 files. The trap
+>    kind is out-of-bounds on ALL five: V8 "memory access out of bounds", JSC "Out of bounds memory
+>    access", wasmer "memory access out of bounds", wazero "out of bounds memory access", wasmtime
+>    "wasm trap: out of bounds memory access". Counts unchanged from 1.8.0: V8 / JSC 12/12 modules,
+>    27/27, 4/4, 2/2, `memory_max` 4/4; wasmer 41/41 drivers; wazero 32/41 (the two two-memory
+>    modules). Link messages for case 2: V8 names the memory import (#1, same wording as wrong kind);
+>    JSC names the placeholder ("imported global … must be a number"), as they said. All 12 lowered
+>    modules validate (IR, `wasmValidate`, V8). `deno.lock` restored after the scratch probes.
 > 2. **Our `assert_trap` kind check** (`src/wast.ts`): spec message → V8 wording per trap kind.
 >    Own branch, full gate, on the current pin (1.7.1).
 > 3. **Pin binaryang 1.8.1**: all three specifiers, `-Oz` guard, full gate; the wast oracle guard
