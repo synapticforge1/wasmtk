@@ -8,6 +8,88 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## SENT 2026-09-30 — 2026-09-30: H10, what wasmtk needs from the shared definitions (H9)
+
+This is about letters H9 (yours: publish the shared definitions D1 / D2 / D3) and H10 (ours:
+generate our copies from them). We are ready to start H10 as soon as there is something to pin, so
+here is exactly what we would consume, which fields we need, and in what order. Nothing here asks
+you to change the design in `../cmem/divergences.md`; it narrows it to our use.
+
+### Where it helps us, and what it replaces
+
+Every item below is a list we keep by hand today, and each has already drifted or nearly did.
+
+| our hand-kept copy | where | from |
+| --- | --- | --- |
+| 20 spec trap messages, each mapped to V8's wording (`TRAP_KINDS`, built 2026-09-30 from 5,263 logged corpus passes) | `src/wast.ts` | **D3** |
+| the proposals our gate runs with experimental V8 flags, each with its testsuite scope (`GATE_V8_FEATURES`) | `tests/wast_tests.ts` | **D2** |
+| the feature names we report when V8 refuses a module ("custom page sizes", memory64 above V8's cap, …) | `src/engine.ts` | **D2** |
+| 13 `i32` operator mnemonics our data relocation treats as "never a pointer" (`ARITH_NEVER_PTR`) | `src/wasmmerge.ts` | **D1** |
+| the text our merge code reads from printed WAT (mnemonics, immediates, `offset=` / `align=`) | `src/wasmmerge.ts`, `wasmbundle.ts`, `wasic.ts` | **D1** (I2) |
+
+We already consume `allFeatures()` from `./wasm-validate` and would keep doing so.
+
+### What we ask for, in priority order
+
+**1. D2 and D3 first; D1 can follow.** Our runner uses D2 and D3 today. D1 matters most to us when
+our WAT regexes give way to your parser (I2), which waits on your one-front-end stage 5 anyway.
+
+**2. Delivery we can pin.** A `./definitions` subpath in a normal release, so our copy is generated
+from the SAME exact version our three other specifiers pin (`compat/wabt`, `compat/binaryen`,
+`wasm-validate` move together; this would be the fourth). Concretely, any of:
+- a TS module exporting the definitions as typed constants plus the content hash and a version
+  stamp (easiest for us), and/or
+- the JSON source files included in the package (for the Rust and Zig consumers), reachable by a
+  stable path.
+Either way, please put the content hash and version in the data itself, so our generated copy's
+header can quote them and our gate can prove the copy matches the pinned source.
+
+**3. D2, the fields we need per feature:**
+- the canonical name (the one `allFeatures()` / `Features` uses);
+- the spec-testsuite directories it gates, as paths relative to the testsuite root
+  (`proposals/custom-descriptors/` and so on), so our per-file scoping stops being a hand list;
+- whether it CHANGES core semantics, not only adds to them. That is why our gate scopes
+  `custom-descriptors` to its own directory: turned on everywhere, it relaxes `br_on_cast`'s rule
+  and the core `br_on_cast.wast` / `br_on_cast_fail.wast` lose 3 `assert_invalid` passes each
+  (measured 2026-09-28). This may be the same fact as your "which proposal snapshots must NOT
+  receive it" column; if so, one field serves both;
+- the date it entered the list.
+Engine flag spellings (V8's `--experimental-wasm-…`) stay ours: we would key them by your
+canonical name.
+
+**4. D3, the fields we need per verdict class:**
+- for TRAPS: a class key and the exact message the spec testsuite writes in `assert_trap`, with
+  the testsuite's prefix rule stated (the spec interpreter matches an expected message as a
+  PREFIX: `"uninitialized element 2"` is `"uninitialized element"`);
+- the same for `assert_invalid` and `assert_malformed` messages when you get there;
+- nothing engine-specific: V8's and wasmtime's wording stay in each runner, keyed by your class.
+
+**5. D1, when you get to it:** the mnemonic and legal text shorthands, the immediate syntax
+(including `offset=` / `align=`), the operand/result stack signature, and the gating feature. A
+coarse operator class (e.g. "numeric binary") would let us DERIVE our relocation set's candidates
+instead of listing them; the "never holds a pointer" judgment stays ours either way.
+
+### What we will do on our side (H10), once there is a version to pin
+
+- `scripts/gen-definitions.ts` reads the pinned `./definitions` and writes a committed
+  `src/definitions.generated.ts` whose header quotes your content hash and version.
+- Our gate regenerates and diffs: copy ≠ regenerated fails, and we invert that check once before
+  trusting it.
+- `TRAP_KINDS`, `GATE_V8_FEATURES`' scopes and `engine.ts`' feature names become keyed by your
+  names; a hand edit to the generated copy is a defect.
+
+### Entries we have that your source may lack (H10 asks us to file these now)
+
+The trap messages our runner maps today, from the 288-file corpus you and we both vendor:
+`unreachable`, `out of bounds memory access`, `out of bounds table access`, `out of bounds array
+access`, `undefined element`, `uninitialized element`, `indirect call type mismatch`, `integer
+divide by zero`, `integer overflow`, `invalid conversion to integer`, `cast failure`, `descriptor
+cast failure`, `null reference`, `null structure reference`, `null array reference`, `null i31
+reference`, `null function reference`, `null descriptor reference`, `unaligned atomic`, and, for
+`assert_exhaustion`, `call stack exhausted`. The proposals our gate treats specially:
+`wide-arithmetic` (on for every file) and `custom-descriptors` (scoped, as above);
+`custom-page-sizes` is run through your `LowerCustomPageSizes`, not a flag.
+
 ## SENT 2026-09-30 — 1.8.1 pinned; the skip count you asked for is 66 → 16
 
 Thank you for 1.8.1. Everything below was measured against the published package.
