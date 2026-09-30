@@ -1,6 +1,16 @@
 {
   "reviews": [
     {
+      "entrypoint": "./modc",
+      "symbol": "compileModule",
+      "member": "(whole)",
+      "before": "9671acff02e1a4df8d10e8b505559a4dc9fe18a5909cb78dabccd0db9509c586",
+      "after": "9d273fa754962c1572a7971f4ce7df7ee74be62b7cf3bee49be88f8afef78c52",
+      "kind": "minor",
+      "reason": "void to boolean return: failure is now reported by the return value; callers that ignore the result are unaffected",
+      "date": "2026-09-30"
+    },
+    {
       "entrypoint": "./wast",
       "symbol": "runWast",
       "member": "(whole)",
