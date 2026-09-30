@@ -65,7 +65,8 @@
 >
 > **H6 in progress (owner chose it first, 2026-09-30).** Plan: H6.1 SemVer ✅ DONE 2026-09-30
 > (`scripts/bump.ts`: kind required, no cap or carry; 11 boundary cases, 5 fail on the odometer;
-> design-decisions, README, workflow, testing updated) · H6.2 the ★ block · H6.3 the compatibility
+> design-decisions, README, workflow, testing updated) · H6.2 the ★ block ✅ DONE 2026-09-30 (28 rules,
+> verbatim, stamped, at the end of best-practices.md) · H6.3 the compatibility
 > gate for the package surface (floor from the diff against the LAST RELEASE TAG's snapshot, since
 > Rule 5 re-baselines before the bump; bootstrap v2.0.3's snapshot from its tag) · H6.4 the CLI
 > surface · H6.5 Rule 3 behaviour checks · H6.6 memory layout with H4.
