@@ -25,11 +25,12 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     Bootstrap (INDEX + CLAUDE.md) is 14.5 KB against a ~10 KB guideline; the rest is the INDEX's
     policy section, which is the owner's to trim.
   - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **19 open silent-wrong, 17 open
-  loud** (2026-09-30, after sw18 / sw22 / sw23, and sw36 found).
-  - **OWNER RULING NEEDED — sw36:** `i32 / i32` truncates (`i32.div_s`); TypeScript divides as
-    floats. Tests work around it with `(a / b) | 0`. Produce an f64, or keep integer division and
-    refuse / document it?
+- ⏳ **Wasm types in TypeScript** (wasm-math-plan.md, SCOPED 2026-09-30, not started). The owner
+  ruled: the declared type decides; `i32 / i32` truncates; an explicit `f64` destination or a
+  `Math` argument divides as floats. Phase 1 (plain `Math` bugs sw38–sw40, ld15) needs no
+  decision; Phase 2 (sw36, sw37) and Phase 3 (the `Math` additions) wait on decisions D1–D6.
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **23 open silent-wrong, 18 open
+  loud** (2026-09-30: sw18 / sw22 / sw23 fixed; sw36–sw40 and ld15 found, all in the plan above).
   - NEXT: the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool branches, sw32),
     then the wasic operator rows (sw10–sw17; sw15, an operator typed from its LEFT operand, also
     breaks `x * -k` in `console.log`), then Phase 0b audit round 2.
