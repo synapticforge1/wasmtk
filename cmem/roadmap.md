@@ -87,6 +87,11 @@
     library using `any` + `Function(…)` failed to assemble (the merged imports kept dynrt's own
     `(type N)`), hidden by that exit code and by `bindgen_tests` reading stale fixtures. Found by
     the Rule 3 check (H6.5a). `compileModule` now returns `boolean`.
+13. **H12 sw05 + sw35 + sw21: calls inside `console.log` (2026-09-30).** A string argument
+    that was not a plain variable or literal (`count(names[1])`) was passed as `""`; `f(a) + f(b)`
+    was read as one call; `(a+1)*(a+2)` lost its outer parens. All three print the right value
+    now, and a string argument nothing can build is a compile error. Open silent-wrong 19 → 18
+    (sw35 was found and fixed in the same change). Test `7b_ConsoleStringCallArg`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

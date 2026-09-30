@@ -410,6 +410,15 @@ asserted `(pagesize 3)` INVALID; the spec calls it MALFORMED (a parse error, `as
 and the runner rightly refused to score a parse failure as a validation verdict. The spec's
 `assert_invalid` form is `(pagesize 2)`. Copy the form; do not reconstruct it.
 
+**Turning a silent fallback into an abort is also a probe: whatever now reaches the abort was
+wrong UPSTREAM too.** [wasmtk, 2026-09-30] sw05's new "cannot emit the string expression" fired on
+`names[0]) + count(names[2]`, which is not an expression at all: the call matcher had swallowed
+`f(a) + f(b)` whole (sw35, silent on the old compiler, confirmed there). Read what a new
+diagnostic QUOTES before deciding the new diagnostic is too strict. And when a fix changes
+emitted text in a benign way (here an unused local on 25 golden entries), classify the golden
+diffs with a script that ignores exactly that delta and nothing else. Then "0 real diffs" is a
+measurement, not a skim of 27 first-differing lines.
+
 ### 🔁 STANDING QUESTION, both projects: *where is this construct USED, not where is it NAMED?*
 
 [binaryang + wasmtk, adopted 2026-08-27 — carried in binaryang's handoff and here, deliberately in

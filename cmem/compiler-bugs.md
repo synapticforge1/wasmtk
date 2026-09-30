@@ -7,16 +7,18 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 19 | 43 | 0 | 17 |
-| LOUD | 21 | 13 | 1 | 8 |
+| SILENT-WRONG | 18 | 45 | 0 | 17 |
+| LOUD | 20 | 14 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 47 rows of the Phase 0b round-1 table (each row counted as one
+80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 48 rows of the Phase 0b round-1 table (sw35 the 48th, 2026-09-30) (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 19** (2026-09-30, which is H12/I11 bar (c): the console
+**Open silent-wrong in the compiler: 18** (2026-09-30, later: sw05 fixed, and sw35 found and
+fixed with it; sw21, loud since the morning, fixed too, so open loud 21 → 20). Before that, **19**
+(2026-09-30, which is H12/I11 bar (c): the console
 fallback now delegates to wasic's `emitExpr` and otherwise ABORTS, so sw04 and sw27 are fixed and
 7 rows (sw18, sw21, sw22, sw23, sw26, sw30, sw31) turned LOUD: still open, now loud, 14 → 21. The
 corpus reached the stub nowhere (0 of 489 golden WAT outputs held one), so no existing program
@@ -48,7 +50,8 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~sw02~~ | ✅ FIXED 2026-09-29: console ternary with a template branch: `n=5` → `n=`. Four causes in the one construct, all fixed: (1) `getStrPtrLen` kept only `segs[0]` of a multi-piece branch (template, concat); the branch is now built whole by wasic's `emitStringAssign` via the string-expression resolver; (2) `select` ran BOTH branches (a call in the branch not taken still ran) and, when both captured a length in `$__str_op_len`, the ELSE length won; now `if` with the chosen branch's length; (3) `looksLikeString` missed templates, string-method calls and string-returning calls, so those ternaries printed `0` or built an invalid module (widened for the ternary only); (4) the split used the LAST `?` (`findTopLevelOp`), so a nested ternary grouped wrongly: new `splitTernary` (first `?`, matching `:`). Also: `console_log.ts` gained its first error path (`setConsoleDiagnosticSink`), and a branch nothing can build is now a diagnostic, not `""`. Test `7b_ConsoleStringTernary`; fails on the old compiler | console_log string ternary |
 | ~~sw03~~ | ✅ FIXED 2026-09-29: `ok ? "pass" : "fail: " + msg`: `pass` → `passboom`. The `+` concat split ran before the ternary and cut at the `+` INSIDE the else branch. The string-ternary block now runs before every operator handler in `parseSingleArg` (the conditional binds looser than all of them). Golden-WAT: no existing output changed. Test `7b_ConsoleTernaryBeforeOperators`; fails on the old compiler | console_log `+` split |
 | ~~sw04~~ | ✅ FIXED 2026-09-30: `Math.abs(s.charCodeAt(0) - 100)`: `3` → `100` (operand → 0). The console fallback delegates to wasic's emitExpr (`setExprFallbackResolver`). Test `7b_ConsoleExprFallback`; fails on the old compiler | console_log fallback |
-| sw05 | string arg that is not a plain var/literal (`count(names[1])`): `3` → `0` | console_log exprToWat string |
+| ~~sw05~~ | ✅ FIXED 2026-09-30: string arg that is not a plain var/literal (`count(names[1])`): `3` → `0`. `exprToWat`'s string branch went straight to a null string; it now asks wasic's string resolver (emitStringPtrLen / emitStringAssign), keeps `null` / `undefined` as the null string, and otherwise ABORTS (`cannot emit the string expression`). The string-equality operand (`getStrPL`) had the same silent `""` fallback and now aborts the same way. The resolver's `$__str_op_len` is pre-declared for a console line whose call has an expression argument (both declaration heuristics, emitFunction and `_start`). Test `7b_ConsoleStringCallArg`; fails on the old compiler | console_log exprToWat string |
+| ~~sw35~~ | ✅ FIXED 2026-09-30 (found fixing sw05, whose new diagnostic exposed it): `count(w) + count(names[2])`: `6` → `0`. Both console call matchers (`/^(\w+)\s*\((.*)?\)$/` in parseSingleArg and exprToWat) took `f(a) + f(b)` as ONE call with the argument `a) + f(b`; they now require the `(` to close at the end (`parenDepthNeverNegative`, which now skips string literals). Behind it, a call's result was never converted to the type the caller expected (an i32 `count()` in an f64 sum: an invalid module); it is widened now, or reported when lossy. Repro `sw35_console_call_plus_call_one_call.ts`; test `7b_ConsoleStringCallArg` | console_log call match |
 | sw06 | `` `len=${s.length}` + "!" ``: `len=5!` → `len=!` | wasic appendConcatPart |
 | sw07 | `console.log(s.includes("b"))`: `true` → `1` | wasic dotCallLookupFn |
 | sw08 | `s.indexOf(String(n))`: `2` → `0` (quietEmit nested failure) | wasic quietEmit sites |
@@ -64,7 +67,7 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | sw18 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(n << 2)`: `12` → `true` | console_log findTopLevelOp |
 | sw19 | `x ?? 5` on a non-nullable 0: `0` → `5` | wasic |
 | sw20 | `console.log(-7 % 4)`: `-3` → `1` (`rem_u`) | console_log |
-| sw21 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log((a+1)*(a+2))`: `20` → `5` | console_log paren strip |
+| ~~sw21~~ | ✅ FIXED 2026-09-30 (with sw05; LOUD since earlier that day): `console.log((a+1)*(a+2))`: `20` → `5`. The paren unwrap stripped the first `(` and the last `)` of any expression shaped `(…)`; it now unwraps only a matching outer pair. Repro now MATCH | console_log paren strip |
 | sw22 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(a ** 2)`: `9` → `0` | console_log |
 | sw23 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `console.log(n * -2)`: `-6` → `-2` | console_log |
 | sw24 | `console.log("C:\\tmp")` double-decoded: `C:\tmp` → `C:<TAB>mp` | console_log per-iov |

@@ -112,6 +112,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-09-30, H12 sw05 + sw35 + sw21 (calls in `console.log`), full gate green.** wasi
+> **434/434** (+`7b_ConsoleStringCallArg`) · golden-WAT **491 / 0** after a deliberate re-record:
+> 465 identical, 25 differ ONLY by an unused `$__str_op_ptr/len` declaration (a script ignoring
+> exactly those two lines found 0 other differences), +1 new entry · engine 1152 on baseline, 0
+> regressed · wast 64,506 / 0 / 16 · Go 7/7/12 · bindgen 142 · bundle 4 · merge 1 · mod 55 ·
+> varscope 12 · jstyper 73 · dync 3 + 3 · typed_decl 18 · engine_tests 11 · wast_runner 8 ·
+> hybrid + wasmmerge_guard 15. Round-1 repros: sw05 and sw21 now MATCH, no row changed class.
+>
 > **2026-09-30, modc dynrt-merge fix + exit-code sweep, full gate green.** wasi **433/433** ·
 > bindgen **142/142** on freshly built fixtures (127/2 without the `wasmmerge` fix) · golden-WAT
 > 490 / 0 · engine 1152 on baseline, 0 regressed · wast 64,506 / 0 / 16 · Go 7/7/12.

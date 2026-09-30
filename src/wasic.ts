@@ -18746,6 +18746,10 @@ class WasicTranspiler {
         // A string ternary in a console argument leaves the chosen branch's length in
         // $__str_op_len (H12 sw02). Over-declares for numeric ternaries; Binaryen strips it.
         (/\bconsole\.(log|error|warn)\b/.test(l) && l.includes("?")) ||
+        // A call in a console argument whose own argument is an expression (`count(names[1])`):
+        // a string parameter is built by the string-expr resolver into $__str_op_len (H12 sw05).
+        // Over-declares for numeric parameters; Binaryen strips it.
+        /\bconsole\.(log|error|warn)\(.*\w\(\s*[^)\s"'][^)]*?[[.(`]/.test(l) ||
         // Printing a string-enum variable routes through $__enum_str_<Enum>, whose multi-value
         // (ptr,len) result is captured into this pair. Over-declares slightly when string enums
         // exist but none is printed here — an unused local, which Binaryen strips.
@@ -20502,6 +20506,9 @@ class WasicTranspiler {
           (/\bconsole\.(log|error|warn)\b/.test(l) && /===|!==|==|!=/.test(l)) ||
           // a string ternary in a console argument → $__str_op_len (H12 sw02; see emitFunction)
           (/\bconsole\.(log|error|warn)\b/.test(l) && l.includes("?")) ||
+          // a call in a console argument whose argument is an expression → $__str_op_len (H12 sw05;
+          // see emitFunction)
+          /\bconsole\.(log|error|warn)\(.*\w\(\s*[^)\s"'][^)]*?[[.(`]/.test(l) ||
           // string-enum variable printed → $__enum_str_<Enum> multi-value capture (see emitFunction)
           (this.stringEnumVars.size > 0 && /\bconsole\.(log|error|warn)\b/.test(l))
         )
