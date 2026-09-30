@@ -10,6 +10,8 @@
  *   A  against the real last release tag: a kind below the floor is refused, nothing written;
  *      a kind at the floor is written
  *   B  Rule 5: a surface change without its re-baseline commit is refused before any floor
+ *   D  reviewed changes: the committed reviews lower the floor; an edited signature voids its
+ *      review; a review cannot excuse a removal
  *   C  against a tag on a KNOWN surface: no change → patch; an export removed → patch refused,
  *      major floor, the symbol named; an export added → minor floor
  *
@@ -30,8 +32,8 @@ const run = async (cmd: string, args: string[], cwd = clone) => {
 const P = ["--allow-read", "--allow-write", "--allow-run", "--allow-env"];
 const bump = (kind?: string) =>
   run(Deno.execPath(), ["run", ...P, "scripts/bump.ts", ...(kind ? [kind] : [])]);
-const surface = (mode: string) =>
-  run(Deno.execPath(), ["run", ...P, "scripts/api-surface.ts", mode]);
+const surface = (...args: string[]) =>
+  run(Deno.execPath(), ["run", ...P, "scripts/api-surface.ts", ...args]);
 const version = async () => JSON.parse(await Deno.readTextFile(`${clone}/deno.json`)).version;
 const reset = async () => void await run("git", ["checkout", "--", "."]);
 
@@ -58,23 +60,25 @@ if (cl.code !== 0) throw new Error(`clone failed: ${cl.out}`);
 const v0 = await version();
 console.log(`clone at ${clone}, version ${v0}`);
 
-// A. Against the REAL last release (v2.0.3): the floor is MAJOR (runWast/runWastPath signatures).
+// A. Against the REAL last release (v2.0.3): the floor is MINOR once the committed reviews lower
+// runWast / runWastPath's CHANGED signatures (without them it is MAJOR; see D).
 let r = await bump("patch");
 check(
-  "A1 patch below a MAJOR floor is refused, nothing written",
-  r.code !== 0 && await version() === v0 && /below the surface floor \(major\)/.test(r.out),
+  "A1 patch below a MINOR floor is refused, nothing written",
+  r.code !== 0 && await version() === v0 && /below the surface floor \(minor\)/.test(r.out),
   r.out,
 );
 r = await bump("minor");
 check(
-  "A2 minor below a MAJOR floor is refused, nothing written",
-  r.code !== 0 && await version() === v0,
+  "A2 minor at the floor is allowed and written",
+  r.code === 0 && await version() === bumpOf(v0, "minor"),
   r.out,
 );
+await reset();
 r = await bump("major");
 check(
-  "A3 major at the floor is allowed and written",
-  r.code === 0 && (await version()).startsWith(String(Number(v0.split(".")[0]) + 1) + ".0.0"),
+  "A3 major above the floor is allowed and written",
+  r.code === 0 && await version() === bumpOf(v0, "major"),
   r.out,
 );
 await reset();
@@ -136,6 +140,46 @@ check(
 );
 r = await bump("minor");
 check("C5 export ADDED: minor allowed", r.code === 0, r.out);
+await reset();
+
+// D. Reviewed changes (api-surface.review.json), against the real last release again.
+await run("git", ["tag", "-d", "v99.0.0"]);
+r = await surface("--floor");
+check(
+  "D1 the committed reviews lower runWast / runWastPath: floor MINOR, each shown as REVIEWED",
+  /floor since v\d+\.\d+\.\d+.*MINOR/.test(r.out) &&
+    /runWast signature CHANGED — REVIEWED/.test(r.out) &&
+    /runWastPath signature CHANGED — REVIEWED/.test(r.out),
+  r.out,
+);
+// Change runWast's signature AGAIN (an added optional parameter), re-baseline: the review no longer
+// matches its exact before/after, so the change is judged afresh (MAJOR) and the review is reported.
+const SIG = "  path: string,\n  opts: WastOptions = {},\n): Promise<WastResult> {";
+const src2 = src.replace(/\r\n/g, "\n");
+const edited = src2.replace(
+  SIG,
+  "  path: string,\n  opts: WastOptions = {},\n  extra?: number,\n): Promise<WastResult> {",
+);
+if (edited === src2) throw new Error("test edit did nothing: runWast's signature text not found");
+await Deno.writeTextFile(wast, edited);
+await surface("--record");
+r = await surface("--floor");
+check(
+  "D2 an edited signature voids its review: floor MAJOR, the stale review reported",
+  /floor.*MAJOR/.test(r.out) && /\.\/wast runWast signature CHANGED\s*$/m.test(r.out) &&
+    /review of \.\/wast runWast .* matches no change/.test(r.out),
+  r.out,
+);
+await reset();
+// A review cannot excuse a REMOVAL: --review on a removed export is refused.
+await Deno.writeTextFile(wast, unexported);
+await surface("--record");
+r = await surface("--review", "./wast", "isList", "(whole)", "minor", "should be refused");
+check(
+  "D3 --review refuses to excuse a removed export",
+  r.code !== 0 && /not a CHANGED member/.test(r.out),
+  r.out,
+);
 await reset();
 
 function bumpOf(v: string, k: string): string {

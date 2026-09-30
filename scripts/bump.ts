@@ -33,6 +33,7 @@ import {
   generateSurface,
   type Kind,
   KIND_RANK,
+  loadReviews,
   printFloor,
   serialize,
   surfaceAtLastTag,
@@ -66,14 +67,14 @@ try {
 }
 if (committed !== serialize(current)) {
   console.error("❌ bump: api-surface.json does not match the code:");
-  printFloor(diffSurfaces(JSON.parse(committed), current), "the committed snapshot");
+  printFloor(await diffSurfaces(JSON.parse(committed), current), "the committed snapshot");
   console.error(
     "   Re-baseline in its OWN commit first (`deno task api-surface`), stating the reason (Rule 5).",
   );
   Deno.exit(1);
 }
 const { tag, surface: released, source } = await surfaceAtLastTag();
-const floor = diffSurfaces(released, current);
+const floor = await diffSurfaces(released, current, await loadReviews(root));
 printFloor(floor, `${tag} (${source})`);
 if (KIND_RANK[kind] < KIND_RANK[floor.kind]) {
   console.error(
