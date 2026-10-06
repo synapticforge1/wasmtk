@@ -251,6 +251,18 @@ export function setStrCmpNeededCallback(fn: (() => void) | undefined): void {
   _strCmpNeeded = fn;
 }
 
+/** Requests one of wasic's math helpers by name (`i32_abs`, `f64_sign`, `f64_hypot3`, …). Set by
+ *  wasic.ts around parseConsoleLogArgs. Added 2026-10-06: before it, a console `Math.max` in an i32
+ *  context called `$__i32_max` that nothing emitted (ld04). */
+let _mathHelperNeeded: ((name: string) => void) | undefined = undefined;
+/**
+ * Inject the callback that asks the compiler to emit a math helper the console path calls. Pass
+ * `undefined` to clear it.
+ */
+export function setMathHelperNeededCallback(fn: ((name: string) => void) | undefined): void {
+  _mathHelperNeeded = fn;
+}
+
 /** Callback to get the function table index for a named function. Set by wasic.ts around parseConsoleLogArgs. */
 let _funcTableLookup: ((name: string) => number | undefined) | undefined = undefined;
 /**
@@ -2087,6 +2099,19 @@ function exprToWat(
         structLookup,
         globals,
       );
+      // An f64-valued Math result at the expected type, as wasic's emitExpr does (ld15,
+      // 2026-10-06): `trunc_f64_s` into an integer, demote into f32.
+      const asExpected = (w: string): string =>
+        expectedType === "i32"
+          ? `(i32.trunc_f64_s ${w})`
+          : expectedType === "i64"
+          ? `(i64.trunc_f64_s ${w})`
+          : expectedType === "f32"
+          ? `(f32.demote_f64 ${w})`
+          : w;
+      if (expectedType === "i32" && (fn === "abs" || fn === "min" || fn === "max")) {
+        _mathHelperNeeded?.(`i32_${fn}`);
+      }
       if (fn === "clz32") {
         return `(i32.clz ${
           exprToWat(
@@ -2140,7 +2165,7 @@ function exprToWat(
               globals,
             )
           })`
-          : `(f64.abs ${arg0})`;
+          : asExpected(`(f64.abs ${arg0})`);
       }
       if (fn === "min") {
         return expectedType === "i32"
@@ -2167,7 +2192,7 @@ function exprToWat(
               globals,
             )
           })`
-          : `(f64.min ${arg0} ${arg1})`;
+          : asExpected(`(f64.min ${arg0} ${arg1})`);
       }
       if (fn === "max") {
         return expectedType === "i32"
@@ -2194,21 +2219,31 @@ function exprToWat(
               globals,
             )
           })`
-          : `(f64.max ${arg0} ${arg1})`;
+          : asExpected(`(f64.max ${arg0} ${arg1})`);
       }
-      if (fn === "sqrt") return `(f64.sqrt ${arg0})`;
-      if (fn === "floor") return `(f64.floor ${arg0})`;
-      if (fn === "ceil") return `(f64.ceil ${arg0})`;
-      if (fn === "trunc") return `(f64.trunc ${arg0})`;
-      if (fn === "round") return `(f64.floor (f64.add ${arg0} (f64.const 0.5)))`;
-      if (fn === "pow") return `(call $mathlib_pow ${arg0} ${arg1})`;
+      if (fn === "sqrt") return asExpected(`(f64.sqrt ${arg0})`);
+      if (fn === "floor") return asExpected(`(f64.floor ${arg0})`);
+      if (fn === "ceil") return asExpected(`(f64.ceil ${arg0})`);
+      if (fn === "trunc") return asExpected(`(f64.trunc ${arg0})`);
+      // round / sign / hypot: wasic's exact helpers (sw38–sw40, 2026-10-06); see emitMathHelpers.
+      if (fn === "round") {
+        _mathHelperNeeded?.("f64_round");
+        return asExpected(`(call $__math_round ${arg0})`);
+      }
+      if (fn === "pow") return asExpected(`(call $mathlib_pow ${arg0} ${arg1})`);
       if (fn === "sign") {
-        return `(if (result f64) (f64.eq ${arg0} (f64.const 0)) (then (f64.const 0)) (else (f64.copysign (f64.const 1) ${arg0})))`;
+        _mathHelperNeeded?.("f64_sign");
+        return asExpected(`(call $__math_sign ${arg0})`);
       }
       if (fn === "hypot") {
-        return `(f64.sqrt (f64.add (f64.mul ${arg0} ${arg0}) (f64.mul ${arg1} ${arg1})))`;
+        if (a.length === 0) return asExpected(`(f64.const 0)`);
+        _mathHelperNeeded?.(`f64_hypot${a.length}`);
+        const hArgs = a.map((x) =>
+          exprToWat(x, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals)
+        );
+        return asExpected(`(call $__math_hypot${a.length} ${hArgs.join(" ")})`);
       }
-      if (fn === "fround") return `(f64.promote_f32 (f32.demote_f64 ${arg0}))`;
+      if (fn === "fround") return asExpected(`(f64.promote_f32 (f32.demote_f64 ${arg0}))`);
       // Phase 38: extended math library functions
       const MATH38_UNARY = [
         "sin",
@@ -2231,9 +2266,9 @@ function exprToWat(
         "acosh",
         "atanh",
       ];
-      if (MATH38_UNARY.includes(fn)) return `(call $mathlib_${fn} ${arg0})`;
-      if (fn === "atan2") return `(call $mathlib_atan2 ${arg0} ${arg1})`;
-      if (fn === "random") return `(call $mathlib_random)`;
+      if (MATH38_UNARY.includes(fn)) return asExpected(`(call $mathlib_${fn} ${arg0})`);
+      if (fn === "atan2") return asExpected(`(call $mathlib_atan2 ${arg0} ${arg1})`);
+      if (fn === "random") return asExpected(`(call $mathlib_random)`);
     }
   }
 

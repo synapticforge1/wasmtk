@@ -112,6 +112,16 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-06, wasm-math Phase 1 (exact `Math`; Math results at the declared type), full gate
+> green.** wasi **436/436** (+`38_MathExactSemantics`) · golden-WAT **493 / 0** after a deliberate
+> re-record: 42 entries changed, every line explained (inline round / sign / hypot → helper calls;
+> 35 dynrt pipelines also renumber functions around the new helper), +1 new · engine 1152 on
+> baseline, 0 regressed · wast 64,506 / 0 / 16 · Go 7/7/12 · bindgen 142 · bundle 4 · merge 1 ·
+> mod 55 · varscope 12 · jstyper 73 · dync 3 + 3 · typed_decl 18 · engine_tests 11 ·
+> wast_runner 8 · hybrid + wasmmerge_guard 15. Round-1 repros: sw38–sw40, ld04, ld15 MATCH; 21
+> DIFFER = open silent-wrong 21; 18 compile/run failures = open loud 18. A 392-line battery
+> (224 `hypot` calls, `round` / `sign` on 84 values) is identical to Deno bar sw41's `-0` printing.
+>
 > **2026-09-30, H12 sw18 + sw22 + sw23 (operator split in `console.log`), full gate green.** wasi
 > **435/435** (+`7b_ConsoleOperatorSplit`) · golden-WAT **492 / 0** after a deliberate re-record:
 > 490 identical, ONE changed correctly (`38_MathTrig`: `-Math.PI / 2` now `(-π) / 2`,

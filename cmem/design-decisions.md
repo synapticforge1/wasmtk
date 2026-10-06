@@ -276,7 +276,13 @@ high-value subset.
     n` is 1.666…, and so are `let` and `var` (`var` not preferred). "The const case noted is very
     explicit on the return value."
   - **The `Math` functions are f64 by definition,** so their arguments are f64 contexts:
-    `Math.floor(a / b)` divides as floats, then floors.
+    `Math.floor(a / b)` divides as floats, then floors (sw37, Phase 2: not yet implemented).
+  - **A `Math` result in an integer or f32 context is converted like any f64 there** (2026-10-06):
+    `trunc_f64_s` into i32 / i64 (it traps out of range or on NaN), `demote` into f32. One
+    convention for every site; changing it is decision D3 in wasm-math-plan.md.
+  - **`Math` functions return JavaScript's exact result where wasm and JS are both f64**
+    (2026-10-06): `sign`, `round`, `hypot` are helpers shared by wasic and the console path
+    (`setMathHelperNeededCallback`; a console path that writes `call $__x` must REQUEST `$__x`).
   - Functions that TypeScript's `Math` lacks, for the wasm operations with no JS spelling, are
     being scoped. The plan, open questions and bugs: [wasm-math-plan.md](wasm-math-plan.md).
   - Test corpus consequence: a test that prints an `i32 / i32` must write `(a / b) | 0` or carry

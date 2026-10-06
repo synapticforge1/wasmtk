@@ -1,8 +1,8 @@
 # Wasm types in TypeScript: the declared-type rule and the `Math` additions (SCOPE, 2026-09-30)
 
-**Status: SCOPED, not started.** The ruling is recorded in design-decisions.md § "Wasm types in
-TypeScript". This file is the work it implies: what is broken today, what to build, in what order,
-and what the owner still has to decide. Nothing here is implemented.
+**Status (2026-10-06): Phase 1 DONE; Phases 2–4 wait on the owner's decisions D1–D6.** The
+ruling is recorded in design-decisions.md § "Wasm types in TypeScript". This file is the work it
+implies: what was broken, what to build, in what order, and what the owner still has to decide.
 
 ## Why
 
@@ -34,7 +34,8 @@ Rule gaps (the ruling says one thing, wasic does another):
 | sw37 | `Math.floor(a / b)` (−7, 2) | −4 | −3 | same: the `Math` argument is emitted as f64, but the division inside is already `i32.div_s`. `ceil` and `round` alike; `trunc` agrees only by coincidence |
 | ld15 | `const x: i32 = Math.floor(3.7)`; also `trunc`, `ceil`, `round`, with or without a division | 3 | invalid module | `F64_UNARY` / `round` return f64 whatever `defaultType` is (wasic.ts ~9437–9451); the i32 local gets an f64. LOUD, but it hits a common pattern |
 
-Plain bugs (TypeScript and wasm are both f64 here, so the ruling is not involved):
+Plain bugs (TypeScript and wasm are both f64 here, so the ruling is not involved; ALL FIXED in
+Phase 1, 2026-10-06, as was ld15 above):
 
 | id | source | Deno | wasm | cause |
 | --- | --- | --- | --- | --- |
@@ -47,12 +48,22 @@ The same probe found `Math.max` / `min` with three literal arguments, `Math.abs(
 
 ## The work, in order
 
-**Phase 1: the plain bugs (no decision needed).** sw38, sw39, sw40 and ld15. The `Math`
-functions get JavaScript's exact semantics: `sign` returns NaN for NaN and preserves −0; `hypot` is
-n-ary and scaled so it does not overflow; `round` follows JavaScript's rule exactly (nearest,
-ties toward +∞, −0 kept), not `floor(x + 0.5)`. `floor`, `ceil`, `trunc` and `round` in an i32 context convert their
-result (the conversion kind is decision D3 below; until then, refuse loudly, never an invalid
-module). One stress test; the full gate.
+**Phase 1: the plain bugs. ✅ DONE 2026-10-06** (sw38, sw39, sw40, ld15; ld04 with them).
+- `sign`, `round`, `hypot` are wasic helpers (`$__math_sign`, `$__math_round`,
+  `$__math_hypot<n>`, emitted only when used), shared by both paths: the console path now
+  REQUESTS helpers through `setMathHelperNeededCallback`, which also fixed ld04.
+- `hypot` is V8's algorithm and bit-identical to Deno on a 224-call battery; `round` and `sign`
+  identical on 84 awkward values (the battery generator was a scratch script; its shape is in
+  compiler-bugs.md sw39).
+- Every f64-valued Math result is converted at the type its context asks for. ld15 needed NO new
+  decision: wasic already converts an f64 in an integer context with `trunc_f64_s` (`y as i32`,
+  an f64 local read as i32, about ten sites), and Math now does the same. D3 below is therefore
+  a question about that convention as a whole, not about Math.
+- Found on the way, logged, NOT fixed (outside the Math dispatch): sw41 (`console.log(-0)`
+  prints `0`), ld16 (`String(x)` in a console argument), ld17 (`console.log` of an f32 variable).
+- Golden-WAT: 42 entries changed, every line explained: only the old inline round / sign /
+  hypot forms became helper calls, including inside the dynrt runtime library (35 pipeline
+  entries, which also renumber their functions around the new helper).
 
 **Phase 2: the declared-destination rule (sw36, sw37).** The mechanism: an EXPLICIT float
 destination turns a `/` of integer operands into `f64.div` of converted operands.
@@ -104,8 +115,10 @@ result, e.g. `note: m / n is i32 division; wasm prints 1, TypeScript prints 1.66
   `declare global { interface Math { idiv(a: number, b: number): number } }`, but Deno then
   needs a runtime polyfill module the program imports), or in a wasmtk module
   (`import { idiv } from "@jrmarcum/wasmtk/math"`), which needs no global change.
-- **D3. f64 into an `i32` destination.** `const x: i32 = Math.floor(y)`: truncate and trap out of
-  range (`i32.trunc_f64_s`), saturate (`trunc_sat`), or wrap (what `| 0` does in JavaScript)?
+- **D3. f64 into an `i32` destination, as a convention.** Today, everywhere (and for Math since
+  Phase 1): truncate and TRAP out of range or on NaN (`i32.trunc_f64_s`). Keep it, or saturate
+  (`trunc_sat`), or wrap (what `| 0` does in JavaScript)? A change applies to every site, not
+  only Math.
 - **D4. Which functions.** The Phase 3 table is a candidate list, not a commitment.
 - **D5. Release.** Phase 2 changes printed values of existing programs: MINOR with a note, or
   MAJOR?

@@ -96,7 +96,13 @@
     and `n * -2` were split at the wrong character (compile errors since that morning, wrong
     numbers before). Also fixed: `-n + m` was negated whole, and integer results where a float
     was expected built invalid modules. Open loud 20 → 17. Found: sw36, `i32 / i32` truncates;
-    awaiting the owner's ruling. Test `7b_ConsoleOperatorSplit`.
+    ruled by design the same day (the declared type decides), narrowed to the declared-`f64` case.
+    Test `7b_ConsoleOperatorSplit`.
+15. **wasm-math Phase 1: exact `Math` results (2026-10-06).** `Math.sign(NaN)` was 1;
+    `Math.hypot` overflowed at 1e200 and read two arguments; `Math.round` was wrong at
+    0.49999999999999994 and lost −0; `const x: i32 = Math.floor(y)` built an invalid module. All
+    fixed (hypot bit-identical to V8), plus a console helper that was never emitted (ld04). Test
+    `38_MathExactSemantics`. Phases 2–4 wait on the owner (wasm-math-plan.md).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
