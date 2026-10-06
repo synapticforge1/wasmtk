@@ -7,6 +7,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **2026-10-06, owner: PAUSE after wasm-math Phase 1 and wait for binaryang to catch up** (H9's
+> `./definitions`, which our SENT 2026-09-30 letter asks for, unblocks H10). Resume from the list
+> below; nothing is half-done.
+
 - ⏳ **H6 (workspace letter, owner chose it 2026-09-30).** Done: H6.1 SemVer `2465ad0`, H6.2 the ★
   block `159e0df`, H6.3 the compatibility gate `4d7d8da` + reviewed exceptions `17e2054`, H6.4 the
   CLI surface `ab5d127` (rules: design-decisions.md § Semantic Versioning and § The compatibility
@@ -25,13 +29,14 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     Bootstrap (INDEX + CLAUDE.md) is 14.5 KB against a ~10 KB guideline; the rest is the INDEX's
     policy section, which is the owner's to trim.
   - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
-- ⏳ **Wasm types in TypeScript** (wasm-math-plan.md, SCOPED 2026-09-30, not started). The owner
-  ruled: the declared type decides; `i32 / i32` truncates; an explicit `f64` destination or a
-  `Math` argument divides as floats. Phase 1 (plain `Math` bugs sw38–sw40, ld15) needs no
-  decision; Phase 2 (sw36, sw37) and Phase 3 (the `Math` additions) wait on decisions D1–D6.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **23 open silent-wrong, 18 open
-  loud** (2026-09-30: sw18 / sw22 / sw23 fixed; sw36–sw40 and ld15 found, all in the plan above).
-  - NEXT: the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool branches, sw32),
+- ⏳ **Wasm types in TypeScript** (wasm-math-plan.md). The owner ruled (2026-09-30): the declared
+  type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
+  as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
+  (the `Math` additions) and Phase 4 (the user page) wait on the owner's decisions D1–D6.
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **21 open silent-wrong, 18 open
+  loud** (2026-10-06, after Phase 1; sw41, ld16, ld17 found there).
+  - NEXT: the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool branches, sw32,
+    sw41 `-0`; and the loud console printer rows ld16, ld17),
     then the wasic operator rows (sw10–sw17; sw15, an operator typed from its LEFT operand, also
     breaks `x * -k` in `console.log`), then Phase 0b audit round 2.
 - ⏳ **wast: 7 `(module definition …)`s V8 refuses for its own size caps** (`memory64` 1, `table`
@@ -81,6 +86,11 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Completed — dated summaries (details in the files named)
 
+- **2026-10-06 — wasm-math Phase 1** (wasm-math-plan.md; compiler-bugs.md): exact `Math.sign`,
+  `Math.round`, n-ary `Math.hypot` (V8's algorithm, bit-identical) as shared helpers; every Math
+  result at the declared type (ld15); console helper requests (ld04). Silent-wrong 23 → 21.
+- **2026-09-30 — the wasm-types ruling and the Math scope** (`7142f68`): design-decisions.md,
+  wasm-math-plan.md; sw36 narrowed, sw37–sw40 and ld15 found.
 - **2026-09-30 — the `modc` / exit-code defect** found by H6.5a (compiler-bugs.md, FIXED):
   `modc` of a dynrt-merged library assembles again (`wasmmerge` resolves a copied import's
   `(type N)`); `modc`, `info`, `mod <file>` and `wasic x.js` exit 1 on failure (an exit sweep of
