@@ -33,10 +33,14 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
   (the `Math` additions) and Phase 4 (the user page) wait on the owner's decisions D1–D6.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **21 open silent-wrong, 18 open
-  loud** (2026-10-06, after Phase 1; sw41, ld16, ld17 found there).
-  - NEXT: the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool branches, sw32,
-    sw41 `-0`; and the loud console printer rows ld16, ld17),
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **22 open silent-wrong, 17 open
+  loud** (2026-10-06: sw41, ld16, ld17 fixed; sw42 found and fixed; sw43, sw44, ld18 found).
+  - **f32 in containers is broken** (sw43: an `f32[]` literal overruns the next data segment,
+    silent memory corruption; ld18: an f32 struct field loads with `i32.load`). The most serious
+    open rows; the same on main.
+  - **sw44 needs a design call:** wasic does not track what was thrown, so `String(e)` cannot
+    tell a thrown string (`custom`) from a thrown Error (`Error: custom`).
+  - NEXT: the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool branches, sw32),
     then the wasic operator rows (sw10–sw17; sw15, an operator typed from its LEFT operand, also
     breaks `x * -k` in `console.log`), then Phase 0b audit round 2.
 - ⏳ **wast: 7 `(module definition …)`s V8 refuses for its own size caps** (`memory64` 1, `table`
@@ -86,6 +90,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Completed — dated summaries (details in the files named)
 
+- **2026-10-06 — the Phase 1 finds** (compiler-bugs.md): `console.log(-0)` prints `-0` (sw41);
+  console `String(x)` (ld16) and `String(<string>)` (sw42); `console.log` of an f32 (ld17).
 - **2026-10-06 — wasm-math Phase 1** (wasm-math-plan.md; compiler-bugs.md): exact `Math.sign`,
   `Math.round`, n-ary `Math.hypot` (V8's algorithm, bit-identical) as shared helpers; every Math
   result at the declared type (ld15); console helper requests (ld04). Silent-wrong 23 → 21.

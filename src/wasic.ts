@@ -6972,6 +6972,15 @@ class WasicTranspiler {
           `${ind}(local.set $${varName}_ptr)`,
         ].join("\n");
       }
+      // String(<string>) is the string itself. It went to the numeric path below and printed its
+      // POINTER: `String(s)` gave `260` (sw42, found fixing ld16, 2026-10-06; the same on main).
+      if (argType === "string" || this.isStringExpr(argExpr, locals)) {
+        return [
+          this.emitStringPtrLen(argExpr, locals),
+          `${ind}(local.set $${varName}_len)`,
+          `${ind}(local.set $${varName}_ptr)`,
+        ].join("\n");
+      }
       // sw33 (found fixing sw01, 2026-09-29): a boolean went through `$__i32_to_str` and printed
       // `1` / `0`. Pick the static "true" / "false" string instead.
       if (argType === "bool") {
@@ -13270,7 +13279,8 @@ class WasicTranspiler {
           // does. Build it into the $__str_op pair (declared for console ternaries).
           const tk = tok.trim();
           if (
-            !(tk.startsWith("`") || this.isStringExpr(tk, locs as Map<string, WatType>)) ||
+            !(tk.startsWith("`") || /^String\s*\(/.test(tk) || // String(x): ld16, 2026-10-06
+              this.isStringExpr(tk, locs as Map<string, WatType>)) ||
             !locs.has("__str_op_ptr")
           ) return undefined;
           // Speculative, like the emitStringPtrLen probe above: a failure is a stub, not a
@@ -13733,7 +13743,8 @@ class WasicTranspiler {
           // does. Build it into the $__str_op pair (declared for console ternaries).
           const tk = tok.trim();
           if (
-            !(tk.startsWith("`") || this.isStringExpr(tk, locs as Map<string, WatType>)) ||
+            !(tk.startsWith("`") || /^String\s*\(/.test(tk) || // String(x): ld16, 2026-10-06
+              this.isStringExpr(tk, locs as Map<string, WatType>)) ||
             !locs.has("__str_op_ptr")
           ) return undefined;
           // Speculative, like the emitStringPtrLen probe above: a failure is a stub, not a
@@ -15781,6 +15792,20 @@ class WasicTranspiler {
     (if (f64.ge (f64.sub (local.get $x) (local.get $r)) (f64.const 0.5))
       (then (local.set $r (f64.add (local.get $r) (f64.const 1)))))
     (f64.copysign (local.get $r) (local.get $x))
+  )`);
+    }
+    if (this.mathHelpers.has("f64_to_str_console")) {
+      // console.log formats −0 as `-0`; string conversion (`${x}`, String(x)) gives `0`, which is
+      // what $__f64_to_str does (sw41, 2026-10-06). Only a whole console argument calls this.
+      f64Helpers.push(`  ;; console.log's number formatting: -0 as "-0", else $__f64_to_str
+  (func $__f64_to_str_console (param $val f64) (param $buf i32) (result i32)
+    (if (i32.and (f64.eq (local.get $val) (f64.const 0))
+                 (i64.lt_s (i64.reinterpret_f64 (local.get $val)) (i64.const 0)))
+      (then
+        (i32.store8 (local.get $buf) (i32.const 45))
+        (i32.store8 offset=1 (local.get $buf) (i32.const 48))
+        (return (i32.const 2))))
+    (call $__f64_to_str (local.get $val) (local.get $buf))
   )`);
     }
     for (const h of [...this.mathHelpers].filter((h) => h.startsWith("f64_hypot")).sort()) {
@@ -18856,6 +18881,8 @@ ${sum}
         // a string parameter is built by the string-expr resolver into $__str_op_len (H12 sw05).
         // Over-declares for numeric parameters; Binaryen strips it.
         /\bconsole\.(log|error|warn)\(.*\w\(\s*[^)\s"'][^)]*?[[.(`]/.test(l) ||
+        // `String(x)` in a console argument goes through the same resolver (ld16, 2026-10-06).
+        (/\bconsole\.(log|error|warn)\b/.test(l) && /\bString\s*\(/.test(l)) ||
         // Printing a string-enum variable routes through $__enum_str_<Enum>, whose multi-value
         // (ptr,len) result is captured into this pair. Over-declares slightly when string enums
         // exist but none is printed here — an unused local, which Binaryen strips.
@@ -20615,6 +20642,8 @@ ${sum}
           // a call in a console argument whose argument is an expression → $__str_op_len (H12 sw05;
           // see emitFunction)
           /\bconsole\.(log|error|warn)\(.*\w\(\s*[^)\s"'][^)]*?[[.(`]/.test(l) ||
+          // `String(x)` in a console argument (ld16; see emitFunction)
+          (/\bconsole\.(log|error|warn)\b/.test(l) && /\bString\s*\(/.test(l)) ||
           // string-enum variable printed → $__enum_str_<Enum> multi-value capture (see emitFunction)
           (this.stringEnumVars.size > 0 && /\bconsole\.(log|error|warn)\b/.test(l))
         )

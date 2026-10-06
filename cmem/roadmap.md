@@ -103,6 +103,11 @@
     0.49999999999999994 and lost −0; `const x: i32 = Math.floor(y)` built an invalid module. All
     fixed (hypot bit-identical to V8), plus a console helper that was never emitted (ld04). Test
     `38_MathExactSemantics`. Phases 2–4 wait on the owner (wasm-math-plan.md).
+16. **Console number printing (2026-10-06).** `console.log(-0)` prints `-0` (templates and
+    `String(-0)` still `0`, as in JavaScript); `String(x)` works inside `console.log`;
+    `String(s)` of a string no longer prints a pointer; an `f32` value prints. Test
+    `7b_ConsoleNumberFormatting`. Found: f32 arrays and struct fields are broken (sw43, ld18), and
+    `String(e)` of a caught value depends on an untracked thrown kind (sw44).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

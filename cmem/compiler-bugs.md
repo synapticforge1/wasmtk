@@ -7,16 +7,18 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 21 | 48 | 0 | 17 |
-| LOUD | 18 | 19 | 1 | 8 |
+| SILENT-WRONG | 22 | 50 | 0 | 17 |
+| LOUD | 17 | 21 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 57 rows of the Phase 0b round-1 table (sw35 the 48th, sw36 the 49th, sw37–sw40 and ld15 the 50th–54th, 2026-09-30; sw41, ld16, ld17 the 55th–57th, 2026-10-06) (each row counted as one
+80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 61 rows of the Phase 0b round-1 table (sw35 the 48th, sw36 the 49th, sw37–sw40 and ld15 the 50th–54th, 2026-09-30; sw41, ld16, ld17 the 55th–57th, sw42–sw44 and ld18 the 58th–61st, 2026-10-06) (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 21** (2026-10-06, wasm-math-plan.md Phase 1: sw38, sw39,
+**Open silent-wrong in the compiler: 22** (2026-10-06, later: the Phase 1 finds fixed, sw41
+and loud ld16, ld17; fixing them found sw42 (fixed), sw43 and sw44 (open), and loud ld18: 21 →
+22 silent, 18 → 17 loud). Before that, **21** (2026-10-06, wasm-math-plan.md Phase 1: sw38, sw39,
 sw40 fixed, sw41 found, 23 → 21; loud ld15 and ld04 fixed, ld16 and ld17 found, still 18).
 Before that, **23** (2026-09-30, night: scoping the division ruling
 found sw37–sw40 in the `Math` dispatch, 19 → 23, and ld15, loud 17 → 18; sw36 narrowed by the
@@ -81,7 +83,10 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~sw38~~ | ✅ FIXED 2026-10-06 (wasm-math-plan.md Phase 1): `Math.sign(NaN)` was `1`, `Math.sign(-0)` was `+0`. Now `$__math_sign` (NaN → NaN, ±0 → itself, else ±1; the argument evaluated once). Test `38_MathExactSemantics` | wasic + console_log Math `sign` |
 | ~~sw39~~ | ✅ FIXED 2026-10-06 (Phase 1): `Math.hypot(1e200, 1e200)` was `Infinity`, `Math.hypot(3, 4, 12)` was `5`. Now `$__math_hypot<n>`, V8's algorithm (largest magnitude; Infinity before NaN; Kahan-compensated scaled sum), one helper per arity. Bit-identical to Deno on a 224-call battery (1–4 arguments, subnormals, ±Infinity, NaN, 1e±200). Test `38_MathExactSemantics` | wasic + console_log Math `hypot` |
 | ~~sw40~~ | ✅ FIXED 2026-10-06 (Phase 1): `Math.round(0.49999999999999994)` was `1`, `Math.round(-0.4)` was `+0`. Now `$__math_round`: `floor`, then +1 when `x - floor(x) >= 0.5` (exact for every double), then `copysign` with `x` (keeps −0, cannot flip a nonzero result). Identical to Deno on 84 awkward values. Test `38_MathExactSemantics` | wasic + console_log Math `round` |
-| sw41 | OPEN (found fixing sw38/sw40, 2026-10-06): `console.log(-0)` prints `0`; Deno prints `-0` (console formatting; `` `${-0}` `` and `String(-0)` are `0` in both). The value is right (`1 / x` is `-Infinity`); the f64 printer `$__f64_to_str` serves both console.log and string conversion, which disagree on −0. Repro `sw41_console_log_negative_zero.ts` | console f64 printer |
+| ~~sw41~~ | ✅ FIXED 2026-10-06: `console.log(-0)` printed `0` (Deno `-0`). A WHOLE numeric console argument (not a template, not a top-level string concat) is marked `console` and printed by `$__f64_to_str_console` (−0 as `-0`, else `$__f64_to_str`); a numeric literal argument is fixed at compile time. String conversion (`` `${-0}` ``, `String(-0)`, `"v=" + -0`) still gives `0`, as in JavaScript. Test `7b_ConsoleNumberFormatting` | console f64 printer |
+| ~~sw42~~ | ✅ FIXED 2026-10-06 (found fixing ld16; the same on main): `const t: string = String(s)` printed the string's POINTER (`260`): emitStringAssign's `String(...)` branch sent a string argument down the numeric path. A string argument is now the string itself. Test `7b_ConsoleNumberFormatting` | wasic emitStringAssign `String(...)` |
+| sw43 | OPEN (found fixing ld17, 2026-10-06; the same on main): an `f32[]` literal is written as 8-byte f64 elements into a reservation of 4 bytes per element. It OVERRUNS the next data segment (`[1.25, 2.5]` turned a following `"true"` into four NUL bytes) and an element reads back as a bit pattern (`xs[1]` printed `1072955392`, the high word of 1.25). Silent memory corruption. Repro `sw43_f32_array_literal_overruns.ts` | wasic f32 array layout |
+| sw44 | OPEN (found fixing ld16, 2026-10-06): `String(e)` of a catch variable. wasic stores every caught value as its message and does not track WHAT was thrown, so a declared `const m: string = String(e)` always prefixes `Error: ` (wrong for a thrown string: Deno `custom`), while the console form prints the bare message (wrong for a thrown `Error`: Deno `Error: custom`). Either needs the thrown kind at run time. Repro `sw44_string_of_catch_var_kind_unknown.ts` | wasic exception model |
 | sw24 | `console.log("C:\\tmp")` double-decoded: `C:\tmp` → `C:<TAB>mp` | console_log per-iov |
 | sw25 | `console.log(n > 0 ? true : false)`: `true` → `1` | console_log |
 | sw26 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `"x" + (a < b ? "lo" : "hi")`: `xlo` → `x0` | console_log |
@@ -106,8 +111,9 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ld13 | `const b: string[] = a`: unsupported expression | wasic. Found landing the rule |
 | ld14 | a union-typed array filled by `push({ … })` literals, then `xs[i].type`: unsupported | wasic. Found landing the rule |
 | ~~ld15~~ | ✅ FIXED 2026-10-06 (Phase 1): `const x: i32 = Math.floor(3.7)` (also `trunc`, `ceil`, `round`, `sqrt`, `sign`, `hypot`, the mathlib functions) was an INVALID MODULE: every f64-valued Math result was returned as f64 whatever `defaultType` asked. Now converted at the type asked, with wasic's existing convention for an f64 in an integer context (`trunc_f64_s`, as `y as i32` and an f64 local read as i32 already do), `demote` into f32. Both paths (wasic `asDefault`, console_log `asExpected`). Test `38_MathExactSemantics` | wasic + console_log Math dispatch |
-| ld16 | OPEN (found fixing Phase 1, 2026-10-06): `console.log(String(x))` with an f64 `x`: `undefined func "$String"` (an invalid module, so loud). Repro `ld16_console_string_of_number.ts` | console_log call path |
-| ld17 | OPEN (found fixing Phase 1, 2026-10-06; the same on main): `console.log(z)` of ANY `f32` variable: `call expected f64, found f32`, an invalid module. The console printer never promotes an f32. Repro `ld17_console_log_f32_variable.ts` | console f64 printer |
+| ~~ld16~~ | ✅ FIXED 2026-10-06: `console.log(String(x))` emitted `call $String`, an undefined function. A console `String(...)` now goes through wasic's string resolver (emitStringAssign owns `String(...)`), and anything it cannot build is a diagnostic. `String(<string local>)` keeps the old pass-through (see sw44). Test `7b_ConsoleNumberFormatting` | console_log call path |
+| ~~ld17~~ | ✅ FIXED 2026-10-06: `console.log(z)` of any `f32` value was an invalid module: the printer was handed a raw f32. Every producer of an f64 segment whose source may be f32 (locals, globals, calls, closures, struct fields, 2D elements, nullish) now goes through `promoteF32`. Test `7b_ConsoleNumberFormatting` | console f64 printer |
+| ld18 | OPEN (found fixing ld17, 2026-10-06; the same on main): an `f32` STRUCT FIELD is loaded with `i32.load`, in wasic's own emitExpr too: `const a: f64 = p.x + 1` is an invalid module. With sw43, f32 storage in containers is broken. Repro `ld18_f32_struct_field_i32_load.ts` | wasic f32 field layout |
 
 **`sw29` was settled by the owner's ruling (2026-09-28), not by an f64 default:** every
 declaration states its type, and a counting-`for` counter is an integer by standard. See
