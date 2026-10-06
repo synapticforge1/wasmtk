@@ -443,6 +443,28 @@ export type ClosureVarLookup = (name: string) => {
   funcType: string; // e.g. "$ftype_i32_r_f64"
 } | undefined;
 
+/** The memory load for a value of WAT type `t`: a local twin of wasic.ts's memLoadOp (this module
+ *  is imported BY wasic.ts, so it cannot import back). f32 went to `i32.load` and printed bit
+ *  patterns (`xs[1]` → 1075838976; sw43, 2026-10-06). */
+function memLoadOp(t: string | undefined | null): string {
+  return t === "f64"
+    ? "f64.load"
+    : t === "i64"
+    ? "i64.load"
+    : t === "f32"
+    ? "f32.load"
+    : "i32.load";
+}
+
+/** An f32 value at a non-f32 expected type (exprToWat's raw element / field loads): promoted to
+ *  f64, or truncated to an integer (sw43 / ld18, 2026-10-06). Anything else is returned as is. */
+function f32AsExpected(wat: string, from: string | undefined, to: string): string {
+  if (from !== "f32" || to === "f32") return wat;
+  if (to === "i32") return `(i32.trunc_f32_s ${wat})`;
+  if (to === "i64") return `(i64.trunc_f32_s ${wat})`;
+  return `(f64.promote_f32 ${wat})`;
+}
+
 /** An f32 value at the f64 printer: promoted. Every producer of an `f64expr` segment whose
  *  source type may be f32 goes through this; the raw f32 was an invalid module (ld17,
  *  2026-10-06). */
@@ -1295,11 +1317,7 @@ function parseSingleArg(
       const rowPtr =
         `(i32.load (i32.add (i32.add ${base} (i32.const 8)) (i32.shl ${rowIdx} (i32.const 2))))`;
       const eShift = (a2.elemType === "f64" || a2.elemType === "i64") ? 3 : 2;
-      const eLoad = a2.elemType === "f64"
-        ? "f64.load"
-        : a2.elemType === "i64"
-        ? "i64.load"
-        : "i32.load";
+      const eLoad = memLoadOp(a2.elemType);
       const wat =
         `(${eLoad} (i32.add (i32.add ${rowPtr} (i32.const 8)) (i32.shl ${colIdx} (i32.const ${eShift}))))`;
       const kind = a2.elemType === "f64" || a2.elemType === "f32"
@@ -1359,11 +1377,7 @@ function parseSingleArg(
       }
       // Phase 31: respect custom shift/loadOp for sub-word TypedArrays (Uint8Array, Int16Array, etc.)
       const loadOp = arrInfo.customLoadOp ??
-        (arrInfo.elemType === "f64"
-          ? "f64.load"
-          : arrInfo.elemType === "i64"
-          ? "i64.load"
-          : "i32.load");
+        (memLoadOp(arrInfo.elemType));
       const shift = arrInfo.shift !== undefined
         ? arrInfo.shift
         : (arrInfo.elemType === "f64" || arrInfo.elemType === "i64")
@@ -1395,12 +1409,13 @@ function parseSingleArg(
         ? `(i32.add ${dataBase} ${idxWat})`
         : `(i32.add ${dataBase} (i32.shl ${idxWat} (i32.const ${shift})))`;
       const wat = `(${loadOp} ${addrWat})`;
-      const kind = arrInfo.elemType === "f64"
+      // An f32 element prints as a number (it was an i32expr: its bit pattern; sw43).
+      const kind = arrInfo.elemType === "f64" || arrInfo.elemType === "f32"
         ? "f64expr" as const
         : arrInfo.elemType === "i64"
         ? "i64expr" as const
         : "i32expr" as const;
-      return [{ kind, wat }];
+      return [{ kind, wat: arrInfo.customLoadOp ? wat : promoteF32(wat, arrInfo.elemType) }];
     }
   }
   // Phase 12/5h: fallback — i32 local holding a dynamic i32[] array pointer (captured or method-returned)
@@ -1919,12 +1934,12 @@ function exprToWat(
       const rowPtr =
         `(i32.load (i32.add (i32.add ${base} (i32.const 8)) (i32.shl ${rowIdx} (i32.const 2))))`;
       const eShift = (a2.elemType === "f64" || a2.elemType === "i64") ? 3 : 2;
-      const eLoad = a2.elemType === "f64"
-        ? "f64.load"
-        : a2.elemType === "i64"
-        ? "i64.load"
-        : "i32.load";
-      return `(${eLoad} (i32.add (i32.add ${rowPtr} (i32.const 8)) (i32.shl ${colIdx} (i32.const ${eShift}))))`;
+      const eLoad = memLoadOp(a2.elemType);
+      return f32AsExpected(
+        `(${eLoad} (i32.add (i32.add ${rowPtr} (i32.const 8)) (i32.shl ${colIdx} (i32.const ${eShift}))))`,
+        a2.elemType,
+        expectedType,
+      );
     }
   }
   // Array element read: arr[idx]. Guard the greedy index capture so `arr[0] + arr[1]` (index would
@@ -1935,7 +1950,7 @@ function exprToWat(
   // Phase 23: tuple element access t[N] → struct field _N
   if (bracketM && structLookup && /^\d+$/.test(bracketM[2])) {
     const fi = structLookup(bracketM[1], `_${bracketM[2]}`);
-    if (fi) return fi.watLoad;
+    if (fi) return f32AsExpected(fi.watLoad, fi.type, expectedType);
   }
   if (bracketM && arrayLookup) {
     const ai = arrayLookup(bracketM[1]);
@@ -1960,7 +1975,7 @@ function exprToWat(
       }
       // Phase 31: respect custom shift/loadOp for sub-word TypedArrays
       const loadOp = ai.customLoadOp ??
-        (ai.elemType === "f64" ? "f64.load" : ai.elemType === "i64" ? "i64.load" : "i32.load");
+        (memLoadOp(ai.elemType));
       const shift = ai.shift !== undefined
         ? ai.shift
         : (ai.elemType === "f64" || ai.elemType === "i64")
@@ -1989,7 +2004,8 @@ function exprToWat(
       const addrWat = shift === 0
         ? `(i32.add ${dataBase} ${idxWat})`
         : `(i32.add ${dataBase} (i32.shl ${idxWat} (i32.const ${shift})))`;
-      return `(${loadOp} ${addrWat})`;
+      const elemWat = `(${loadOp} ${addrWat})`;
+      return ai.customLoadOp ? elemWat : f32AsExpected(elemWat, ai.elemType, expectedType);
     }
   }
 
@@ -1997,14 +2013,14 @@ function exprToWat(
   const sfDotM = expr.match(/^(\w+)\.(\w+)$/);
   if (sfDotM && structLookup) {
     const fi = structLookup(sfDotM[1], sfDotM[2]);
-    if (fi) return fi.watLoad;
+    if (fi) return f32AsExpected(fi.watLoad, fi.type, expectedType); // ld18: f32 fields
   }
 
   // Phase 42: three-part chained struct field access: a.b.c
   const sfChainedDotM = expr.match(/^(\w+)\.(\w+)\.(\w+)$/);
   if (sfChainedDotM && structLookup) {
     const fi = structLookup(`${sfChainedDotM[1]}.${sfChainedDotM[2]}`, sfChainedDotM[3]);
-    if (fi) return fi.watLoad;
+    if (fi) return f32AsExpected(fi.watLoad, fi.type, expectedType);
   }
 
   // Global isNaN(x) → f64.ne x x

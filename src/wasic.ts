@@ -993,6 +993,39 @@ function encodeF64LE(val: number): string {
   );
 }
 
+/** Encodes a 32-bit float as 4 little-endian WAT escape bytes. An `f32[]` element was encoded
+ *  with encodeF64LE (8 bytes) into a 4-byte slot, overrunning the next data segment (sw43). */
+function encodeF32LE(val: number): string {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, val, true);
+  return Array.from(new Uint8Array(buf)).map((b) => `\\${b.toString(16).padStart(2, "0")}`).join(
+    "",
+  );
+}
+
+/** The memory load for a value of WAT type `t`. The chains this replaces sent `f32` to
+ *  `i32.load`, so an f32 struct field or array element was an i32 (ld18, sw43; 2026-10-06). */
+function memLoadOp(t: string | undefined | null): string {
+  return t === "f64"
+    ? "f64.load"
+    : t === "i64"
+    ? "i64.load"
+    : t === "f32"
+    ? "f32.load"
+    : "i32.load";
+}
+
+/** The memory store for a value of WAT type `t` (see memLoadOp). */
+function memStoreOp(t: string | undefined | null): string {
+  return t === "f64"
+    ? "f64.store"
+    : t === "i64"
+    ? "i64.store"
+    : t === "f32"
+    ? "f32.store"
+    : "i32.store";
+}
+
 /** Phase 6d: Parses a nested array literal "[[1,2],[3,4]]" → [["1","2"],["3","4"]]. */
 function parse2DArrayLiteral(str: string): string[][] {
   const s = str.trim();
@@ -5482,11 +5515,7 @@ class WasicTranspiler {
     ];
     for (const field of def.fields) {
       const valExpr = rawFields[field.name] ?? "0";
-      const storeOp = field.type === "f64"
-        ? "f64.store"
-        : field.type === "i64"
-        ? "i64.store"
-        : "i32.store";
+      const storeOp = memStoreOp(field.type);
       const valWat = this.emitExpr(valExpr, locals, field.type);
       stmts.push(`(${storeOp} offset=${field.offset} (local.get $__rt_struct_ptr) ${valWat})`);
     }
@@ -5537,11 +5566,7 @@ class WasicTranspiler {
       `(local.set $__rt_struct_ptr (call $__malloc (i32.const ${def.totalSize})))`,
     ];
     for (const field of def.fields) {
-      const storeOp = field.type === "f64"
-        ? "f64.store"
-        : field.type === "i64"
-        ? "i64.store"
-        : "i32.store";
+      const storeOp = memStoreOp(field.type);
       if (Object.prototype.hasOwnProperty.call(overrides, field.name)) {
         const valWat = this.emitExpr(overrides[field.name], locals, field.type);
         stmts.push(`(${storeOp} offset=${field.offset} (local.get $__rt_struct_ptr) ${valWat})`);
@@ -5560,11 +5585,7 @@ class WasicTranspiler {
               } ${baseInfo.ptrWat}))`,
             );
           } else {
-            const loadOp = field.type === "f64"
-              ? "f64.load"
-              : field.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const loadOp = memLoadOp(field.type);
             stmts.push(
               `(${storeOp} offset=${field.offset} (local.get $__rt_struct_ptr) (${loadOp} offset=${bf.offset} ${baseInfo.ptrWat}))`,
             );
@@ -5601,11 +5622,7 @@ class WasicTranspiler {
     defaultExpr: string | null,
     locals: Map<string, WatType>,
   ): string {
-    const loadOp = field.type === "f64"
-      ? "f64.load"
-      : field.type === "i64"
-      ? "i64.load"
-      : "i32.load";
+    const loadOp = memLoadOp(field.type);
     const loadWat = `(${loadOp} (i32.add ${baseWat} (i32.const ${field.offset})))`;
     if (defaultExpr !== null) {
       const defWat = this.emitExpr(defaultExpr, locals, field.type);
@@ -5767,11 +5784,7 @@ class WasicTranspiler {
           continue;
         }
       }
-      const storeOp = field.type === "f64"
-        ? "f64.store"
-        : field.type === "i64"
-        ? "i64.store"
-        : "i32.store";
+      const storeOp = memStoreOp(field.type);
       const valWat = this.emitExpr(elem, locals, field.type);
       stmts.push(
         `(${storeOp} offset=${baseOffset + field.offset} (local.get $${basePtr}) ${valWat})`,
@@ -5974,8 +5987,10 @@ class WasicTranspiler {
     let encoded = header;
     for (const elem of elements) {
       const e = elem.trim();
-      if (elemType === "f64" || elemType === "f32") {
+      if (elemType === "f64") {
         encoded += encodeF64LE(parseFloat(e) || 0);
+      } else if (elemType === "f32") {
+        encoded += encodeF32LE(parseFloat(e) || 0); // sw43: 4 bytes, the slot elemSize reserves
       } else if (elemType === "i64") {
         // Simplified: encode as i32 pair (handles values within ±2^31)
         const val = parseInt(e.replace(/n$/, ""), 10) || 0;
@@ -6076,11 +6091,7 @@ class WasicTranspiler {
     const elemSize =
       (info.elemType === "f64" || info.elemType === "i64" || info.elemType === "string") ? 8 : 4;
     const byteSize = capacity * elemSize + 8; // 8-byte header: [length i32][capacity i32]
-    const storeOp = info.elemType === "f64"
-      ? "f64.store"
-      : info.elemType === "i64"
-      ? "i64.store"
-      : "i32.store";
+    const storeOp = memStoreOp(info.elemType);
 
     const getWat = this.arrGetWat(varName);
     const stmts: string[] = [];
@@ -6113,11 +6124,7 @@ class WasicTranspiler {
     const outerCap = Math.max(outerLen * 2, 8);
     const outerSize = outerCap * 4 + 8; // outer elements are i32 ptrs (4 bytes each)
     const elemSize = (info.elemType === "f64" || info.elemType === "i64") ? 8 : 4;
-    const storeOp = info.elemType === "f64"
-      ? "f64.store"
-      : info.elemType === "i64"
-      ? "i64.store"
-      : "i32.store";
+    const storeOp = memStoreOp(info.elemType);
     const stmts: string[] = [];
 
     // Allocate outer array
@@ -6228,11 +6235,7 @@ class WasicTranspiler {
     const restParam = fnDef.params[restIdx];
     const elemType = restParam.arrayElemType ?? "i32";
     const elemSize = (elemType === "f64" || elemType === "i64") ? 8 : 4;
-    const storeOp = elemType === "f64"
-      ? "f64.store"
-      : elemType === "i64"
-      ? "i64.store"
-      : "i32.store";
+    const storeOp = memStoreOp(elemType);
     const len = restArgs.length;
     const capacity = Math.max(len * 2, 8);
     const byteSize = capacity * elemSize + 8;
@@ -8005,7 +8008,54 @@ class WasicTranspiler {
   // -------------------------------------------------------------------------
   // Expression emitter
   // -------------------------------------------------------------------------
+  /**
+   * Every expression, with an f32 value converted at an f32 boundary (2026-10-06, ld18 / sw43).
+   * The emitter's many leaf paths (locals, globals, struct fields, array elements, calls) return
+   * their raw value; none converted an f32, so an f32 in an f64 context (`const a: f64 = z + 1`,
+   * `p.x + 1`) and an f64 in an f32 context were invalid modules. This reads the emitted WAT's
+   * result type from its OUTERMOST form and converts only when exactly one side is f32. In valid
+   * WAT an f32 never meets a non-f32 context, so no currently valid output can change.
+   */
   private emitExpr(
+    raw: string,
+    locals: Map<string, WatType>,
+    defaultType: WatType,
+  ): string {
+    const wat = this.emitExprCore(raw, locals, defaultType);
+    const want = defaultType === "bool" ? "i32" : defaultType;
+    const have = this.watResultType(wat, locals);
+    if (!have || have === want || (have !== "f32" && want !== "f32")) return wat;
+    const CONV: Record<string, string> = {
+      "f32>f64": "f64.promote_f32",
+      "f32>i32": "i32.trunc_f32_s",
+      "f32>i64": "i64.trunc_f32_s",
+      "f64>f32": "f32.demote_f64",
+      "i32>f32": "f32.convert_i32_s",
+      "i64>f32": "f32.convert_i64_s",
+    };
+    const op = CONV[`${have}>${want}`];
+    return op ? `(${op} ${wat})` : wat;
+  }
+
+  /** The numeric result type of an emitted WAT expression, read from its outermost form, or
+   *  undefined when it cannot be told (see emitExpr). */
+  private watResultType(wat: string, locals: Map<string, WatType>): string | undefined {
+    const m = wat.trimStart().match(/^\(([\w.]+)(?:\s+\(result\s+(\w+)\))?(?:\s+\$([\w.$]+))?/);
+    if (!m) return undefined;
+    const [, op, resultAnn, name] = m;
+    const num = (t: string | null | undefined) =>
+      t === "bool" ? "i32" : t && ["i32", "i64", "f32", "f64"].includes(t) ? t : undefined;
+    const typed = op.match(/^(i32|i64|f32|f64)\.(\w+)/);
+    // A comparison yields i32 (`f32.lt`); the WHOLE name, so `f32.neg` / `f64.nearest` stay float.
+    if (typed) return /^(eqz?|ne|lt|gt|le|ge)(_[su])?$/.test(typed[2]) ? "i32" : typed[1];
+    if ((op === "block" || op === "if") && resultAnn) return num(resultAnn);
+    if (op === "local.get" && name) return num(locals.get(name));
+    if (op === "global.get" && name) return num(this.moduleGlobals.get(name)?.type);
+    if (op === "call" && name) return num(this.functions.find((f) => f.name === name)?.result);
+    return undefined;
+  }
+
+  private emitExprCore(
     raw: string,
     locals: Map<string, WatType>,
     defaultType: WatType,
@@ -8396,11 +8446,7 @@ class WasicTranspiler {
           const fieldPtr = `(i32.load (i32.add ${base} (i32.const ${fld.offset})))`;
           const idxWat = this.emitArrayIndex(siM[3], locals);
           const shift = (fld.arrayElemType === "f64" || fld.arrayElemType === "i64") ? 3 : 2;
-          const loadOp = fld.arrayElemType === "f64"
-            ? "f64.load"
-            : fld.arrayElemType === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOp = memLoadOp(fld.arrayElemType);
           return `(${loadOp} (i32.add (i32.add ${fieldPtr} (i32.const 8)) (i32.shl ${idxWat} (i32.const ${shift}))))`;
         }
       }
@@ -8599,11 +8645,7 @@ class WasicTranspiler {
         const rowIdxWat = this.emitExpr(bracket2DMatch[2], locals, "i32");
         const colIdxWat = this.emitExpr(bracket2DMatch[3], locals, "i32");
         const elemType = outerInfo.elemType;
-        const loadOp = elemType === "f64"
-          ? "f64.load"
-          : elemType === "i64"
-          ? "i64.load"
-          : "i32.load";
+        const loadOp = memLoadOp(elemType);
         const shift = (elemType === "f64" || elemType === "i64") ? 3 : 2;
         // Outer array: dynamic; row pointer is stored at outer + 8 + rowIdx * 4
         const rowPtrWat = `(i32.load (i32.add (i32.add (local.get $${
@@ -8668,11 +8710,7 @@ class WasicTranspiler {
       const elemType: WatType = (defaultType === "f64" || defaultType === "i64")
         ? defaultType
         : "i32";
-      const storeOp = elemType === "f64"
-        ? "f64.store"
-        : elemType === "i64"
-        ? "i64.store"
-        : "i32.store";
+      const storeOp = memStoreOp(elemType);
       const elemSize = (elemType === "f64" || elemType === "i64") ? 8 : 4;
       const cap1D = Math.max(elements.length * 2, 8);
       const size1D = cap1D * elemSize + 8;
@@ -8697,11 +8735,7 @@ class WasicTranspiler {
         const fieldIdxTF = parseInt(tupleFieldMatch[2], 10);
         const fieldTF = svTF.def.fields[fieldIdxTF];
         if (fieldTF) {
-          const loadOpTF = fieldTF.type === "f64"
-            ? "f64.load"
-            : fieldTF.type === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOpTF = memLoadOp(fieldTF.type);
           const baseWatTF = svTF.ptr === -1
             ? `(local.get $${tupleFieldMatch[1]})`
             : `(i32.const ${svTF.ptr})`;
@@ -8733,11 +8767,7 @@ class WasicTranspiler {
               : `(i32.const ${arrInfo.ptr})`;
             const ptrWat =
               `(i32.load (i32.add (i32.add ${baseWat} (i32.const 8)) (i32.shl ${idxWat} (i32.const 2))))`;
-            const loadOp = field.type === "f64"
-              ? "f64.load"
-              : field.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const loadOp = memLoadOp(field.type);
             return `(${loadOp} (i32.add ${ptrWat} (i32.const ${field.offset})))`;
           }
         }
@@ -8815,11 +8845,7 @@ class WasicTranspiler {
         const fieldIdx2 = parseInt(bracketMatch[2], 10);
         const field2 = svE.def.fields[fieldIdx2];
         if (field2) {
-          const loadOp2 = field2.type === "f64"
-            ? "f64.load"
-            : field2.type === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOp2 = memLoadOp(field2.type);
           const baseWat2 = svE.ptr === -1
             ? `(local.get $${bracketMatch[1]})`
             : `(i32.const ${svE.ptr})`;
@@ -8831,13 +8857,7 @@ class WasicTranspiler {
         // String array element: 8-byte (ptr,len) elements — return the ptr word only in expr context.
         const isStrElem = arrInfo.isStringArr || arrInfo.elemType === "string";
         // 2D array single-index: loads i32 pointer to the inner row array (always 4-byte i32.load).
-        const loadOp = arrInfo.is2D
-          ? "i32.load"
-          : arrInfo.elemType === "f64"
-          ? "f64.load"
-          : arrInfo.elemType === "i64"
-          ? "i64.load"
-          : "i32.load";
+        const loadOp = arrInfo.is2D ? "i32.load" : memLoadOp(arrInfo.elemType);
         const shift = arrInfo.is2D
           ? 2
           : isStrElem
@@ -9170,11 +9190,7 @@ class WasicTranspiler {
         }
         const field = cd?.struct.fields.find((f) => f.name === dotFieldMatch[1]);
         if (field) {
-          const loadOp = field.type === "f64"
-            ? "f64.load"
-            : field.type === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOp = memLoadOp(field.type);
           return `(${loadOp} (i32.add (local.get $__self) (i32.const ${field.offset})))`;
         }
       }
@@ -9214,11 +9230,7 @@ class WasicTranspiler {
         const cd = this.classDefs.get(cv.className);
         const field = cd?.struct.fields.find((f) => f.name === structFieldMatch[2]);
         if (field) {
-          const loadOp = field.type === "f64"
-            ? "f64.load"
-            : field.type === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOp = memLoadOp(field.type);
           const baseWat = cv.ptr < 0
             ? `(local.get $${structFieldMatch[1]})`
             : `(i32.const ${cv.ptr})`;
@@ -9237,11 +9249,7 @@ class WasicTranspiler {
       if (sv) {
         const field = sv.def.fields.find((f) => f.name === structFieldMatch[2]);
         if (field) {
-          const loadOp = field.type === "f64"
-            ? "f64.load"
-            : field.type === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOp = memLoadOp(field.type);
           const baseWat = sv.ptr < 0
             ? `(local.get $${structFieldMatch[1]})`
             : `(i32.const ${sv.ptr})`;
@@ -9261,11 +9269,7 @@ class WasicTranspiler {
           const innerField = innerDef?.fields.find((f) => f.name === chainedFieldMatch[3]);
           if (innerField) {
             const outerLoadOp = "i32.load";
-            const innerLoadOp = innerField.type === "f64"
-              ? "f64.load"
-              : innerField.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const innerLoadOp = memLoadOp(innerField.type);
             const baseWat = sv.ptr < 0
               ? `(local.get $${chainedFieldMatch[1]})`
               : `(i32.const ${sv.ptr})`;
@@ -9592,11 +9596,7 @@ class WasicTranspiler {
       {
         const ccl = this.currentClosureCaptureLayout.get(expr);
         if (ccl) {
-          const loadOp = ccl.type === "f64"
-            ? "f64.load"
-            : ccl.type === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOp = memLoadOp(ccl.type);
           const rawLoad = `(${loadOp} offset=${ccl.offset} (local.get $__closure_ptr))`;
           if (ccl.type === "f64" && defaultType === "i32") return `(i32.trunc_f64_s ${rawLoad})`;
           if (
@@ -10454,20 +10454,27 @@ class WasicTranspiler {
           return STR_CMP[op] ?? `(i32.eqz ${cmpCall})`;
         }
 
-        const baseType = watBaseType(lhsType);
+        // An f32 operand meeting an f64 (the other operand, or an f64 context) computes in f64, as
+        // TypeScript does: f32 + f64 is an f32 op over an f64 value otherwise (2026-10-06, ld18).
+        const numType: WatType = watBaseType(lhsType) === "f32" &&
+            (watBaseType(defaultType as WatType) === "f64" ||
+              watBaseType(this.inferExprType(rhs, locals)) === "f64")
+          ? "f64"
+          : lhsType;
+        const baseType = watBaseType(numType);
         const isFloat = baseType === "f64" || baseType === "f32";
         const suffix = isFloat ? f64suf : i32suf;
         // f64.rem does not exist in WebAssembly; use x - trunc(x/y)*y formula instead.
         if (op === "%" && isFloat) {
-          const lWat = this.emitExpr(lhs, locals, lhsType);
-          const rWat = this.emitExpr(rhs, locals, lhsType);
+          const lWat = this.emitExpr(lhs, locals, numType);
+          const rWat = this.emitExpr(rhs, locals, numType);
           const innerWat =
             `(${baseType}.sub ${lWat} (${baseType}.mul (${baseType}.trunc (${baseType}.div ${lWat} ${rWat})) ${rWat}))`;
           return innerWat;
         }
         const watOp = `${baseType}.${suffix}`;
-        const innerWat = `(${watOp} ${this.emitExpr(lhs, locals, lhsType)} ${
-          this.emitExpr(rhs, locals, lhsType)
+        const innerWat = `(${watOp} ${this.emitExpr(lhs, locals, numType)} ${
+          this.emitExpr(rhs, locals, numType)
         })`;
         // Mixed-type promotion: if context needs f64/i64 but arithmetic ran in i32, convert.
         // Also applies to alwaysI32 ops (|, ^, &, >>>, etc.) when stored in a f64 variable.
@@ -10488,7 +10495,8 @@ class WasicTranspiler {
           watBaseType(defaultType as WatType) === "i32" &&
           !STRING_CMP_OPS.has(op)
         ) {
-          return `(i32.trunc_f64_s ${innerWat})`;
+          // trunc FROM the operand type: `i32.trunc_f64_s` of an f32 was an invalid module.
+          return `(i32.trunc_${baseType}_s ${innerWat})`;
         }
         return innerWat;
       }
@@ -11074,11 +11082,7 @@ class WasicTranspiler {
                           } (local.get $__nested_ptr) ${lenW})`,
                         );
                       } else {
-                        const nstoreOp = nfield.type === "f64"
-                          ? "f64.store"
-                          : nfield.type === "i64"
-                          ? "i64.store"
-                          : "i32.store";
+                        const nstoreOp = memStoreOp(nfield.type);
                         const nvalWat = this.emitExpr(nvalExpr, locals, nfield.type);
                         stmts.push(
                           `(${nstoreOp} offset=${nfield.offset} (local.get $__nested_ptr) ${nvalWat})`,
@@ -11097,11 +11101,7 @@ class WasicTranspiler {
                 stmts.push(`(i32.store offset=${field.offset} (local.get $__obj_ret) ${ptrW})`);
                 stmts.push(`(i32.store offset=${field.offset + 4} (local.get $__obj_ret) ${lenW})`);
               } else {
-                const storeOp = field.type === "f64"
-                  ? "f64.store"
-                  : field.type === "i64"
-                  ? "i64.store"
-                  : "i32.store";
+                const storeOp = memStoreOp(field.type);
                 const valWat = this.emitExpr(valExpr, locals, field.type);
                 stmts.push(`(${storeOp} offset=${field.offset} (local.get $__obj_ret) ${valWat})`);
               }
@@ -11123,11 +11123,7 @@ class WasicTranspiler {
           for (let i = 0; i < tupleElems.length; i++) {
             const field = tupleDef.fields[i];
             if (!field) continue;
-            const storeOp = field.type === "f64"
-              ? "f64.store"
-              : field.type === "i64"
-              ? "i64.store"
-              : "i32.store";
+            const storeOp = memStoreOp(field.type);
             const valWat = this.emitExpr(tupleElems[i].trim(), locals, field.type);
             stmtsR.push(`(${storeOp} offset=${field.offset} (local.get $__obj_ret) ${valWat})`);
           }
@@ -11308,16 +11304,8 @@ class WasicTranspiler {
       const srcInfo = this.arrayVars.get(srcName);
       if (srcInfo) {
         const elemType = srcInfo.elemType;
-        const loadOp = elemType === "f64"
-          ? "f64.load"
-          : elemType === "i64"
-          ? "i64.load"
-          : "i32.load";
-        const storeOp = elemType === "f64"
-          ? "f64.store"
-          : elemType === "i64"
-          ? "i64.store"
-          : "i32.store";
+        const loadOp = memLoadOp(elemType);
+        const storeOp = memStoreOp(elemType);
         const shift = (elemType === "f64" || elemType === "i64") ? 3 : 2;
         const elemSize = (elemType === "f64" || elemType === "i64") ? 8 : 4;
         const watType = elemType === "f64" ? "f64" : elemType === "i64" ? "i64" : "i32";
@@ -11529,11 +11517,7 @@ class WasicTranspiler {
         for (let i = 0; i < elems4.length; i++) {
           const field = sv.def.fields[i];
           if (!field) continue;
-          const storeOp = field.type === "f64"
-            ? "f64.store"
-            : field.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const storeOp = memStoreOp(field.type);
           stmtsN.push(
             `(${storeOp} offset=${field.offset} (local.get $${namedTupleLitStmt[1]}) ${
               this.emitExpr(elems4[i].trim(), locals, field.type)
@@ -11590,11 +11574,7 @@ class WasicTranspiler {
               if (b === "" || b.startsWith("...")) continue;
               const tf = tdef.fields[i];
               if (!tf) continue;
-              const loadOp = tf.type === "f64"
-                ? "f64.load"
-                : tf.type === "i64"
-                ? "i64.load"
-                : "i32.load";
+              const loadOp = memLoadOp(tf.type);
               stmts.push(
                 `(local.set $${b} (${loadOp} offset=${cf.offset + tf.offset} ${baseWat}))`,
               );
@@ -11651,11 +11631,7 @@ class WasicTranspiler {
           for (const [fieldName, exprStr] of Object.entries(runtimeInits)) {
             const field = sv.def.fields.find((f) => f.name === fieldName);
             if (field) {
-              const storeOp = field.type === "f64"
-                ? "f64.store"
-                : field.type === "i64"
-                ? "i64.store"
-                : "i32.store";
+              const storeOp = memStoreOp(field.type);
               const valWat = this.emitExpr(exprStr, locals, field.type);
               stmts.push(`(${storeOp} offset=${field.offset} (i32.const ${sv.ptr}) ${valWat})`);
             }
@@ -11675,11 +11651,7 @@ class WasicTranspiler {
           for (const [fieldName, exprStr] of Object.entries(runtimeInits)) {
             const field = sv.def.fields.find((f) => f.name === fieldName);
             if (field) {
-              const storeOp = field.type === "f64"
-                ? "f64.store"
-                : field.type === "i64"
-                ? "i64.store"
-                : "i32.store";
+              const storeOp = memStoreOp(field.type);
               const valWat = this.emitExpr(exprStr, locals, field.type);
               stmts.push(
                 `(${storeOp} offset=${field.offset} (local.get $${structLetMatch[1]}) ${valWat})`,
@@ -11697,11 +11669,7 @@ class WasicTranspiler {
           const valStr2 = im2[2].trim();
           const field2 = sv.def.fields.find((f) => f.name === fieldKey2);
           if (field2) {
-            const storeOp2 = field2.type === "f64"
-              ? "f64.store"
-              : field2.type === "i64"
-              ? "i64.store"
-              : "i32.store";
+            const storeOp2 = memStoreOp(field2.type);
             const valWat2 = this.emitExpr(valStr2, locals, field2.type);
             stmts.push(
               `(${storeOp2} offset=${field2.offset} (local.get $${structLetMatch[1]}) ${valWat2})`,
@@ -11996,16 +11964,8 @@ class WasicTranspiler {
       {
         const ccl = this.currentClosureCaptureLayout.get(varName);
         if (ccl) {
-          const cLoadOp = ccl.type === "f64"
-            ? "f64.load"
-            : ccl.type === "i64"
-            ? "i64.load"
-            : "i32.load";
-          const cStoreOp = ccl.type === "f64"
-            ? "f64.store"
-            : ccl.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const cLoadOp = memLoadOp(ccl.type);
+          const cStoreOp = memStoreOp(ccl.type);
           const cGet = `(${cLoadOp} offset=${ccl.offset} (local.get $__closure_ptr))`;
           const cRhs = this.emitExpr(rhs, locals, ccl.type);
           const cArith = (op === "%=" && (ccl.type === "f64" || ccl.type === "f32"))
@@ -12050,22 +12010,14 @@ class WasicTranspiler {
             const parts: string[] = [];
             for (let i = 0; i < tdef.fields.length && i < elems.length; i++) {
               const tf = tdef.fields[i];
-              const sop = tf.type === "f64"
-                ? "f64.store"
-                : tf.type === "i64"
-                ? "i64.store"
-                : "i32.store";
+              const sop = memStoreOp(tf.type);
               const vw = this.emitExpr(elems[i], locals, tf.type);
               parts.push(`(${sop} offset=${field.offset + tf.offset} (local.get $__self) ${vw})`);
             }
             return parts.join("\n      ");
           }
         }
-        const storeOp = field.type === "f64"
-          ? "f64.store"
-          : field.type === "i64"
-          ? "i64.store"
-          : "i32.store";
+        const storeOp = memStoreOp(field.type);
         const valWat = this.emitExpr(thisWriteMatch[2], locals, field.type);
         return `(${storeOp} (i32.add (local.get $__self) (i32.const ${field.offset})) ${valWat})`;
       }
@@ -12133,11 +12085,7 @@ class WasicTranspiler {
               `Cannot assign to readonly field '${structWriteMatch[2]}' of '${wCv.className}'`,
             );
           }
-          const storeOp = wField.type === "f64"
-            ? "f64.store"
-            : wField.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const storeOp = memStoreOp(wField.type);
           const baseWat = wCv.ptr === -1
             ? `(local.get $${structWriteMatch[1]})`
             : `(i32.const ${wCv.ptr})`;
@@ -12167,11 +12115,7 @@ class WasicTranspiler {
               `Cannot assign to readonly field '${structWriteMatch[2]}' of struct '${sv.def.name}'`,
             );
           }
-          const storeOp = field.type === "f64"
-            ? "f64.store"
-            : field.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const storeOp = memStoreOp(field.type);
           const baseWat = sv.ptr < 0
             ? `(local.get $${structWriteMatch[1]})`
             : `(i32.const ${sv.ptr})`;
@@ -12489,11 +12433,7 @@ class WasicTranspiler {
               : `(i32.const ${arrInfo.ptr})`;
             const ptrWat =
               `(i32.load (i32.add (i32.add ${baseWat} (i32.const 8)) (i32.shl ${idxWat} (i32.const 2))))`;
-            const storeOp = field.type === "f64"
-              ? "f64.store"
-              : field.type === "i64"
-              ? "i64.store"
-              : "i32.store";
+            const storeOp = memStoreOp(field.type);
             const valWat = this.emitExpr(valExpr.trim(), locals, field.type as WatType);
             return `(${storeOp} (i32.add ${ptrWat} (i32.const ${field.offset})) ${valWat})`;
           }
@@ -12509,11 +12449,7 @@ class WasicTranspiler {
         const fieldIdx = parseInt(arrWriteMatch[2], 10);
         const field = svW.def.fields[fieldIdx];
         if (field) {
-          const storeOp = field.type === "f64"
-            ? "f64.store"
-            : field.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const storeOp = memStoreOp(field.type);
           const baseWat = svW.ptr === -1
             ? `(local.get $${arrWriteMatch[1]})`
             : `(i32.const ${svW.ptr})`;
@@ -12528,11 +12464,7 @@ class WasicTranspiler {
           const [rowRaw, colRaw] = arrWriteMatch[2].split("][");
           const rowIdxWat = this.emitArrayIndex(rowRaw, locals);
           const colIdxWat = this.emitArrayIndex(colRaw, locals);
-          const storeOp2D = arrInfo.elemType === "f64"
-            ? "f64.store"
-            : arrInfo.elemType === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const storeOp2D = memStoreOp(arrInfo.elemType);
           const shift2D = (arrInfo.elemType === "f64" || arrInfo.elemType === "i64") ? 3 : 2;
           const rowPtrWat = `(i32.load (i32.add (i32.add ${
             this.arrGetWat(arrWriteMatch[1])
@@ -12552,11 +12484,7 @@ class WasicTranspiler {
           const [ptrWat, lenWat] = splitTwoWatExprs(ptrLen);
           return `(i32.store ${elemAddrWat} ${ptrWat})\n      (i32.store offset=4 ${elemAddrWat} ${lenWat})`;
         }
-        const storeOp = arrInfo.elemType === "f64"
-          ? "f64.store"
-          : arrInfo.elemType === "i64"
-          ? "i64.store"
-          : "i32.store";
+        const storeOp = memStoreOp(arrInfo.elemType);
         const shift = (arrInfo.elemType === "f64" || arrInfo.elemType === "i64") ? 3 : 2;
         const idxWat = this.emitArrayIndex(arrWriteMatch[2], locals);
         // Phase 19: struct literal RHS — allocate in static data section and store its pointer
@@ -12636,11 +12564,7 @@ class WasicTranspiler {
       {
         const ccl = this.currentClosureCaptureLayout.get(varName);
         if (ccl) {
-          const storeOp = ccl.type === "f64"
-            ? "f64.store"
-            : ccl.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const storeOp = memStoreOp(ccl.type);
           return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) ${
             this.emitExpr(assignMatch[2].trim(), locals, ccl.type)
           })`;
@@ -12740,11 +12664,7 @@ class WasicTranspiler {
             const field = structDef.fields[fi];
             if (fi > 0) segments.push({ kind: "literal", text: ", " });
             segments.push({ kind: "literal", text: `${field.name}: ` });
-            const loadOp = field.type === "f64"
-              ? "f64.load"
-              : field.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const loadOp = memLoadOp(field.type);
             const kind = field.type === "f64"
               ? "f64expr" as const
               : field.type === "i64"
@@ -12938,11 +12858,7 @@ class WasicTranspiler {
           const cd = this.classDefs.get(this.currentMethodClass);
           const f = cd?.struct.fields.find((fi) => fi.name === fn);
           if (f) {
-            const loadOp = f.type === "f64"
-              ? "f64.load"
-              : f.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const loadOp = memLoadOp(f.type);
             return {
               type: f.type,
               watLoad: `(${loadOp} (i32.add (local.get $__self) (i32.const ${f.offset})))`,
@@ -12985,11 +12901,7 @@ class WasicTranspiler {
                     watLoadLen: `(i32.load offset=${innerField.offset + 4} ${outerPtrWat})`,
                   };
                 }
-                const innerLoadOp = innerField.type === "f64"
-                  ? "f64.load"
-                  : innerField.type === "i64"
-                  ? "i64.load"
-                  : "i32.load";
+                const innerLoadOp = memLoadOp(innerField.type);
                 return {
                   type: innerField.type,
                   watLoad:
@@ -13025,11 +12937,7 @@ class WasicTranspiler {
                   watLoadLen: `(i32.load offset=${field.offset + 4} ${ptrWat})`,
                 };
               }
-              const loadOp = field.type === "f64"
-                ? "f64.load"
-                : field.type === "i64"
-                ? "i64.load"
-                : "i32.load";
+              const loadOp = memLoadOp(field.type);
               return {
                 type: field.type,
                 watLoad: `(${loadOp} (i32.add ${ptrWat} (i32.const ${field.offset})))`,
@@ -13052,11 +12960,7 @@ class WasicTranspiler {
                 watLoadLen: `(i32.load offset=${f.offset + 4} ${baseWat})`,
               };
             }
-            const loadOp = f.type === "f64"
-              ? "f64.load"
-              : f.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const loadOp = memLoadOp(f.type);
             const baseWat = cv.ptr < 0 ? `(local.get $${vn})` : `(i32.const ${cv.ptr})`;
             return {
               type: f.type,
@@ -13118,7 +13022,7 @@ class WasicTranspiler {
             watLoadLen: `(i32.load offset=${f.offset + 4} ${baseWat})`,
           };
         }
-        const loadOp = f.type === "f64" ? "f64.load" : f.type === "i64" ? "i64.load" : "i32.load";
+        const loadOp = memLoadOp(f.type);
         const baseWat = sv.ptr < 0 ? `(local.get $${vn})` : `(i32.const ${sv.ptr})`;
         return {
           type: f.type,
@@ -13408,11 +13312,7 @@ class WasicTranspiler {
           const cd = this.classDefs.get(this.currentMethodClass);
           const f = cd?.struct.fields.find((fi) => fi.name === fn);
           if (f) {
-            const loadOp = f.type === "f64"
-              ? "f64.load"
-              : f.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const loadOp = memLoadOp(f.type);
             return {
               type: f.type,
               watLoad: `(${loadOp} (i32.add (local.get $__self) (i32.const ${f.offset})))`,
@@ -13455,11 +13355,7 @@ class WasicTranspiler {
                     watLoadLen: `(i32.load offset=${innerField.offset + 4} ${outerPtrWat})`,
                   };
                 }
-                const innerLoadOp = innerField.type === "f64"
-                  ? "f64.load"
-                  : innerField.type === "i64"
-                  ? "i64.load"
-                  : "i32.load";
+                const innerLoadOp = memLoadOp(innerField.type);
                 return {
                   type: innerField.type,
                   watLoad:
@@ -13494,11 +13390,7 @@ class WasicTranspiler {
                   watLoadLen: `(i32.load offset=${field.offset + 4} ${ptrWat})`,
                 };
               }
-              const loadOp = field.type === "f64"
-                ? "f64.load"
-                : field.type === "i64"
-                ? "i64.load"
-                : "i32.load";
+              const loadOp = memLoadOp(field.type);
               return {
                 type: field.type,
                 watLoad: `(${loadOp} (i32.add ${ptrWat} (i32.const ${field.offset})))`,
@@ -13521,11 +13413,7 @@ class WasicTranspiler {
                 watLoadLen: `(i32.load offset=${f.offset + 4} ${baseWat})`,
               };
             }
-            const loadOp = f.type === "f64"
-              ? "f64.load"
-              : f.type === "i64"
-              ? "i64.load"
-              : "i32.load";
+            const loadOp = memLoadOp(f.type);
             const baseWat = cv.ptr < 0 ? `(local.get $${vn})` : `(i32.const ${cv.ptr})`;
             return {
               type: f.type,
@@ -13587,7 +13475,7 @@ class WasicTranspiler {
             watLoadLen: `(i32.load offset=${f.offset + 4} ${baseWat})`,
           };
         }
-        const loadOp = f.type === "f64" ? "f64.load" : f.type === "i64" ? "i64.load" : "i32.load";
+        const loadOp = memLoadOp(f.type);
         const baseWat = sv.ptr < 0 ? `(local.get $${vn})` : `(i32.const ${sv.ptr})`;
         return {
           type: f.type,
@@ -13863,16 +13751,8 @@ class WasicTranspiler {
       {
         const ccl = this.currentClosureCaptureLayout.get(v);
         if (ccl) {
-          const loadOp = ccl.type === "f64"
-            ? "f64.load"
-            : ccl.type === "i64"
-            ? "i64.load"
-            : "i32.load";
-          const storeOp = ccl.type === "f64"
-            ? "f64.store"
-            : ccl.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const loadOp = memLoadOp(ccl.type);
+          const storeOp = memStoreOp(ccl.type);
           const addOp = ccl.type === "f64" ? "f64.add" : ccl.type === "i64" ? "i64.add" : "i32.add";
           const one = ccl.type === "f64"
             ? "f64.const 1"
@@ -13899,16 +13779,8 @@ class WasicTranspiler {
       {
         const ccl = this.currentClosureCaptureLayout.get(v);
         if (ccl) {
-          const loadOp = ccl.type === "f64"
-            ? "f64.load"
-            : ccl.type === "i64"
-            ? "i64.load"
-            : "i32.load";
-          const storeOp = ccl.type === "f64"
-            ? "f64.store"
-            : ccl.type === "i64"
-            ? "i64.store"
-            : "i32.store";
+          const loadOp = memLoadOp(ccl.type);
+          const storeOp = memStoreOp(ccl.type);
           const subOp = ccl.type === "f64" ? "f64.sub" : ccl.type === "i64" ? "i64.sub" : "i32.sub";
           const one = ccl.type === "f64"
             ? "f64.const 1"
@@ -14684,11 +14556,7 @@ class WasicTranspiler {
             continue;
           }
 
-          const loadOp = elemType === "f64"
-            ? "f64.load"
-            : elemType === "i64"
-            ? "i64.load"
-            : "i32.load";
+          const loadOp = memLoadOp(elemType);
           const shift = (elemType === "f64" || elemType === "i64") ? 3 : 2;
 
           const lbl = this.pendingLabel ?? String(this.loopCounter++);
@@ -14713,13 +14581,13 @@ class WasicTranspiler {
               `(${loadOp} (i32.add (i32.add (local.get $${arrName}) (i32.const 8)) (i32.shl (local.get ${idxVar}) (i32.const ${shift}))))`;
             lenWat = `(i32.load (local.get $${arrName}))`;
           } else if (arrInfo.ptr === -1) {
-            // Array parameter (runtime pointer, no header): elements start directly at ptr
-            // Length is not stored — length must be passed separately; default to 0 if unknown
+            // Array parameter: a runtime pointer to the SAME layout as every other array, the
+            // 8-byte [length, capacity] header then the data (as arr[i] reads it). This branch read
+            // from ptr itself, so the header was iterated as elements: the sum of an i32[] param
+            // [1, 2, 3] was 7 (sw45, found fixing sw43, 2026-10-06; the same on main).
             elemLoadWat =
-              `(${loadOp} (i32.add (local.get $${arrName}) (i32.shl (local.get ${idxVar}) (i32.const ${shift}))))`;
-            lenWat = arrInfo.length > 0
-              ? `(i32.const ${arrInfo.length})`
-              : `(i32.load (local.get $${arrName}))`;
+              `(${loadOp} (i32.add (i32.add (local.get $${arrName}) (i32.const 8)) (i32.shl (local.get ${idxVar}) (i32.const ${shift}))))`;
+            lenWat = `(i32.load (local.get $${arrName}))`;
           } else {
             // Static array: compile-time address, known length. Elements start at ptr + 8
             // (past the 8-byte [length, capacity] header) — mirrors the arr[i] path (~line 6662).
@@ -16224,9 +16092,11 @@ ${sum}
       const [method, elemType] = key.split("_") as [string, WatType];
       const isF64 = elemType === "f64";
       const shift = isF64 ? 3 : 2;
-      const loadOp = isF64 ? "f64.load" : "i32.load";
-      const storeOp = isF64 ? "f64.store" : "i32.store";
-      const valType = isF64 ? "f64" : "i32";
+      // f32 elements are 4-byte FLOATS: f32 ops and an f32 value type. They were i32 here, so
+      // `ys.push(1.5)` on an f32[] passed an f32 to an i32 parameter (2026-10-06, with sw43).
+      const valType = isF64 ? "f64" : elemType === "f32" ? "f32" : "i32";
+      const loadOp = `${valType}.load`;
+      const storeOp = `${valType}.store`;
       const name = `$__dynarr_${key}`;
 
       if (method === "push" && key !== "push_string") {
@@ -16329,7 +16199,7 @@ ${sum}
   )`,
         );
       } else if (method === "indexof") {
-        const cmpOp = isF64 ? "f64.eq" : "i32.eq";
+        const cmpOp = `${valType}.eq`;
         parts.push(`  ;; Dynamic array indexof_${elemType}: linear search, returns index or -1.
   (func ${name} (param $arr i32) (param $val ${valType}) (result i32)
     (local $i i32)
@@ -16498,10 +16368,10 @@ ${sum}
       } else if (method === "find") {
         // Register callback type: (elemType) → i32
         const ftName = this.getOrCreateFuncType([elemType], "i32");
-        const notFound = isF64 ? "(f64.const nan)" : "(i32.const -1)";
+        const notFound = valType === "i32" ? "(i32.const -1)" : `(${valType}.const nan)`;
         parts.push(
           `  ;; Dynamic array find_${elemType}: return first elem where fn(elem) is truthy, or ${
-            isF64 ? "NaN" : "-1"
+            valType === "i32" ? "-1" : "NaN"
           }.
   (func ${name} (param $arr i32) (param $fn i32) (result ${valType})
     (local $i i32)
@@ -16720,7 +16590,7 @@ ${sum}
   )`,
         );
       } else if (method === "sort" && key !== "sort_string") {
-        const cmpOp = isF64 ? "f64.gt" : "i32.gt_s";
+        const cmpOp = valType === "i32" ? "i32.gt_s" : `${valType}.gt`;
         parts.push(
           `  ;; Dynamic array sort_${elemType}: in-place insertion sort (ascending), returns arr ptr.
   (func ${name} (param $arr i32) (result i32)
@@ -16814,8 +16684,8 @@ ${sum}
       } else if (method === "flat") {
         // Outer array holds i32 pointers (shift=2) to inner arrays of elemType.
         const innerShift = isF64 ? 3 : 2;
-        const innerLoadOp = isF64 ? "f64.load" : "i32.load";
-        const innerStoreOp = isF64 ? "f64.store" : "i32.store";
+        const innerLoadOp = loadOp;
+        const innerStoreOp = storeOp;
         parts.push(
           `  ;; Dynamic array flat_${elemType}: one-level flatten of 2D array (outer=i32 ptrs, inner=${elemType}).
   (func ${name} (param $arr i32) (result i32)
@@ -16879,8 +16749,8 @@ ${sum}
         // fn: (elemType) → i32  (i32 = ptr to inner array of elemType)
         const ftName = this.getOrCreateFuncType([elemType], "i32");
         const innerShift = isF64 ? 3 : 2;
-        const innerLoadOp = isF64 ? "f64.load" : "i32.load";
-        const innerStoreOp = isF64 ? "f64.store" : "i32.store";
+        const innerLoadOp = loadOp;
+        const innerStoreOp = storeOp;
         parts.push(
           `  ;; Dynamic array flatmap_${elemType}: map each elem to inner array via fn, then flatten.
   (func ${name} (param $arr i32) (param $fn i32) (result i32)
@@ -19195,7 +19065,7 @@ ${sum}
     factoryLines.push(`    (local.set $__closure_ptr (call $__malloc (i32.const ${structSize})))`);
     factoryLines.push(`    (i32.store (local.get $__closure_ptr) (i32.const ${tableIdx}))`);
     for (const { name, type, offset } of captureLayout) {
-      const storeOp = type === "f64" ? "f64.store" : type === "i64" ? "i64.store" : "i32.store";
+      const storeOp = memStoreOp(type);
       factoryLines.push(
         `    (${storeOp} offset=${offset} (local.get $__closure_ptr) (local.get $${name}))`,
       );
@@ -19232,7 +19102,7 @@ ${sum}
         trampolineLines.push(`    (local $__cap_${name} ${watBaseType(type)})`);
       }
       for (const { name, type, offset } of immutableLayout) {
-        const loadOp = type === "f64" ? "f64.load" : type === "i64" ? "i64.load" : "i32.load";
+        const loadOp = memLoadOp(type);
         trampolineLines.push(
           `    (local.set $__cap_${name} (${loadOp} offset=${offset} (local.get $__closure_ptr)))`,
         );
@@ -19249,7 +19119,7 @@ ${sum}
         trampolineLines.push(`    (local $__cap_${name} ${watBaseType(type)})`);
       }
       for (const { name, type, offset } of captureLayout) {
-        const loadOp = type === "f64" ? "f64.load" : type === "i64" ? "i64.load" : "i32.load";
+        const loadOp = memLoadOp(type);
         trampolineLines.push(
           `    (local.set $__cap_${name} (${loadOp} offset=${offset} (local.get $__closure_ptr)))`,
         );

@@ -280,6 +280,11 @@ high-value subset.
   - **A `Math` result in an integer or f32 context is converted like any f64 there** (2026-10-06):
     `trunc_f64_s` into i32 / i64 (it traps out of range or on NaN), `demote` into f32. One
     convention for every site; changing it is decision D3 in wasm-math-plan.md.
+  - **An f32 is converted at every f32 boundary, by ONE rule** (2026-10-06, ld18 / sw43):
+    `emitExpr` wraps the emitter, reads the emitted WAT's result type from its outermost form
+    (`watResultType`) and converts when exactly one side is f32. A new leaf path need not know
+    about f32. Memory access goes through `memLoadOp` / `memStoreOp` (console_log has a local
+    twin): an inline `=== "f64" ? … : "i32.load"` chain is how f32 got lost 64 times.
   - **Console formatting is not string conversion** (2026-10-06, sw41): a WHOLE numeric
     `console.log` argument prints −0 as `-0` (`$__f64_to_str_console`); a template, a top-level
     string concatenation and `String(x)` are string conversion and print `0`, as JavaScript does.
