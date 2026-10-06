@@ -112,6 +112,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-06, f32 in containers + for-of over array params (sw43, ld18, sw45), full gate
+> green.** wasi **438/438** (+`9_F32Containers`) · golden-WAT **495 / 0**: ZERO existing entries
+> changed (every rewrite touches only f32 or a for-of over a parameter, and the corpus has
+> neither), +1 new · engine 1152 on baseline · wast 64,506 / 0 / 16 · Go 7/7/12 · every other
+> suite as before. Round-1 repros: 21 DIFFER = open silent 21; 15 + 2 = open loud 17.
+>
 > **2026-10-06, console number printing (sw41, sw42, ld16, ld17), full gate green.** wasi
 > **437/437** (+`7b_ConsoleNumberFormatting`) · golden-WAT **494 / 0** after a deliberate
 > re-record: 146 entries changed, 0 lines removed once `$__f64_to_str_console` is read as
