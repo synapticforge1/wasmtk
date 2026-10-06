@@ -443,15 +443,24 @@ export type ClosureVarLookup = (name: string) => {
   funcType: string; // e.g. "$ftype_i32_r_f64"
 } | undefined;
 
+/** An f32 value at the f64 printer: promoted. Every producer of an `f64expr` segment whose
+ *  source type may be f32 goes through this; the raw f32 was an invalid module (ld17,
+ *  2026-10-06). */
+function promoteF32(wat: string, type: string | null | undefined): string {
+  return type === "f32" ? `(f64.promote_f32 ${wat})` : wat;
+}
+
 /** A parsed fragment of a console.log argument list. */
 export type LogSegment =
   | { kind: "literal"; text: string } // static string (embedded in data section)
   | { kind: "i32var"; name: string } // local i32 variable
   | { kind: "i64var"; name: string } // local i64 variable
-  | { kind: "f64var"; name: string } // local f64 variable
+  // `console`: a WHOLE console argument, printed with console.log's formatting (−0 as `-0`), not
+  // string conversion (`${-0}` is `0`). Set by parseConsoleLogArgs only (sw41, 2026-10-06).
+  | { kind: "f64var"; name: string; console?: boolean } // local f64 variable
   | { kind: "i32expr"; wat: string } // arbitrary WAT expression yielding i32
   | { kind: "i64expr"; wat: string } // arbitrary WAT expression yielding i64
-  | { kind: "f64expr"; wat: string } // arbitrary WAT expression yielding f64
+  | { kind: "f64expr"; wat: string; console?: boolean } // arbitrary WAT expression yielding f64
   | { kind: "strvar"; ptrLocal: string; lenLocal: string } // string variable (ptr + len i32 locals)
   | { kind: "boolvar"; name: string } // bool-typed local (i32, 0=false 1=true)
   | { kind: "boolexpr"; wat: string } // arbitrary WAT expression yielding bool i32
@@ -789,7 +798,9 @@ function parseSingleArg(
       }
       const wat = `(global.get $${token})`;
       if (gType === "i64") return [{ kind: "i64expr", wat }];
-      if (gType === "f64" || gType === "f32") return [{ kind: "f64expr", wat }];
+      if (gType === "f64") return [{ kind: "f64expr", wat }];
+      // An f32 reaches the f64 printer PROMOTED: the raw f32 was an invalid module (ld17).
+      if (gType === "f32") return [{ kind: "f64expr", wat: `(f64.promote_f32 ${wat})` }];
       return [{ kind: "i32expr", wat }];
     }
     const wtype = locals.get(token);
@@ -799,7 +810,11 @@ function parseSingleArg(
     if (wtype === "i64") return [{ kind: "i64var", name: token }];
     if (wtype === "i32") return [{ kind: "i32var", name: token }];
     if (wtype === "bool") return [{ kind: "boolvar", name: token }];
-    if (wtype === "f32" || wtype === "f64") return [{ kind: "f64var", name: token }];
+    if (wtype === "f64") return [{ kind: "f64var", name: token }];
+    // ld17 (2026-10-06): an f32 local was printed as an f64var, `$__f64_to_str` of an f32.
+    if (wtype === "f32") {
+      return [{ kind: "f64expr", wat: `(f64.promote_f32 (local.get $${token}))` }];
+    }
     // Unknown type — treat as i32 (safest default for integer expressions)
     return [{ kind: "i32var", name: token }];
   }
@@ -846,7 +861,7 @@ function parseSingleArg(
         : fi.type === "bool"
         ? "boolexpr" as const
         : "i32expr" as const;
-      return [{ kind, wat: fi.watLoad }];
+      return [{ kind, wat: promoteF32(fi.watLoad, fi.type) }];
     }
   }
 
@@ -866,7 +881,7 @@ function parseSingleArg(
         : fi.type === "bool"
         ? "boolexpr" as const
         : "i32expr" as const;
-      return [{ kind, wat: fi.watLoad }];
+      return [{ kind, wat: promoteF32(fi.watLoad, fi.type) }];
     }
   }
 
@@ -889,7 +904,7 @@ function parseSingleArg(
         : fi.type === "bool"
         ? "boolexpr" as const
         : "i32expr" as const;
-      return [{ kind, wat: fi.watLoad }];
+      return [{ kind, wat: promoteF32(fi.watLoad, fi.type) }];
     }
   }
 
@@ -908,6 +923,24 @@ function parseSingleArg(
     if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
   }
 
+  // ── `String(x)`: wasic's string conversion (emitStringPtrLen / emitStringAssign own it). The
+  // generic call path below took it for a user function and emitted `call $String`, an undefined
+  // function (ld16, 2026-10-06). What the resolver cannot build is a diagnostic, never `""`.
+  {
+    const strM = token.match(/^String\s*\(([\s\S]*)\)$/);
+    // `String(<string local>)` is left to the pass-through below, which prints the string as is.
+    // That includes a CATCH variable, which wasic stores as its message: whether `String(e)`
+    // should prefix `Error: ` depends on what was thrown, which wasic does not track (sw44).
+    const strLocal = /^\w+$/.test(strM?.[1]?.trim() ?? "") &&
+      locals.get(strM![1].trim()) === "string";
+    if (strM && !strLocal && parenDepthNeverNegative(strM[1])) {
+      const r = _stringExprResolver?.(token, locals);
+      if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+      _diagnosticSink?.(`console argument: cannot convert '${token.slice(0, 60)}' to a string.`);
+      return [{ kind: "literal", text: "" }];
+    }
+  }
+
   // ── Chained `new ClassName(...).method(...)` (possibly inside a binary op): route through
   // dotCallLookup, which delegates to wasic's emitExpr (it owns the new+method-chain handler and the
   // binary-op loop). Returns undefined for anything emitExpr can't resolve, so it's safe.
@@ -921,7 +954,7 @@ function parseSingleArg(
         : r.type === "bool"
         ? "boolexpr" as const
         : "i32expr" as const;
-      return [{ kind: k, wat: r.wat }];
+      return [{ kind: k, wat: promoteF32(r.wat, r.type) }];
     }
   }
 
@@ -940,7 +973,7 @@ function parseSingleArg(
         : result.type === "bool"
         ? "boolexpr" as const
         : "i32expr" as const;
-      return [{ kind, wat: result.wat }];
+      return [{ kind, wat: promoteF32(result.wat, result.type) }];
     }
   }
 
@@ -994,7 +1027,7 @@ function parseSingleArg(
             : innerResult === "i64"
             ? "i64expr" as const
             : "i32expr" as const;
-          return [{ kind, wat }];
+          return [{ kind, wat: promoteF32(wat, innerResult) }];
         }
       }
     }
@@ -1123,7 +1156,8 @@ function parseSingleArg(
       const wat =
         `(call_indirect (type ${closureSig.funcType}) (local.get $${callee})${argsPart} (i32.load (local.get $${callee})))`;
       const result = closureSig.result;
-      if (result === "f64" || result === "f32") return [{ kind: "f64expr", wat }];
+      if (result === "f64") return [{ kind: "f64expr", wat }];
+      if (result === "f32") return [{ kind: "f64expr", wat: `(f64.promote_f32 ${wat})` }]; // ld17
       if (result === "i64") return [{ kind: "i64expr", wat }];
       if (result === "bool") return [{ kind: "boolexpr", wat }];
       if (result === "string") return [{ kind: "strcall" as const, callWat: wat }];
@@ -1214,7 +1248,8 @@ function parseSingleArg(
     const retType = (sig as { result?: string } | undefined)?.result;
     if (retType === "bool") return [{ kind: "boolexpr", wat }];
     if (retType === "i64") return [{ kind: "i64expr", wat }];
-    if (retType === "f64" || retType === "f32") return [{ kind: "f64expr", wat }];
+    if (retType === "f64") return [{ kind: "f64expr", wat }];
+    if (retType === "f32") return [{ kind: "f64expr", wat: `(f64.promote_f32 ${wat})` }]; // ld17
     if (retType === "string") return [{ kind: "strcall" as const, callWat: wat }];
     return [{ kind: "i32expr", wat }];
   }
@@ -1272,7 +1307,7 @@ function parseSingleArg(
         : a2.elemType === "i64"
         ? "i64expr" as const
         : "i32expr" as const;
-      return [{ kind, wat }];
+      return [{ kind, wat: promoteF32(wat, a2.elemType) }];
     }
   }
   let bracketMatch = token.match(/^(\w+)\[(.+)\]$/);
@@ -1286,7 +1321,7 @@ function parseSingleArg(
         : fi.type === "i64"
         ? "i64expr" as const
         : "i32expr" as const;
-      return [{ kind, wat: fi.watLoad }];
+      return [{ kind, wat: promoteF32(fi.watLoad, fi.type) }];
     }
   }
   if (bracketMatch && arrayLookup) {
@@ -1435,7 +1470,7 @@ function parseSingleArg(
     if (nw !== undefined) {
       return [{
         kind: nw.type === "f64" || nw.type === "f32" ? "f64expr" : "i32expr",
-        wat: nw.wat,
+        wat: promoteF32(nw.wat, nw.type),
       }];
     }
   }
@@ -2827,6 +2862,29 @@ function isWholeStringLiteral(token: string, q: string): boolean {
   return true;
 }
 
+/** The f64 printer for a numeric segment: `$__f64_to_str_console` (−0 as `-0`, wasic's
+ *  emitMathHelpers) for a whole console argument, else `$__f64_to_str` (string conversion). */
+function f64Printer(seg: LogSegment): string {
+  return "console" in seg && seg.console ? "$__f64_to_str_console" : "$__f64_to_str";
+}
+
+/** True if `s` has a string or template literal at top level (outside brackets): `"x" + n` does,
+ *  `f("x")` does not. Used to tell a string concatenation from a numeric argument (sw41). */
+function hasTopLevelQuote(s: string): boolean {
+  const inStr = literalMask(s);
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (inStr[i]) {
+      if (depth === 0) return true;
+      continue; // literal content counts toward neither depth nor a match
+    }
+    const ch = s[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+  }
+  return false;
+}
+
 /** True if scanning `s` never drives `()`/`[]` depth below zero — i.e. a greedy `(.+)` arg capture
  *  didn't swallow a following `)`/`]`. Mirrors wasic.ts's guard so method handlers can fall through
  *  on an over-greedy match (e.g. `s.at(i) === t.at(j)`) instead of mis-emitting. Skips string
@@ -3008,21 +3066,39 @@ export function parseConsoleLogArgs(
 
   for (let i = 0; i < args.length; i++) {
     if (i > 0) segments.push({ kind: "literal", text: " " }); // space between args
-    segments.push(
-      ...parseSingleArg(
-        args[i],
-        locals,
-        funcLookup,
-        allocString,
-        enumLookup,
-        arrayLookup,
-        structLookup,
-        dotCallLookup,
-        globals,
-        enumStringLookup,
-        closureVarLookup,
-      ),
+    const argSegs = parseSingleArg(
+      args[i],
+      locals,
+      funcLookup,
+      allocString,
+      enumLookup,
+      arrayLookup,
+      structLookup,
+      dotCallLookup,
+      globals,
+      enumStringLookup,
+      closureVarLookup,
     );
+    // A whole numeric argument prints with console.log's formatting: −0 as `-0` (sw41). A
+    // template or a top-level string concatenation is string conversion, where −0 is `0`.
+    const only = argSegs.length === 1 ? argSegs[0] : undefined;
+    if (
+      only && (only.kind === "f64var" || only.kind === "f64expr") &&
+      !args[i].trim().startsWith("`") && !hasTopLevelQuote(args[i])
+    ) {
+      only.console = true;
+      _mathHelperNeeded?.("f64_to_str_console");
+    }
+    // A numeric LITERAL is formatted at compile time (parseSingleArg, as string conversion):
+    // `console.log(-0.0)` printed `0`.
+    const lit = args[i].trim();
+    if (
+      only?.kind === "literal" && /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(lit) &&
+      Object.is(Number(lit), -0)
+    ) {
+      only.text = "-0";
+    }
+    segments.push(...argSegs);
   }
 
   // Always terminate with a newline (console.log behaviour)
@@ -3311,13 +3387,13 @@ export function emitConsoleLog(
         } else if (seg.kind === "i64var") {
           callExpr = `(call $__i64_to_str (local.get $${seg.name}) ${destExpr})`;
         } else if (seg.kind === "f64var") {
-          callExpr = `(call $__f64_to_str (local.get $${seg.name}) ${destExpr})`;
+          callExpr = `(call ${f64Printer(seg)} (local.get $${seg.name}) ${destExpr})`;
         } else if (seg.kind === "i32expr") {
           callExpr = `(call $__i32_to_str ${seg.wat} ${destExpr})`;
         } else if (seg.kind === "i64expr") {
           callExpr = `(call $__i64_to_str ${seg.wat} ${destExpr})`;
         } else {
-          callExpr = `(call $__f64_to_str ${seg.wat} ${destExpr})`;
+          callExpr = `(call ${f64Printer(seg)} ${seg.wat} ${destExpr})`;
         }
 
         if (!runtimeCursor) {
@@ -3467,13 +3543,13 @@ export function emitConsoleLog(
         } else if (seg.kind === "i64var") {
           callExpr = `(call $__i64_to_str (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "f64var") {
-          callExpr = `(call $__f64_to_str (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
+          callExpr = `(call ${f64Printer(seg)} (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "i32expr") {
           callExpr = `(call $__i32_to_str ${seg.wat} (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "i64expr") {
           callExpr = `(call $__i64_to_str ${seg.wat} (i32.const ${scratchPtr}))`;
         } else {
-          callExpr = `(call $__f64_to_str ${seg.wat} (i32.const ${scratchPtr}))`;
+          callExpr = `(call ${f64Printer(seg)} ${seg.wat} (i32.const ${scratchPtr}))`;
         }
 
         statements.push(

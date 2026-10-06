@@ -280,6 +280,10 @@ high-value subset.
   - **A `Math` result in an integer or f32 context is converted like any f64 there** (2026-10-06):
     `trunc_f64_s` into i32 / i64 (it traps out of range or on NaN), `demote` into f32. One
     convention for every site; changing it is decision D3 in wasm-math-plan.md.
+  - **Console formatting is not string conversion** (2026-10-06, sw41): a WHOLE numeric
+    `console.log` argument prints −0 as `-0` (`$__f64_to_str_console`); a template, a top-level
+    string concatenation and `String(x)` are string conversion and print `0`, as JavaScript does.
+    An f32 reaches either printer promoted (`promoteF32`, ld17).
   - **`Math` functions return JavaScript's exact result where wasm and JS are both f64**
     (2026-10-06): `sign`, `round`, `hypot` are helpers shared by wasic and the console path
     (`setMathHelperNeededCallback`; a console path that writes `call $__x` must REQUEST `$__x`).
