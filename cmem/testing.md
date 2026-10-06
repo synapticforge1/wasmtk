@@ -112,6 +112,15 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-06, console number printing (sw41, sw42, ld16, ld17), full gate green.** wasi
+> **437/437** (+`7b_ConsoleNumberFormatting`) · golden-WAT **494 / 0** after a deliberate
+> re-record: 146 entries changed, 0 lines removed once `$__f64_to_str_console` is read as
+> `$__f64_to_str`; 144 gain that helper, 2 gain unused `$__str_op` locals; +1 new · engine 1152
+> on baseline · wast 64,506 / 0 / 16 · Go 7/7/12 · every other suite as before. One regression
+> caught BEFORE the gate: routing every console `String(...)` through emitStringAssign made
+> `15_Exceptions` print `Error: custom error` for a thrown string (sw44); `String(<string
+> local>)` keeps the old pass-through. Round-1 repros: 22 DIFFER = open silent 22; 17 = open loud.
+>
 > **2026-10-06, wasm-math Phase 1 (exact `Math`; Math results at the declared type), full gate
 > green.** wasi **436/436** (+`38_MathExactSemantics`) · golden-WAT **493 / 0** after a deliberate
 > re-record: 42 entries changed, every line explained (inline round / sign / hypot → helper calls;
