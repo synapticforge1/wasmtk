@@ -427,6 +427,14 @@ i32 is a boolean, and no numeric conversion of it is right. The targeted rows al
 MATCH; only the full verifier run showed ld06 moving from RUN-FAIL to DIFFER. A LOUD → SILENT
 move is a regression even when the count of passing rows goes up.
 
+**Separate the VALUE from the PRINTER, and the CHANGE from the RENUMBERING.** [wasmtk,
+2026-10-06] After the Math fix, `Math.sign(-0)` still printed `0`. `1 / Math.sign(-0)` printed
+`-Infinity`: the value was right and the printer was wrong (sw41, a different bug in a different
+place). A repro that prints a value through the code under suspicion tests two things at once.
+Likewise a golden-WAT diff of 42 entries read as 200+ changed lines until function indices
+(`__fn\d+`) were normalised away: one inserted helper renumbers every later function. Normalise
+exactly the known-benign delta, then read every remaining line.
+
 ### 🔁 STANDING QUESTION, both projects: *where is this construct USED, not where is it NAMED?*
 
 [binaryang + wasmtk, adopted 2026-08-27 — carried in binaryang's handoff and here, deliberately in

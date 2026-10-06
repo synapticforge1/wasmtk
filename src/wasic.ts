@@ -146,6 +146,7 @@ import {
   setExprFallbackResolver,
   setFuncTableLookup,
   setInstanceofResolver,
+  setMathHelperNeededCallback,
   setNullishResolver,
   setStrCmpNeededCallback,
   setStringArrayAllocator,
@@ -9382,6 +9383,18 @@ class WasicTranspiler {
         const mathFn = mathCallMatch[1];
         const argsStr = mathCallMatch[2].trim();
         const args = argsStr ? this.splitArgs(argsStr) : [];
+        // Every f64-valued Math result, at the type the context asks for. `const x: i32 =
+        // Math.floor(y)` put an f64 into an i32 local, an invalid module (ld15, 2026-10-06). The
+        // conversion is the one wasic uses for any f64 in an i32 context (`y as i32`, an f64
+        // local read as i32): `trunc_f64_s`, which traps out of range.
+        const asDefault = (w: string): string =>
+          defaultType === "i32"
+            ? `(i32.trunc_f64_s ${w})`
+            : defaultType === "i64"
+            ? `(i64.trunc_f64_s ${w})`
+            : defaultType === "f32"
+            ? `(f32.demote_f64 ${w})`
+            : w;
 
         // Always-i32 ops
         if (mathFn === "clz32") {
@@ -9403,7 +9416,7 @@ class WasicTranspiler {
             this.mathHelpers.add("i32_abs");
             return `(call $__i32_abs ${this.emitExpr(args[0] ?? "0", locals, "i32")})`;
           }
-          return `(f64.abs ${this.emitExpr(args[0] ?? "0", locals, "f64")})`;
+          return asDefault(`(f64.abs ${this.emitExpr(args[0] ?? "0", locals, "f64")})`);
         }
 
         // min / max — i32 helper in i32 context, native f64.min/max otherwise
@@ -9414,9 +9427,11 @@ class WasicTranspiler {
               this.emitExpr(args[1] ?? "0", locals, "i32")
             })`;
           }
-          return `(f64.min ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
-            this.emitExpr(args[1] ?? "0", locals, "f64")
-          })`;
+          return asDefault(
+            `(f64.min ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
+              this.emitExpr(args[1] ?? "0", locals, "f64")
+            })`,
+          );
         }
         if (mathFn === "max") {
           if (defaultType === "i32") {
@@ -9425,18 +9440,21 @@ class WasicTranspiler {
               this.emitExpr(args[1] ?? "0", locals, "i32")
             })`;
           }
-          return `(f64.max ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
-            this.emitExpr(args[1] ?? "0", locals, "f64")
-          })`;
+          return asDefault(
+            `(f64.max ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
+              this.emitExpr(args[1] ?? "0", locals, "f64")
+            })`,
+          );
         }
 
-        // Math.round — JavaScript semantics: round half away from zero.
-        // f64.nearest uses IEEE 754 ties-to-even (banker's rounding), which
-        // gives Math.round(2.5)=2 instead of the JS-correct 3.
-        // floor(x + 0.5) matches JS for all normal values.
+        // Math.round: JavaScript's rule (nearest, ties toward +∞, −0 kept), via $__math_round.
+        // The old inline `floor(x + 0.5)` rounded 0.49999999999999994 to 1 (the sum rounds up to
+        // 1.0) and returned +0 for -0.4 (sw40, 2026-10-06). f64.nearest is ties-to-even, also wrong.
         if (mathFn === "round") {
-          const xWat = this.emitExpr(args[0] ?? "0", locals, "f64");
-          return `(f64.floor (f64.add ${xWat} (f64.const 0.5)))`;
+          this.mathHelpers.add("f64_round");
+          return asDefault(
+            `(call $__math_round ${this.emitExpr(args[0] ?? "0", locals, "f64")})`,
+          );
         }
 
         // Native f64 single-arg instructions
@@ -9447,35 +9465,50 @@ class WasicTranspiler {
           trunc: "f64.trunc",
         };
         if (F64_UNARY[mathFn]) {
-          return `(${F64_UNARY[mathFn]} ${this.emitExpr(args[0] ?? "0", locals, "f64")})`;
+          return asDefault(
+            `(${F64_UNARY[mathFn]} ${this.emitExpr(args[0] ?? "0", locals, "f64")})`,
+          );
         }
 
         // Math.pow — correctly-rounded mathlib pow (Phase 38 / CR sweep)
         if (mathFn === "pow") {
           this.needsMathLib38 = true;
-          return `(call $mathlib_pow ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
-            this.emitExpr(args[1] ?? "0", locals, "f64")
-          })`;
+          return asDefault(
+            `(call $mathlib_pow ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
+              this.emitExpr(args[1] ?? "0", locals, "f64")
+            })`,
+          );
         }
 
-        // Math.sign — copysign(1, x); returns ±1, 0 for zero
+        // Math.sign: NaN for NaN, the zero itself for ±0, else ±1, via $__math_sign (the argument
+        // is evaluated once). The old inline form returned 1 for NaN and +0 for -0 (sw38).
         if (mathFn === "sign") {
-          const xWat = this.emitExpr(args[0] ?? "0", locals, "f64");
-          return `(if (result f64) (f64.eq ${xWat} (f64.const 0)) (then (f64.const 0)) (else (f64.copysign (f64.const 1) ${xWat})))`;
+          this.mathHelpers.add("f64_sign");
+          return asDefault(
+            `(call $__math_sign ${this.emitExpr(args[0] ?? "0", locals, "f64")})`,
+          );
         }
 
-        // Math.hypot(a, b) — sqrt(a²+b²)
+        // Math.hypot(...xs): n-ary and scaled like V8's (no overflow), via $__math_hypot<n>. The
+        // old inline sqrt(a²+b²) overflowed to Infinity at 1e200 and read only two arguments (sw39).
         if (mathFn === "hypot") {
-          const a = this.emitExpr(args[0] ?? "0", locals, "f64");
-          const b = this.emitExpr(args[1] ?? "0", locals, "f64");
-          return `(f64.sqrt (f64.add (f64.mul ${a} ${a}) (f64.mul ${b} ${b})))`;
+          if (args.length === 0) return asDefault(`(f64.const 0)`);
+          this.mathHelpers.add(`f64_hypot${args.length}`);
+          return asDefault(
+            `(call $__math_hypot${args.length} ${
+              args.map((a) => this.emitExpr(a, locals, "f64")).join(" ")
+            })`,
+          );
         }
 
         // Math.fround — demote to f32 then promote back
         if (mathFn === "fround") {
-          return `(f64.promote_f32 (f32.demote_f64 ${
-            this.emitExpr(args[0] ?? "0", locals, "f64")
-          }))`;
+          if (defaultType === "f32") {
+            return `(f32.demote_f64 ${this.emitExpr(args[0] ?? "0", locals, "f64")})`;
+          }
+          return asDefault(
+            `(f64.promote_f32 (f32.demote_f64 ${this.emitExpr(args[0] ?? "0", locals, "f64")}))`,
+          );
         }
 
         // Phase 38: extended math library — inline WAT helpers (Binaryen dead-strips unused)
@@ -9502,17 +9535,21 @@ class WasicTranspiler {
         ]);
         if (mathFn === "random") {
           this.needsMathLib38 = true;
-          return `(call $mathlib_random)`;
+          return asDefault(`(call $mathlib_random)`);
         }
         if (MATH38_UNARY.has(mathFn)) {
           this.needsMathLib38 = true;
-          return `(call $mathlib_${mathFn} ${this.emitExpr(args[0] ?? "0", locals, "f64")})`;
+          return asDefault(
+            `(call $mathlib_${mathFn} ${this.emitExpr(args[0] ?? "0", locals, "f64")})`,
+          );
         }
         if (mathFn === "atan2") {
           this.needsMathLib38 = true;
-          return `(call $mathlib_atan2 ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
-            this.emitExpr(args[1] ?? "0", locals, "f64")
-          })`;
+          return asDefault(
+            `(call $mathlib_atan2 ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
+              this.emitExpr(args[1] ?? "0", locals, "f64")
+            })`,
+          );
         }
       }
     }
@@ -13182,6 +13219,7 @@ class WasicTranspiler {
       setStrCmpNeededCallback(() => {
         this.needsStringHelpers = true;
       });
+      setMathHelperNeededCallback((name) => this.mathHelpers.add(name));
       setFuncTableLookup((name) =>
         this.functions.find((f) => f.name === name) ? this.getFuncTableIdx(name) : undefined
       );
@@ -13300,6 +13338,7 @@ class WasicTranspiler {
       setStructLiteralAllocator(undefined);
       setStructArgLayoutChecker(undefined);
       setStrCmpNeededCallback(undefined);
+      setMathHelperNeededCallback(undefined);
       setFuncTableLookup(undefined);
       setInstanceofResolver(undefined);
       setStringExprResolver(undefined);
@@ -13643,6 +13682,7 @@ class WasicTranspiler {
       setStrCmpNeededCallback(() => {
         this.needsStringHelpers = true;
       });
+      setMathHelperNeededCallback((name) => this.mathHelpers.add(name));
       setFuncTableLookup((name) =>
         this.functions.find((f) => f.name === name) ? this.getFuncTableIdx(name) : undefined
       );
@@ -13761,6 +13801,7 @@ class WasicTranspiler {
       setStructLiteralAllocator(undefined);
       setStructArgLayoutChecker(undefined);
       setStrCmpNeededCallback(undefined);
+      setMathHelperNeededCallback(undefined);
       setFuncTableLookup(undefined);
       setInstanceofResolver(undefined);
       setStringExprResolver(undefined);
@@ -15716,11 +15757,42 @@ class WasicTranspiler {
   }
 
   private emitMathHelpers(): string {
+    // The f64 helpers (2026-10-06) are emitted one by one, only when requested, so a module that
+    // uses none of them is byte-identical to before. The console path requests through
+    // setMathHelperNeededCallback.
+    const f64Helpers: string[] = [];
+    if (this.mathHelpers.has("f64_sign")) {
+      f64Helpers.push(`  ;; Math.sign: NaN for NaN, the zero itself for ±0, else ±1
+  (func $__math_sign (param $x f64) (result f64)
+    (if (result f64) (f64.ne (local.get $x) (local.get $x))
+      (then (local.get $x))
+      (else (if (result f64) (f64.eq (local.get $x) (f64.const 0))
+        (then (local.get $x))
+        (else (f64.copysign (f64.const 1) (local.get $x))))))
+  )`);
+    }
+    if (this.mathHelpers.has("f64_round")) {
+      // x - floor(x) is exact for every double, so the tie test is exact; copysign keeps the
+      // sign of a zero result (-0.4 → -0) and cannot flip a nonzero one.
+      f64Helpers.push(`  ;; Math.round: nearest, ties toward +Infinity, -0 kept (JavaScript's rule)
+  (func $__math_round (param $x f64) (result f64)
+    (local $r f64)
+    (local.set $r (f64.floor (local.get $x)))
+    (if (f64.ge (f64.sub (local.get $x) (local.get $r)) (f64.const 0.5))
+      (then (local.set $r (f64.add (local.get $r) (f64.const 1)))))
+    (f64.copysign (local.get $r) (local.get $x))
+  )`);
+    }
+    for (const h of [...this.mathHelpers].filter((h) => h.startsWith("f64_hypot")).sort()) {
+      f64Helpers.push(this.emitHypotHelper(Number(h.slice("f64_hypot".length))));
+    }
+    const i32Helpers = ["i32_abs", "i32_min", "i32_max"].some((h) => this.mathHelpers.has(h));
+    if (!i32Helpers) return f64Helpers.join("\n\n");
     // These i32 helpers are always emitted together — Binaryen -Oz dead-strips unused functions,
-    // so there is no binary-size cost. This avoids having to track which helpers are used
-    // across the console_log.ts boundary (where mathHelpers cannot be mutated).
+    // so there is no binary-size cost.
     // (Math.pow / ** route to the correctly-rounded $mathlib_pow, not an inline helper.)
     return [
+      ...f64Helpers,
       `  ;; Math.abs for i32
   (func $__i32_abs (param $x i32) (result i32)
     (select
@@ -15738,6 +15810,40 @@ class WasicTranspiler {
     (select (local.get $a) (local.get $b) (i32.gt_s (local.get $a) (local.get $b)))
   )`,
     ].join("\n\n");
+  }
+
+  /**
+   * `$__math_hypot<n>`: `Math.hypot` of n arguments with V8's algorithm, so the result matches
+   * Deno bit for bit: the largest magnitude first (Infinity wins over NaN, NaN over the rest, an
+   * all-zero list is 0), then a Kahan-compensated sum of the squares scaled by that magnitude, so
+   * 1e200 does not overflow. One helper per arity used (2026-10-06, sw39).
+   */
+  private emitHypotHelper(n: number): string {
+    const xs = Array.from({ length: n }, (_, i) => `$x${i}`);
+    const scan = xs.map((x) =>
+      `    (local.set ${x} (f64.abs (local.get ${x})))
+    (if (f64.ne (local.get ${x}) (local.get ${x}))
+      (then (local.set $nan (i32.const 1)) (local.set ${x} (f64.const 0))))
+    (if (f64.gt (local.get ${x}) (local.get $max)) (then (local.set $max (local.get ${x}))))`
+    ).join("\n");
+    const sum = xs.map((x) =>
+      `    (local.set $q (f64.div (local.get ${x}) (local.get $max)))
+    (local.set $s (f64.sub (f64.mul (local.get $q) (local.get $q)) (local.get $c)))
+    (local.set $p (f64.add (local.get $sum) (local.get $s)))
+    (local.set $c (f64.sub (f64.sub (local.get $p) (local.get $sum)) (local.get $s)))
+    (local.set $sum (local.get $p))`
+    ).join("\n");
+    return `  ;; Math.hypot with ${n} argument(s), V8's algorithm
+  (func $__math_hypot${n} ${xs.map((x) => `(param ${x} f64)`).join(" ")} (result f64)
+    (local $max f64) (local $nan i32) (local $sum f64) (local $c f64)
+    (local $q f64) (local $s f64) (local $p f64)
+${scan}
+    (if (f64.eq (local.get $max) (f64.const inf)) (then (return (f64.const inf))))
+    (if (local.get $nan) (then (return (f64.const nan))))
+    (if (f64.eq (local.get $max) (f64.const 0)) (then (return (f64.const 0))))
+${sum}
+    (f64.mul (f64.sqrt (local.get $sum)) (local.get $max))
+  )`;
   }
 
   /**
