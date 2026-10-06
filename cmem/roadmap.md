@@ -108,6 +108,11 @@
     `String(s)` of a string no longer prints a pointer; an `f32` value prints. Test
     `7b_ConsoleNumberFormatting`. Found: f32 arrays and struct fields are broken (sw43, ld18), and
     `String(e)` of a caught value depends on an untracked thrown kind (sw44).
+17. **f32 in arrays and structs; for-of over array parameters (2026-10-06).** An `f32[]` literal
+    overran the next constant in memory and read back bit patterns; an `f32` struct field was read
+    as an integer; no `f32` value was converted where an `f64` was expected. All fixed (sw43,
+    ld18). Found and fixed with them: `for (const e of v)` over ANY array parameter read the
+    array's header as elements (sw45: `[1, 2, 3]` summed to 7). Test `9_F32Containers`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
