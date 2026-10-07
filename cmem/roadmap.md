@@ -113,6 +113,11 @@
     as an integer; no `f32` value was converted where an `f64` was expected. All fixed (sw43,
     ld18). Found and fixed with them: `for (const e of v)` over ANY array parameter read the
     array's header as elements (sw45: `[1, 2, 3]` summed to 7). Test `9_F32Containers`.
+18. **A caught value knows what was thrown (2026-10-06, owner-approved design change).**
+    `String(e)`, `${e}` and `"x" + e` give `TypeError: msg` for a thrown `TypeError` and the
+    string itself for a thrown string; `e instanceof Error` is a run-time test, now FALSE for a
+    thrown string (as in JavaScript; it used to be always true). Re-throws and awaited rejections
+    keep the kind (sw44). Tests `15_ThrownKind`, `15_ThrownKindAsync`. Found: sw46.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
