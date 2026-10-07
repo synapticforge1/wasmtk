@@ -443,6 +443,13 @@ export type ClosureVarLookup = (name: string) => {
   funcType: string; // e.g. "$ftype_i32_r_f64"
 } | undefined;
 
+/** Allocates ALREADY-DECODED text (a literal segment's `text`). The DataAllocator unescapes its
+ *  input, as source text needs; decoded text was unescaped a second time, so `"C:\\tmp"` printed
+ *  `C:<TAB>mp` (sw24, 2026-10-06). Re-escaping the backslashes makes that unescape the identity. */
+function allocDecoded(allocString: DataAllocator, text: string): [number, number] {
+  return allocString(text.replace(/\\/g, "\\\\"));
+}
+
 /** The memory load for a value of WAT type `t`: a local twin of wasic.ts's memLoadOp (this module
  *  is imported BY wasic.ts, so it cannot import back). f32 went to `i32.load` and printed bit
  *  patterns (`xs[1]` → 1075838976; sw43, 2026-10-06). */
@@ -700,7 +707,7 @@ function parseSingleArg(
           }
           if (s?.kind === "strexpr") return [s.ptrWat, s.lenWat];
           if (s?.kind === "literal" && allocString) {
-            const [p, l] = allocString(s.text);
+            const [p, l] = allocDecoded(allocString, s.text);
             return [`(i32.const ${p})`, `(i32.const ${l})`];
           }
           // Anything else (several segments, a slice / method / call that parseSingleArg did not
@@ -729,6 +736,35 @@ function parseSingleArg(
             `(else ${elsePtr} (local.set $__str_op_len ${elseLen})))`,
           lenWat: `(local.get $__str_op_len)`,
         }];
+      }
+      // Both branches BOOLEAN: the result prints `true` / `false`, not `1` / `0` (sw25,
+      // 2026-10-06: `n > 0 ? true : false` printed 1). A branch is boolean when it is a boolean
+      // literal, a comparison or a negation, or a boolean variable / call.
+      const isBoolBranch = (b: string): boolean => {
+        const t = b.trim();
+        if (t === "true" || t === "false") return true;
+        if (/^!(?!=)/.test(t)) return true;
+        if (
+          ["===", "!==", "==", "!=", "<=", ">=", "<", ">"].some((o) => findTopLevelOp(t, o) > 0)
+        ) {
+          return true;
+        }
+        if (/^\w+$/.test(t)) return (locals.get(t) ?? globals?.get(t)) === "bool";
+        const cm = t.match(/^(\w+)\s*\(.*\)$/);
+        return !!cm && funcLookup?.(cm[1]!)?.resultTsName === "boolean";
+      };
+      if (isBoolBranch(thenPart) && isBoolBranch(elsePart)) {
+        const wat = exprToWat(
+          token,
+          locals,
+          "i32",
+          funcLookup,
+          allocString,
+          arrayLookup,
+          structLookup,
+          globals,
+        );
+        return [{ kind: "boolexpr", wat }];
       }
     }
   }
@@ -2682,7 +2718,9 @@ function exprToWat(
     ["-", "f64.sub", "i32.sub", true, false], // positiveIdx: skip unary minus
     ["*", "f64.mul", "i32.mul", false, false],
     ["/", "f64.div", "i32.div_s", false, false],
-    ["%", "f64.rem", "i32.rem_u", false, false],
+    // Signed remainder, the sign of the dividend, as JavaScript's `%` (and wasic's emitExpr):
+    // `rem_u` printed `-7 % 4` as 1 (sw20). There is no `f64.rem`; see the float case below (ld02).
+    ["%", "f64.rem", "i32.rem_s", false, false],
   ];
   // `*`, `/` and `%` share ONE precedence level and are LEFT-associative, but this loop splits at
   // the first operator in table order, where `*` precedes `/` and `%`. `a * b / c` therefore
@@ -2802,11 +2840,31 @@ function exprToWat(
       : opType === "i64"
       ? i32op.replace(/^i32\./, "i64.")
       : i32op;
-    const opWat = `(${watOp} ${
-      exprToWat(lhs, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals)
-    } ${
-      exprToWat(rhs, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals)
-    })`;
+    const lW = exprToWat(
+      lhs,
+      locals,
+      opType,
+      funcLookup,
+      allocString,
+      arrayLookup,
+      structLookup,
+      globals,
+    );
+    const rW = exprToWat(
+      rhs,
+      locals,
+      opType,
+      funcLookup,
+      allocString,
+      arrayLookup,
+      structLookup,
+      globals,
+    );
+    // A float `%`: WebAssembly has no `f64.rem` (an invalid module, ld02). The same formula as
+    // wasic's emitExpr, x - trunc(x / y) * y, so the two paths agree.
+    const opWat = op === "%" && (opType === "f64" || opType === "f32")
+      ? `(${opType}.sub ${lW} (${opType}.mul (${opType}.trunc (${opType}.div ${lW} ${rW})) ${rW}))`
+      : `(${watOp} ${lW} ${rW})`;
     // The result at the type the caller expects. A comparison yields i32 whatever its operands;
     // `1 << n` is i32 even where the caller asked for f64 (a literal-led print, a concat operand),
     // and returning it unconverted put an i32 on an f64 stack, an invalid module (H12, found with
@@ -3458,7 +3516,7 @@ export function emitConsoleLog(
       const iovLen = iovBase + i * 8 + 4; // iov[i].buf_len (i32)
 
       if (seg.kind === "literal") {
-        const [offset, len] = allocString(seg.text);
+        const [offset, len] = allocDecoded(allocString, seg.text);
         statements.push(
           `${indent}(i32.store (i32.const ${iovPtr}) (i32.const ${offset}))`,
           `${indent}(i32.store (i32.const ${iovLen}) (i32.const ${len}))`,
