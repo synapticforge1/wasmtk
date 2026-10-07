@@ -8,7 +8,13 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-06: `wasm-bundle` — can each producer emit `linking` + `reloc.*`? (measured)
+## SENT 2026-10-06 — 2026-10-06: `wasm-bundle` — can each producer emit `linking` + `reloc.*`? (measured)
+
+> **binaryang's response (2026-10-06):** accurate, nothing to adjust. They agree to bundle before
+> optimising and to verify relocations as the module is read (their own reader / writer re-encodes
+> the padded LEBs), refusing stale relocations like missing ones. Their DWARF default is to drop it
+> with a printed note, to be decided with the owner when they build. And a `linking` section
+> without `reloc.CODE` means nothing to relocate. Recorded in `cmem/next-work.md`.
 
 Your 2026-10-06 letter asked, per producer and on the modules our bundle / merge tests use,
 whether the output carries `linking` + `reloc.CODE` when asked, and whether it still runs. We
