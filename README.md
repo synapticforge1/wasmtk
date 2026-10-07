@@ -1177,6 +1177,7 @@ replacement.
 | :---: | --- | --- | --- |
 | ✅ | Core | Functions, variables, control flow | `function`, `let`/`const`/`var`, `if`/`else`, `while`, `do-while`, `for` |
 | ✅ | Core | Operators | Arithmetic, comparison, logical, bitwise, ternary, compound assignment |
+| ✅ | Core bug fix (2026-10-06) | Operators group and type as in JavaScript | Several expressions computed a different value than TypeScript, with no error: `-x + 5` was `-(x + 5)`; `!a && b` was `!(a && b)`; `c1 ? A : c2 ? B : C` grouped from the wrong end; `2 ** 3 + 1` was `2 ** 4`; `a >> 2 << 1` and other same-precedence chains grouped from the right; `"h=" + (n >> 1)` printed `h=true`; `i + f` with `f` a decimal dropped the fraction; and `if (0.5)` was false. All now match TypeScript, both in ordinary code and inside `console.log`. Stress test `4_OperatorSemantics` |
 | ✅ | Core | Switch / labeled break / continue | `switch/case`, `outer: for(...) { break outer; }` |
 | ✅ | Core | Numeric types | `i32`, `i64`, `f32`, `f64`, `boolean`, BigInt literals (`42n`), numeric enums |
 | ✅ | Core | Strings | Literals, `.length`, lexicographic comparisons, template literals |

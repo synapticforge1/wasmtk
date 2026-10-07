@@ -112,6 +112,15 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-06, operator precedence / grouping / typing (sw10–sw17), full gate green.** wasi
+> **443/443** (+`4_OperatorSemantics`) · golden-WAT **500 / 0** after a deliberate re-record: 4
+> entries changed (`a - b + c` regrouped in the date library, i32-identical; two `i32` vs
+> declared-`f64` comparisons now in f64), +1 new. A FIRST cut changed 79 entries, 2 of them to
+> compile failures and 3 to invalid `f64.mul` over `i32.load`: all three defects were in the fix
+> and were found by reading the golden diff before the gate · engine 1152 on baseline · wast
+> 64,506 / 0 / 16 · Go 7/7/12 · every other suite as before. Round-1 repros: 10 DIFFER = open
+> silent 10; 17 + 3 = open loud 20.
+>
 > **2026-10-06, console `%` / escapes / boolean ternaries, closure state (sw20, sw24, sw25,
 > sw32, ld02), full gate green.** wasi **442/442** (+`7b_ConsoleOperatorsAndClosures`) ·
 > golden-WAT **499 / 0**: 1 entry changed (`rem_u` → `rem_s` on positive operands, same

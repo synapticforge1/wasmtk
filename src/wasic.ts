@@ -1003,6 +1003,58 @@ function encodeF32LE(val: number): string {
   );
 }
 
+/** True if `e` has a comparison (`=== !== == != < > <= >=`) or logical (`&& ||`) operator at TOP
+ *  level, skipping literals, bracketed sub-expressions and shifts (`<<` `>>` `>>>`) and `=>`. A
+ *  fully parenthesised expression is unwrapped first: `(a > b)` is a comparison. (sw14) */
+function hasTopLevelBoolOp(e: string): boolean {
+  let s = e.trim();
+  while (s.startsWith("(") && s.endsWith(")") && parenDepthNeverNegative(s.slice(1, -1))) {
+    s = s.slice(1, -1).trim();
+  }
+  const inStr = buildStringLiteralMask(s);
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (inStr[i]) continue;
+    const ch = s[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    if (depth !== 0) continue;
+    const two = s.slice(i, i + 2);
+    if (two === "&&" || two === "||" || two === "==" || two === "!=") return true;
+    if (ch === "<" || ch === ">") {
+      const prev = s[i - 1] ?? "", next = s[i + 1] ?? "";
+      if (next === "<" || next === ">" || prev === "<" || prev === ">" || prev === "=") continue;
+      return true; // < > <= >=
+    }
+  }
+  return false;
+}
+
+/** Every binary operator emitExpr splits on (its binaryOps table), for hasTopLevelBinaryOp. */
+const WASIC_BINARY_OPS = [
+  "||",
+  "&&",
+  "|",
+  "^",
+  "&",
+  "===",
+  "!==",
+  "==",
+  "!=",
+  "<=",
+  ">=",
+  "<",
+  ">",
+  ">>>",
+  ">>",
+  "<<",
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+];
+
 /** sw44 (2026-10-06): the Error family a `throw` can carry, by kind number. 0 is "not an Error"
  *  (a thrown string, number or boolean). `$__exn_kind` holds the kind of the exception in flight;
  *  a catch variable keeps its own copy in `$<var>__kind`. */
@@ -1498,9 +1550,11 @@ function inferInitType(
   if (e === "true" || e === "false") return "bool";
   // 1. bigint literal
   if (/^-?\d+n$/.test(e)) return "i64";
-  // 2. contains a comparison or logical operator → boolean
-  if (/===|!==|==|!=|<=|>=|<|>|&&|\|\||^!/.test(e)) return "bool";
-  if (e.startsWith("!")) return "bool";
+  // 2. a comparison or logical operator AT TOP LEVEL → boolean. A match ANYWHERE in the text took
+  //    the `>` of `n >> 1` and a comparison nested in a call or parens for one: `"h=" + (n >> 1)`
+  //    printed `h=true` (sw14, 2026-10-06).
+  if (hasTopLevelBoolOp(e)) return "bool";
+  if (e.startsWith("!") && !e.startsWith("!=")) return "bool";
   // 2b. string-producing expressions
   if (e.startsWith('"') || e.startsWith("'")) return "string"; // string literal or concat
   if (/^String\s*\(/.test(e)) return "string"; // String(n)
@@ -6651,7 +6705,7 @@ class WasicTranspiler {
           const elseExpr = rest.slice(cIdx + 1).trim();
           // Both branches must be string expressions
           if (this.isStringExpr(thenExpr, locals) && this.isStringExpr(elseExpr, locals)) {
-            const condWat = this.emitExpr(cond, locals, "i32");
+            const condWat = this.emitCond(cond, locals);
             const thenWat = this.emitStringAssign(`${varName}__then`, thenExpr, locals);
             const elseWat = this.emitStringAssign(`${varName}__else`, elseExpr, locals);
             // Rewrite assignments to target varName
@@ -10211,33 +10265,32 @@ ${prefixed}
       return callWat;
     }
 
-    // Ternary: cond ? then : else
-    const ternQ = this.findBinaryOp(expr, "?");
-    if (ternQ !== -1) {
-      const rest = expr.slice(ternQ + 1);
-      const ternC = this.findBinaryOp(rest, ":");
-      if (ternC !== -1) {
-        const cond = expr.slice(0, ternQ).trim();
-        const thenPart = rest.slice(0, ternC).trim();
-        const elsePart = rest.slice(ternC + 1).trim();
-        return `(if (result ${defaultType}) ${this.emitExpr(cond, locals, "i32")} (then ${
-          this.emitExpr(thenPart, locals, defaultType)
-        }) (else ${this.emitExpr(elsePart, locals, defaultType)}))`;
-      }
+    // Ternary: cond ? then : else (the FIRST top-level `?` and its own `:`; sw12)
+    const tern = this.splitTernaryTop(expr);
+    if (tern) {
+      const [cond, thenPart, elsePart] = tern;
+      return `(if (result ${defaultType}) ${this.emitCond(cond, locals)} (then ${
+        this.emitExpr(thenPart, locals, defaultType)
+      }) (else ${this.emitExpr(elsePart, locals, defaultType)}))`;
     }
 
-    // Unary ! — logical not → i32.eqz
-    if (expr.startsWith("!") && !expr.startsWith("!=")) {
-      return `(i32.eqz ${this.emitExpr(expr.slice(1).trim(), locals, "i32")})`;
+    // Unary operators bind tighter than every binary one, so they apply only when no binary
+    // operator is at top level: `!a && b` is `(!a) && b`, not `!(a && b)` (sw11), `-x + 5` is
+    // `(-x) + 5`, not `-(x + 5)` (sw10). The binary loop below splits first; its operands come back.
+    const unaryOk = !this.hasTopLevelBinaryOp(expr);
+
+    // Unary ! — logical not → i32.eqz (of the operand's truthiness)
+    if (unaryOk && expr.startsWith("!") && !expr.startsWith("!=")) {
+      return `(i32.eqz ${this.emitCond(expr.slice(1).trim(), locals)})`;
     }
 
     // Unary ~ — bitwise not → i32.xor with -1
-    if (expr.startsWith("~")) {
+    if (unaryOk && expr.startsWith("~")) {
       return `(i32.xor ${this.emitExpr(expr.slice(1).trim(), locals, "i32")} (i32.const -1))`;
     }
 
     // Unary - on a non-literal (e.g. -x, -(a+b))
-    if (expr.startsWith("-") && !/^-\d/.test(expr)) {
+    if (unaryOk && expr.startsWith("-") && !/^-\d/.test(expr)) {
       const inner = expr.slice(1).trim();
       const innerType = /^\w+$/.test(inner) && locals.has(inner) ? locals.get(inner)! : defaultType;
       if (innerType === "f64" || innerType === "f32") {
@@ -10248,7 +10301,9 @@ ${prefixed}
 
     // Phase 22: exponentiation `a ** b` → Math.pow(a, b)
     // Right-associative: use LTR scan so `a ** b ** c` → pow(a, pow(b, c)).
-    {
+    // Only when no lower-precedence operator is at top level: `2 ** 3 + 1` is `(2 ** 3) + 1`, not
+    // `2 ** (3 + 1)` = 16 (sw13, 2026-10-06). The binary loop splits the `+`; `2 ** 3` comes back.
+    if (unaryOk) {
       const powIdx = this.findDepth0LTR(expr, "**");
       if (powIdx !== -1) {
         this.needsMathLib38 = true;
@@ -10380,11 +10435,24 @@ ${prefixed}
     // when another member of its group occurs further right; that later entry then splits correctly.
     // (`+`/`-` need no such guard: `a + (b - c)` and `(a + b) - c` are mathematically equal, though
     // they can differ in f64 rounding — see design-decisions.md.)
-    const MUL_GROUP = ["*", "/", "%"];
-    const mulRightmost = Math.max(...MUL_GROUP.map((o) => this.findBinaryOp(expr, o)));
+    // The same holds for EVERY same-precedence group (sw17, 2026-10-06): `a >> 2 << 1` matched
+    // `>>` first (table order) and gave `a >> (2 << 1)` = 4 instead of 32. Equality, relational,
+    // shift, additive and multiplicative groups each split at their rightmost member.
+    const SAME_PREC = [
+      ["===", "!==", "==", "!="],
+      ["<=", ">=", "<", ">"],
+      [">>>", ">>", "<<"],
+      ["+", "-"],
+      ["*", "/", "%"],
+    ];
+    const rightmostOf = new Map<string, number>();
+    for (const grp of SAME_PREC) {
+      const r = Math.max(...grp.map((o) => this.findBinaryOp(expr, o)));
+      for (const o of grp) rightmostOf.set(o, r);
+    }
     for (const [op, i32suf, f64suf, alwaysI32] of binaryOps) {
       const idx = this.findBinaryOp(expr, op);
-      if (MUL_GROUP.includes(op) && idx !== -1 && idx < mulRightmost) continue;
+      if (idx !== -1 && idx < (rightmostOf.get(op) ?? -1)) continue;
       if (idx !== -1) {
         const lhs = expr.slice(0, idx).trim();
         const rhs = expr.slice(idx + op.length).trim();
@@ -10432,8 +10500,9 @@ ${prefixed}
         // form also mis-encoded under wasmmerge splice (a `call` nested in an `i32.and` inside a
         // loop `br_if` trapped after reassembly); short-circuiting removes that whole class.
         if (op === "&&" || op === "||") {
-          const lWat = this.emitExpr(lhs, locals, "i32");
-          const rWat = this.emitExpr(rhs, locals, "i32");
+          // Operands by truthiness (sw16): `0.5 && b` is truthy, not a truncated 0.
+          const lWat = this.emitCond(lhs, locals);
+          const rWat = this.emitCond(rhs, locals);
           const scWat = op === "&&"
             ? `(if (result i32) ${lWat} (then ${rWat}) (else (i32.const 0)))`
             : `(if (result i32) ${lWat} (then (i32.const 1)) (else ${rWat}))`;
@@ -10593,10 +10662,24 @@ ${prefixed}
 
         // An f32 operand meeting an f64 (the other operand, or an f64 context) computes in f64, as
         // TypeScript does: f32 + f64 is an f32 op over an f64 value otherwise (2026-10-06, ld18).
-        const numType: WatType = watBaseType(lhsType) === "f32" &&
-            (watBaseType(defaultType as WatType) === "f64" ||
-              watBaseType(this.inferExprType(rhs, locals)) === "f64")
+        // Likewise an i32 left operand meeting a float RIGHT one: the operation was typed from the
+        // left alone, so `i + f` (1 + 2.5) was `i32.add` and printed 3, and `i + 1 < f` compared
+        // truncated (sw15, 2026-10-06). The declared-type ruling holds: only i32 OP i32 stays i32.
+        // A KNOWN float only: a float literal or a variable declared f64 / f32. inferExprType's
+        // fallback is f64, which made `this.x * this.x` of i32 fields f64.mul over i32 loads.
+        const rhsT = rhs.trim();
+        const rhsBase = /^-?\d+\.\d*([eE][+-]?\d+)?$|^-?\d+[eE][+-]?\d+$/.test(rhsT)
           ? "f64"
+          : /^\w+$/.test(rhsT)
+          ? watBaseType((locals.get(rhsT) ?? this.moduleGlobals.get(rhsT)?.type) as WatType)
+          : watBaseType(this.inferExprType(rhs, locals));
+        const rhsKnownFloat = /^-?\d+\.\d*([eE][+-]?\d+)?$|^-?\d+[eE][+-]?\d+$/.test(rhsT) ||
+          (/^\w+$/.test(rhsT) && (rhsBase === "f64" || rhsBase === "f32"));
+        const numType: WatType = watBaseType(lhsType) === "f32" &&
+            (watBaseType(defaultType as WatType) === "f64" || rhsBase === "f64")
+          ? "f64"
+          : !alwaysI32 && watBaseType(lhsType) === "i32" && rhsKnownFloat
+          ? rhsBase as WatType
           : lhsType;
         const baseType = watBaseType(numType);
         const isFloat = baseType === "f64" || baseType === "f32";
@@ -10766,6 +10849,58 @@ ${prefixed}
     return this.emitExpr(e, locals, "i32"); // assume an any-producing sub-expression
   }
 
+  /** A condition (if / while / ternary / `!` / `&&` / `||` operand) by JavaScript TRUTHINESS: an
+   *  f64 is true when nonzero and not NaN (`|x| > 0`), an i64 when nonzero. Converting an f64 to i32
+   *  (`trunc`) made `if (0.5)` false (sw16, 2026-10-06). */
+  private emitCond(cond: string, locals: Map<string, WatType>): string {
+    // Decided on the EMITTED WAT, not on inferExprType (which calls `isNaN(x)` f64 though it emits
+    // an i32 comparison): when the emitter truncated a float to fit the i32 context, the
+    // truncation is replaced by the truthiness test. Everything else is unchanged.
+    const w = this.emitExpr(cond, locals, "i32");
+    const m = w.match(/^\(i32\.trunc_(f64|f32)_s ([\s\S]*)\)$/);
+    if (m && parenDepthNeverNegative(m[2])) {
+      const t = m[1];
+      return `(${t}.gt (${t}.abs ${m[2]}) (${t}.const 0))`;
+    }
+    return w;
+  }
+
+  /** True if `expr` has a binary operator at top level (outside brackets and literals). A unary
+   *  operator, and `**`, bind tighter than all of them, so they apply only when this is false:
+   *  `-x + 5` is `(-x) + 5`, `!a && b` is `(!a) && b`, `2 ** 3 + 1` is `(2 ** 3) + 1` (sw10, sw11,
+   *  sw13, 2026-10-06). findBinaryOp does not match a unary `-`, so `-x` alone is false. */
+  private hasTopLevelBinaryOp(expr: string): boolean {
+    return WASIC_BINARY_OPS.some((op) => this.findBinaryOp(expr, op) > 0);
+  }
+
+  /** Splits a top-level `c ? a : b` at the FIRST `?` and the `:` that matches it, or null. The
+   *  conditional is right-associative: `c1 ? A : c2 ? B : C` is `c1 ? A : (c2 ? B : C)`. Splitting
+   *  at the LAST `?` made it `(c1 ? A : c2) ? B : C` (sw12, 2026-10-06; console_log's twin is
+   *  splitTernary). `?.` and `??` are not the conditional. */
+  private splitTernaryTop(expr: string): [string, string, string] | null {
+    const inStr = buildStringLiteralMask(expr);
+    let depth = 0, q = -1, nested = 0;
+    for (let i = 0; i < expr.length; i++) {
+      if (inStr[i]) continue;
+      const ch = expr[i];
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") depth--;
+      else if (depth === 0 && ch === "?") {
+        if (expr[i + 1] === "." || expr[i + 1] === "?" || expr[i - 1] === "?") continue;
+        if (q === -1) q = i;
+        else nested++;
+      } else if (depth === 0 && ch === ":" && q !== -1) {
+        if (nested > 0) nested--;
+        else {return [
+            expr.slice(0, q).trim(),
+            expr.slice(q + 1, i).trim(),
+            expr.slice(i + 1).trim(),
+          ];}
+      }
+    }
+    return null;
+  }
+
   /** Finds an operator in an expression while respecting paren nesting.
    *  Scans right-to-left so repeated left-associative operators (a-b-c) group correctly. */
   private findBinaryOp(expr: string, op: string): number {
@@ -10804,7 +10939,9 @@ ${prefixed}
         }
         if (op === "=" && after === "=") continue;
         if (op === "!" && after === "=") continue;
-        if (op === "==" && (after === "=" || before === "=")) continue; // avoid === match
+        // avoid matching inside `===` AND inside `!==` (the second needs `before === "!"`; harmless
+        // while `!==` was always tried first, wrong once same-precedence groups split rightmost)
+        if (op === "==" && (after === "=" || before === "=" || before === "!")) continue;
         if (op === "!=" && after === "=") continue; // avoid !== match
         if (op === "&" && (after === "&" || before === "&")) continue;
         if (op === "|" && (after === "|" || before === "|")) continue;
@@ -14494,7 +14631,7 @@ ${prefixed}
           elseBody = synElse;
         }
 
-        const condExpr = this.emitExpr(cond, locals, "i32");
+        const condExpr = this.emitCond(cond, locals);
         // Phase 34: type predicate narrowing — if cond is "predFn(arg)" where predFn is a
         // registered type predicate, temporarily narrow arg's struct def to the target type
         // in the then-branch.  Save and restore state around emitBlock(ifBody, ...).
@@ -14602,7 +14739,7 @@ ${prefixed}
           const loop = `$loop_${lbl}`;
           const cont = `$cont_${lbl}`;
           this.controlStack.push({ breakLabel: brk, continueLabel: cont });
-          const condExpr = this.emitExpr(cond, locals, "i32");
+          const condExpr = this.emitCond(cond, locals);
           const bodyWat = this.emitBlock(
             WasicTranspiler.splitStmts(inlineBody),
             locals,
@@ -14636,7 +14773,7 @@ ${prefixed}
         const loop = `$loop_${lbl}`;
         const cont = `$cont_${lbl}`; // continue target: exits cont-block → falls to br loop
         this.controlStack.push({ breakLabel: brk, continueLabel: cont });
-        const condExpr = this.emitExpr(cond, locals, "i32");
+        const condExpr = this.emitCond(cond, locals);
         const bodyWat = this.emitBlock(whileBody, locals, funcResult, indent + "      ");
         this.controlStack.pop();
         out.push(`${indent}(block ${brk}`);
@@ -14957,7 +15094,7 @@ ${prefixed}
         const brk = `$break_${lbl}`;
         const loop = `$loop_${lbl}`;
         const cont = `$cont_${lbl}`; // continue exits cont-block → falls to condition check
-        const condExpr = this.emitExpr(condPart, locals, "i32");
+        const condExpr = this.emitCond(condPart, locals);
 
         this.controlStack.push({ breakLabel: brk, continueLabel: cont });
         const bodyWat = this.emitBlock(doBody, locals, funcResult, indent + "      ");

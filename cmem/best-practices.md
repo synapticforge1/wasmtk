@@ -427,6 +427,14 @@ i32 is a boolean, and no numeric conversion of it is right. The targeted rows al
 MATCH; only the full verifier run showed ld06 moving from RUN-FAIL to DIFFER. A LOUD → SILENT
 move is a regression even when the count of passing rows goes up.
 
+**When a fix changes core emission, read the golden diff for INVALID WAT before reading it for
+intent.** [wasmtk, 2026-10-06] The operator fixes first changed 79 entries. Grepping the new
+WAT for impossible shapes (`f64.mul (i32.load`, `f64.abs (f64.eq`, `"success": false`) found
+three defects in the fix itself within a minute: a type fallback trusted, a guard that only
+held under the old table order (`==` inside `!==`), a truthiness test applied to comparisons.
+After the fixes, 4 entries changed, each explainable. The size of a golden diff is a signal:
+a narrow fix that moves 79 programs is not narrow.
+
 **Separate the VALUE from the PRINTER, and the CHANGE from the RENUMBERING.** [wasmtk,
 2026-10-06] After the Math fix, `Math.sign(-0)` still printed `0`. `1 / Math.sign(-0)` printed
 `-Infinity`: the value was right and the printer was wrong (sw41, a different bug in a different
