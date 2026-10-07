@@ -826,6 +826,12 @@ function parseSingleArg(
       return [{ kind: "i32expr", wat }];
     }
     const wtype = locals.get(token);
+    // A CATCH variable (wasic declared its `__kind` local) prints by what was thrown: a caught
+    // Error is `Error: msg` in a template or concat, as String(e) is (sw44, 2026-10-06).
+    if (wtype === "string" && locals.has(`${token}__kind`) && _stringExprResolver) {
+      const r = _stringExprResolver(`String(${token})`, locals);
+      if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+    }
     if (wtype === "string") {
       return [{ kind: "strvar", ptrLocal: `${token}_ptr`, lenLocal: `${token}_len` }];
     }
@@ -950,12 +956,9 @@ function parseSingleArg(
   // function (ld16, 2026-10-06). What the resolver cannot build is a diagnostic, never `""`.
   {
     const strM = token.match(/^String\s*\(([\s\S]*)\)$/);
-    // `String(<string local>)` is left to the pass-through below, which prints the string as is.
-    // That includes a CATCH variable, which wasic stores as its message: whether `String(e)`
-    // should prefix `Error: ` depends on what was thrown, which wasic does not track (sw44).
-    const strLocal = /^\w+$/.test(strM?.[1]?.trim() ?? "") &&
-      locals.get(strM![1].trim()) === "string";
-    if (strM && !strLocal && parenDepthNeverNegative(strM[1])) {
+    // Every String(x), a string local included: wasic copies a plain string as is (sw42) and
+    // stringifies a CATCH variable by what was thrown (sw44: `custom` vs `Error: custom`).
+    if (strM && parenDepthNeverNegative(strM[1])) {
       const r = _stringExprResolver?.(token, locals);
       if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
       _diagnosticSink?.(`console argument: cannot convert '${token.slice(0, 60)}' to a string.`);
