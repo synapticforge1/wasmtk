@@ -97,7 +97,7 @@ phase filter IS the whole gate. Full-suite runs cost >10 minutes and buy nothing
 | [architecture.md](architecture.md) | wasic / modc / bindgen / hybrid; the pluggable binaryang backend; the build and merge pipeline; the `wast` spec runner. |
 | [testing.md](testing.md) | How to run every suite; which suites a change reaches (impact map); current counts, dated; the wast per-file baseline and its oracles; the engine cross-check; the vendored spec corpus. |
 | [compiler-bugs.md](compiler-bugs.md) | The live defect log: root cause, fix, regression test, class (silent-wrong / loud) and tally, incl. the H12 round-1 table of open compiler bugs. Read before debugging anything. |
-| [design-decisions.md](design-decisions.md) | Invariants that must not be reverted silently: typed declarations, the binaryang pin and wast oracles, SemVer and the compatibility gate, the console error path, WAT-text rules. Read before changing codegen, a backend or the release scripts. |
+| [design-decisions.md](design-decisions.md) | Invariants that must not be reverted silently: typed declarations, the declared type deciding wasm-typed arithmetic (owner ruling), operator grouping per JavaScript's precedence table in both emitters, f32 conversion at every boundary, the thrown kind, console formatting vs string conversion, the binaryang pin and wast oracles, SemVer and the compatibility gate, the console error path, WAT-text rules. Read before changing codegen, a backend or the release scripts. |
 | [roadmap.md](roadmap.md) | Releases and phases, and the unreleased block since the last tag; README roadmap-row and Breaking Changes conventions. |
 | [next-work.md](next-work.md) | The ONE list of what is open, each item pointing at its record; completed work only as dated summaries with commits. |
 | [capabilities.md](capabilities.md) | Tier-1 stdlib capability libraries (Set, Map, Date, JSON, RegExp) and virtual `wasmtk:<cap>` imports. |
@@ -106,7 +106,7 @@ phase filter IS the whole gate. Full-suite runs cost >10 minutes and buy nothing
 | [async-design.md](async-design.md) | Promise / async design and its invariants. |
 | [math-cr-sweep.md](math-cr-sweep.md) | The correctly-rounded `mathlib` sweep: dd framework, recipe, gotchas, oracle harness. |
 | [stdlib-bundling-brief.md](stdlib-bundling-brief.md) | On-demand stdlib bundling design brief (§1–§7d). |
-| [offload-inventory.md](offload-inventory.md) | What wasmtk does that binaryang, a runtime or a loader could own (letter H11), each with its trigger; nothing moved yet. |
+| [offload-inventory.md](offload-inventory.md) | What wasmtk does that binaryang, a runtime or a loader could own (letter H11), each with its trigger. 2026-10-06: the owner decided `wasmbundle` → binaryang's `wasm-bundle` (exact relocation via `linking` / `reloc.*`); nothing has moved yet. |
 | [vision.md](vision.md) | Polyglot ecosystem vision; "TypeScript as a DLL"; loader strategy; repo map. |
 | [wasm-math-plan.md](wasm-math-plan.md) | The declared-type rule for `/` (owner ruling 2026-09-30) and the `Math` work: Phase 1 (exact `sign` / `round` / `hypot`, Math results at the declared type) DONE 2026-10-06; Phases 2–4 wait on the owner's decisions D1–D6. |
 | [wasic-modularization-plan.md](wasic-modularization-plan.md) | Plan of record for splitting `src/wasic.ts` (letter H12): the layers, the seam rules and gate, the phases. |
