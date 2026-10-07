@@ -82,6 +82,16 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
   The measurement scripts (`check_relocs.ts` and its friends) were scratch; their method is in
   the draft.
+  - **binaryang reviewed the draft (2026-10-06): accurate, fine to send as is.** Their positions:
+    - Bundle before optimising and verify first; this applies to binaryang too, whose reader and
+      writer re-encode the 5-byte padded LEBs at relocation sites. So `wasm-bundle` ties each
+      relocation to its instruction AS IT READS, and refuses stale relocations like missing
+      ones. Our check is their starting test.
+    - DWARF: their default is to DROP debug sections in a bundle, with a printed note; they will
+      put it to the owner when building.
+    - `linking` with no `reloc.CODE` means nothing to relocate: agreed.
+
+    The draft stays DRAFT until the owner sends it.
 
 - **H10** (generated opcode / feature tables) waits on **H9**: binaryang 1.8.1 exports no
   `./definitions`. Our exact request (D2 + D3 first, then D1; field lists; a pinned subpath) was
