@@ -27,6 +27,13 @@ universalWasmLoader SPEC 3.0.0) plus workspace rows I2 / I10 / I11 / C1 / S4. Li
   `.wit`, and a canonical-ABI SUBSET (s32/s64/f32/f64/bool/string) "as produced by wasmtk". The WASI
   shim is optional in 3.0.0. Its fixtures are `wasmtk modc` outputs.
 
+> **2026-10-06, binaryang letter: the owner DECIDED part of #1.** `wasmbundle` moves to binaryang
+> as `wasm-bundle` (imported back via `./wasm-bundle`). It keeps one shared memory: multi-memory is
+> ruled out because wazero fails it. Relocation is EXACT, from the tool-conventions `linking` /
+> `reloc.*` sections. A module without them is refused, or range-relocated with a printed warning.
+> Conflict policy, WASI dedup and `_start` move with it; `witgen` and the prompt stay ours. Our
+> producer measurements are drafted in `scripts/binaryang-report.md` (see next-work.md).
+
 ## Candidates
 
 | # | wasmtk responsibility (size) | could move to | trigger | blocker / note |
