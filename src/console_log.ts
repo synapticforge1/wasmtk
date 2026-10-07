@@ -443,6 +443,57 @@ export type ClosureVarLookup = (name: string) => {
   funcType: string; // e.g. "$ftype_i32_r_f64"
 } | undefined;
 
+/** True if `e` is KNOWN to be a float: a float literal (`2.5`, `1e3`) or a variable declared
+ *  f64 / f32. (sw15's console twin, 2026-10-06.) */
+function isKnownFloat(
+  e: string,
+  locals: Map<string, string>,
+  globals?: Map<string, string>,
+): boolean {
+  const t = e.trim();
+  if (/^-?\d+\.\d*([eE][+-]?\d+)?$|^-?\d+[eE][+-]?\d+$/.test(t)) return true;
+  if (!/^\w+$/.test(t)) return false;
+  const ty = locals.get(t) ?? globals?.get(t);
+  return ty === "f64" || ty === "f32";
+}
+
+/** A condition by JavaScript truthiness (sw16's console twin, 2026-10-06): a KNOWN float is true
+ *  when `|x| > 0` (nonzero, not NaN); anything else is exprToWat at i32, as before. A float
+ *  condition used to reach an `if` raw, an invalid module. */
+function condToWat(
+  cond: string,
+  locals: Map<string, string>,
+  funcLookup?: FuncLookup,
+  allocString?: DataAllocator,
+  arrayLookup?: ArrayLookup,
+  structLookup?: StructFieldLookup,
+  globals?: Map<string, string>,
+): string {
+  if (isKnownFloat(cond, locals, globals)) {
+    const w = exprToWat(
+      cond,
+      locals,
+      "f64",
+      funcLookup,
+      allocString,
+      arrayLookup,
+      structLookup,
+      globals,
+    );
+    return `(f64.gt (f64.abs ${w}) (f64.const 0))`;
+  }
+  return exprToWat(
+    cond,
+    locals,
+    "i32",
+    funcLookup,
+    allocString,
+    arrayLookup,
+    structLookup,
+    globals,
+  );
+}
+
 /** Allocates ALREADY-DECODED text (a literal segment's `text`). The DataAllocator unescapes its
  *  input, as source text needs; decoded text was unescaped a second time, so `"C:\\tmp"` printed
  *  `C:<TAB>mp` (sw24, 2026-10-06). Re-escaping the backslashes makes that unescape the identity. */
@@ -672,10 +723,10 @@ function parseSingleArg(
         return !!cm && funcLookup?.(cm[1]!)?.result === "string";
       };
       if (isStringBranch(thenPart) || isStringBranch(elsePart)) {
-        const condWat = exprToWat(
+        // By truthiness: a float condition (`half ? "t" : "f"`) reached the `if` raw (sw16 twin).
+        const condWat = condToWat(
           condPart,
           locals,
-          "i32",
           funcLookup,
           allocString,
           arrayLookup,
@@ -1721,7 +1772,11 @@ function parseSingleArg(
       ),
     }];
   }
-  if (leadType === "i32" || leadType === "bool") {
+  // An i32-led expression with a KNOWN float in it (`i + f`, `i * 0.5`) is a float (sw15's console
+  // twin, 2026-10-06); printing an integral value as f64 gives the same text, so this is safe.
+  const hasKnownFloat = [...token.matchAll(/(?<![\w.])(-?\d+\.\d*(?:[eE][+-]?\d+)?|[A-Za-z_]\w*)/g)]
+    .some((m) => isKnownFloat(m[1]!, locals, globals));
+  if ((leadType === "i32" || leadType === "bool") && !hasKnownFloat) {
     return [{
       kind: "i32expr",
       wat: exprToWat(
@@ -2589,17 +2644,15 @@ function exprToWat(
   }
 
   // Ternary: cond ? then : else
-  const ternQ = findTopLevelOp(expr, "?");
-  if (ternQ !== -1) {
-    const rest = expr.slice(ternQ + 1);
-    const ternC = findTopLevelOp(rest, ":");
-    if (ternC !== -1) {
-      const cond = expr.slice(0, ternQ).trim();
-      const thenPart = rest.slice(0, ternC).trim();
-      const elsePart = rest.slice(ternC + 1).trim();
+  // The FIRST top-level `?` and its own `:` (splitTernary): `c1 ? A : c2 ? B : C` grouped from the
+  // LAST `?` printed 1 for -5 (sw12's console half, 2026-10-06).
+  const ternSplit = splitTernary(expr);
+  if (ternSplit) {
+    {
+      const [cond, thenPart, elsePart] = ternSplit;
       const resType = isFloat ? expectedType : "i32";
       return `(if (result ${resType}) ${
-        exprToWat(cond, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals)
+        condToWat(cond, locals, funcLookup, allocString, arrayLookup, structLookup, globals)
       } (then ${
         exprToWat(
           thenPart,
@@ -2728,12 +2781,24 @@ function exprToWat(
   // division/remainder. Skip a candidate when another member of its group sits further right, so
   // the later entry splits at the RIGHTMOST operator. This mirrors the identical guard in wasic.ts's
   // emitExpr; the two binary-op loops are parallel code paths and must be fixed together.
-  const MUL_GROUP = ["*", "/", "%"];
-  const mulRightmost = Math.max(...MUL_GROUP.map((o) => findTopLevelOp(expr, o)));
+  // Every same-precedence group splits at its rightmost member, as in wasic.ts's emitExpr (the
+  // parallel path; sw17, 2026-10-06): `a >> 2 << 1` split at `>>` and printed 4 instead of 32.
+  const SAME_PREC = [
+    ["===", "!==", "==", "!="],
+    ["<=", ">=", "<", ">"],
+    [">>>", ">>", "<<"],
+    ["+", "-"],
+    ["*", "/", "%"],
+  ];
+  const rightmostOf = new Map<string, number>();
+  for (const grp of SAME_PREC) {
+    const r = Math.max(...grp.map((o) => findTopLevelOp(expr, o)));
+    for (const o of grp) rightmostOf.set(o, r);
+  }
   for (const [op, f64op, i32op, positiveIdx, alwaysI32] of binOps) {
     const idx = findTopLevelOp(expr, op);
     if (idx === -1) continue;
-    if (MUL_GROUP.includes(op) && idx < mulRightmost) continue;
+    if (idx < (rightmostOf.get(op) ?? -1)) continue;
     if (positiveIdx && idx === 0) continue;
     const lhs = expr.slice(0, idx).trim();
     const rhs = expr.slice(idx + op.length).trim();
@@ -2741,20 +2806,19 @@ function exprToWat(
     // a guarded RHS side effect (e.g. `i < len && s.charCodeAt(i) === c`) does not run when the
     // LHS already decides the result. Avoids OOB access and the wasmmerge call-in-i32.and trap.
     if (op === "&&" || op === "||") {
-      const lWat = exprToWat(
+      // Operands by truthiness (sw16's console twin): a float operand reached the `if` raw.
+      const lWat = condToWat(
         lhs,
         locals,
-        "i32",
         funcLookup,
         allocString,
         arrayLookup,
         structLookup,
         globals,
       );
-      const rWat = exprToWat(
+      const rWat = condToWat(
         rhs,
         locals,
-        "i32",
         funcLookup,
         allocString,
         arrayLookup,
@@ -2828,12 +2892,16 @@ function exprToWat(
         effLhsType = firstTypedAtom(rhs);
       }
     }
+    // An i32 left operand meeting a KNOWN float right one computes in f64 (sw15's console twin,
+    // 2026-10-06): `i + f` was `i32.add` over an f64 global, an invalid module.
     const opType = alwaysI32
       ? "i32"
       : effLhsType === "i64"
       ? "i64"
-      : effLhsType === "i32" || effLhsType === "bool"
+      : (effLhsType === "i32" || effLhsType === "bool") && !isKnownFloat(rhs, locals, globals)
       ? "i32"
+      : (effLhsType === "i32" || effLhsType === "bool")
+      ? "f64"
       : numType;
     const watOp = (opType === "f64" || opType === "f32")
       ? f64op
@@ -3103,7 +3171,8 @@ function findTopLevelOp(expr: string, op: string): number {
       if (op === ">" && (after === "=" || after === ">" || before === ">")) continue;
       if (op === "=" && after === "=") continue;
       if (op === "!" && after === "=") continue;
-      if (op === "==" && (after === "=" || before === "=")) continue; // avoid ===
+      // avoid matching inside `===` and `!==` (see wasic.ts's findBinaryOp)
+      if (op === "==" && (after === "=" || before === "=" || before === "!")) continue;
       if (op === "!=" && after === "=") continue; // avoid !==
       if (op === "&" && (after === "&" || before === "&")) continue;
       if (op === "|" && (after === "|" || before === "|")) continue;

@@ -128,6 +128,11 @@
     printed `1`; and a closure mutating its captured counter returned the same value on every
     call (sw20, ld02, sw24, sw25, sw32). Test `7b_ConsoleOperatorsAndClosures`. Found: sw48
     (a mutated captured PARAMETER still copies), ld20–ld22 (closure forms refused).
+21. **Operator precedence, grouping and typing (2026-10-06).** `-x + 5`, `!a && b`, chained
+    ternaries, `2 ** 3 + 1`, `a >> 2 << 1` and every other same-precedence chain now group as
+    JavaScript does; `"h=" + (n >> 1)` prints `h=4`; `i + f` with a float operand is a float;
+    `if (0.5)` is true and `if (NaN)` false. In wasic and inside `console.log` (sw10–sw17). Test
+    `4_OperatorSemantics`. Found: sw49 (`&&` / `||` give a boolean, not an operand), ld23.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

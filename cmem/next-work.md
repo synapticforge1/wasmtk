@@ -33,11 +33,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
   (the `Math` additions) and Phase 4 (the user page) wait on the owner's decisions D1–D6.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **17 open silent-wrong, 19 open
-  loud** (2026-10-06: sw20, sw24, sw25, sw32, ld02 fixed; sw48, ld20–ld22 found).
-  - NEXT: the wasic operator rows (sw10–sw17; sw15, an operator typed from its LEFT operand, also
-    breaks `x * -k` in `console.log`), then sw06–sw09, sw19, sw28, sw48, then Phase 0b audit
-    round 2.
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **10 open silent-wrong, 20 open
+  loud** (2026-10-06: sw10–sw17 fixed in both paths; sw49, ld23 found).
+  - Open silent: sw06–sw09, sw19, sw28, sw48, sw49; sw36, sw37 wait on wasm-math D1.
+  - NEXT: sw06–sw09 (string building), sw19, sw28, then sw48 / sw49, then Phase 0b audit round 2.
 - ⏳ **wast: 7 `(module definition …)`s V8 refuses for its own size caps** (`memory64` 1, `table`
   1, `table64` 1, `memory_max_i64` 4). A definition asserts only validity, so binaryang's
   `wasmValidate` ACCEPTING it can be the verdict; its soundness condition is the mirror of the
@@ -85,6 +84,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Completed — dated summaries (details in the files named)
 
+- **2026-10-06 — operator precedence, grouping and typing** (compiler-bugs.md sw10–sw17), in wasic
+  and the console path.
 - **2026-10-06 — console `%`, escapes, boolean ternaries; closure state** (compiler-bugs.md sw20,
   sw24, sw25, sw32, ld02).
 - **2026-10-06 — top-level code beside `main`** (compiler-bugs.md sw46, sw47): the top level runs
