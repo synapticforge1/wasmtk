@@ -72,8 +72,7 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 - **`wasm-bundle` (binaryang letter, 2026-10-06):** the owner decided `wasmbundle` moves to
   binaryang as `wasm-bundle`, which we import back (`./wasm-bundle`), with relocation done
   EXACTLY from the tool-conventions `linking` / `reloc.*` sections. They asked whether each
-  producer can emit them. Measured 2026-10-06, reply DRAFTED in `scripts/binaryang-report.md`
-  (not yet sent):
+  producer can emit them. Measured 2026-10-06, reply SENT 2026-10-06 (`scripts/binaryang-report.md`):
   - Rust: yes, correct.
   - Zig: yes, via `build-obj` + `zig wasm-ld`.
   - TinyGo: its post-link `wasm-opt` leaves the relocations STALE; the `.o` + `wasm-ld` route
@@ -91,7 +90,7 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
       put it to the owner when building.
     - `linking` with no `reloc.CODE` means nothing to relocate: agreed.
 
-    The draft stays DRAFT until the owner sends it.
+    SENT 2026-10-06; binaryang's response is above. Nothing of ours is open on it; they build next.
 
 - **H10** (generated opcode / feature tables) waits on **H9**: binaryang 1.8.1 exports no
   `./definitions`. Our exact request (D2 + D3 first, then D1; field lists; a pinned subpath) was
