@@ -7,16 +7,18 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 17 | 59 | 0 | 17 |
-| LOUD | 19 | 23 | 1 | 8 |
+| SILENT-WRONG | 10 | 67 | 0 | 17 |
+| LOUD | 20 | 23 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 69 rows of the Phase 0b round-1 table (sw35 the 48th, sw36 the 49th, sw37–sw40 and ld15 the 50th–54th, 2026-09-30; sw41, ld16, ld17 the 55th–57th, sw42–sw44 and ld18 the 58th–61st, sw45 and ld19 the 62nd–63rd, sw46 the 64th, sw47 the 65th, sw48 and ld20–ld22 the 66th–69th, 2026-10-06) (each row counted as one
+80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 71 rows of the Phase 0b round-1 table (sw35 the 48th, sw36 the 49th, sw37–sw40 and ld15 the 50th–54th, 2026-09-30; sw41, ld16, ld17 the 55th–57th, sw42–sw44 and ld18 the 58th–61st, sw45 and ld19 the 62nd–63rd, sw46 the 64th, sw47 the 65th, sw48 and ld20–ld22 the 66th–69th, sw49 and ld23 the 70th–71st, 2026-10-06) (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 17** (2026-10-06, later: the console rows sw20, sw24, sw25
+**Open silent-wrong in the compiler: 10** (2026-10-06, evening: wasic's operator rows sw10–sw17
+fixed in BOTH paths; sw49 and loud ld23 found: 17 → 10 silent, 19 → 20 loud). Before that, **17**
+(2026-10-06, later: the console rows sw20, sw24, sw25
 and sw32 (a closure bug, not a console one) fixed, loud ld02 too; sw48 and loud ld20–ld22 found:
 20 → 17 silent, 17 → 19 loud). Before that, **20** (2026-10-06, late: sw46 fixed, top-level code beside
 a `main` function; sw47 found and fixed with it: 21 → 20). Before that, **21** (2026-10-06,
@@ -72,14 +74,15 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | sw07 | `console.log(s.includes("b"))`: `true` → `1` | wasic dotCallLookupFn |
 | sw08 | `s.indexOf(String(n))`: `2` → `0` (quietEmit nested failure) | wasic quietEmit sites |
 | sw09 | array in a template/console: `v=1,2,3` → `v=260` (a pointer) | both |
-| sw10 | `-x + 5`: `2` → `-8` (unary minus takes the rest) | wasic emitExpr |
-| sw11 | `!a && b`: `no` → `yes` | both |
-| sw12 | `c1 ? A : c2 ? B : C` grouped from the right: `-1` → `1`. NARROWED 2026-09-29: the console STRING-ternary half is fixed with sw02 (`splitTernary`); the wasic numeric half is not | wasic |
-| sw13 | `2 ** 3 + 1`: `9` → `16` | wasic |
-| sw14 | a comparison anywhere infers bool: `"h=" + (n >> 1)`: `h=4` → `h=true`. NARROWED 2026-09-28: the declaration half (`const h = n >> 1`) is gone with the typed-declaration rule, the concat half is not | wasic inferInitType (concat operand typing) |
-| sw15 | binop typed from the LEFT operand: `i + f` = `3.5` → `3` | wasic lhsType |
-| sw16 | `if (0.5)` truncates: `yes` → `no` | wasic |
-| sw17 | `a >> 2 << 1`: `32` → `4` | wasic op table |
+| ~~sw10~~ | ✅ FIXED 2026-10-06: `-x + 5`: `2` → `-8`. Unary `-`, `!`, `~` (and `**`) apply only when no binary operator is at top level (`hasTopLevelBinaryOp`). Test `4_OperatorSemantics` | wasic emitExpr |
+| ~~sw11~~ | ✅ FIXED 2026-10-06: `!a && b`: `no` → `yes` (same rule as sw10). PRINTING `!a && b` still gives `true` where JavaScript gives the operand `0`: that is sw49 | both |
+| ~~sw12~~ | ✅ FIXED 2026-10-06: `c1 ? A : c2 ? B : C` grouped from the right: `-1` → `1`. wasic's `splitTernaryTop` and the console's numeric ternary now split at the FIRST `?` and its own `:`. Test `4_OperatorSemantics` | wasic + console |
+| ~~sw13~~ | ✅ FIXED 2026-10-06: `2 ** 3 + 1`: `9` → `16`. `**` is taken only when no lower-precedence operator is at top level | wasic |
+| ~~sw14~~ | ✅ FIXED 2026-10-06: a comparison ANYWHERE inferred bool: `"h=" + (n >> 1)`: `h=4` → `h=true`. `hasTopLevelBoolOp` looks at top level only and skips shifts and `=>` | wasic inferInitType |
+| ~~sw15~~ | ✅ FIXED 2026-10-06: binop typed from the LEFT operand: `i + f` = `3.5` → `3`. An i32 left operand meeting a KNOWN float (a float literal or a variable declared f64 / f32) computes in f64, in wasic and in the console (where the segment prints as f64 too). A first cut trusted `inferExprType`, whose fallback is f64, and built `f64.mul` over `i32.load`s: caught by golden-WAT before the gate | wasic + console |
+| ~~sw16~~ | ✅ FIXED 2026-10-06: `if (0.5)` truncated: `yes` → `no`. `emitCond` (if / while / for / ternary / `!` / `&&` / `||`): when the emitter truncated a float to fit the i32 context, the truncation becomes `|x| > 0` (nonzero, not NaN). Decided on the emitted WAT: a first cut used `inferExprType`, which calls `isNaN(x)` f64, and wrapped comparisons in `f64.abs`. Console twin `condToWat` | wasic + console |
+| ~~sw17~~ | ✅ FIXED 2026-10-06: `a >> 2 << 1`: `32` → `4`. Every same-precedence group (equality, relational, shift, additive, multiplicative) splits at its rightmost member, in both paths. That exposed `findBinaryOp` matching `==` inside `!==` (`s[i] !== "x"` split as `s[i] !` / `= "x"`): fixed in both. `a - b + c` is now `(a - b) + c` (identical in i32; the date library re-recorded) | wasic + console op tables |
+| sw49 | OPEN (found fixing sw11, 2026-10-06): `a && b` / `a || b` give a BOOLEAN where JavaScript gives an operand: `console.log(!a && b)` with b = 0 prints `true` (JavaScript `0`). A declaration `const y: i32 = x || 7` happens to give 7. Repro `sw49_logical_and_returns_boolean.ts` | wasic + console `&&` / `\|\|` |
 | ~~sw18~~ | ✅ FIXED 2026-09-30 (LOUD since that morning): `console.log(n << 2)`: `12` → `true`. `findTopLevelOp` scans right to left and skipped only the FIRST `<` of `<<` (`after === "<"`), so the second split `n <` from `2`; it now skips a `<` with a `<` on either side. Test `7b_ConsoleOperatorSplit` | console_log findTopLevelOp |
 | sw19 | `x ?? 5` on a non-nullable 0: `0` → `5` | wasic |
 | ~~sw20~~ | ✅ FIXED 2026-10-06: `console.log(-7 % 4)`: `-3` → `1`. The console `%` is `i32.rem_s` (JavaScript's sign of the dividend, as wasic's emitExpr). Test `7b_ConsoleOperatorsAndClosures` | console_log |
@@ -126,6 +129,7 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~ld16~~ | ✅ FIXED 2026-10-06: `console.log(String(x))` emitted `call $String`, an undefined function. A console `String(...)` now goes through wasic's string resolver (emitStringAssign owns `String(...)`), and anything it cannot build is a diagnostic. `String(<string local>)` keeps the old pass-through (see sw44). Test `7b_ConsoleNumberFormatting` | console_log call path |
 | ~~ld17~~ | ✅ FIXED 2026-10-06: `console.log(z)` of any `f32` value was an invalid module: the printer was handed a raw f32. Every producer of an f64 segment whose source may be f32 (locals, globals, calls, closures, struct fields, 2D elements, nullish) now goes through `promoteF32`. Test `7b_ConsoleNumberFormatting` | console f64 printer |
 | ~~ld18~~ | ✅ FIXED 2026-10-06: an `f32` STRUCT FIELD was loaded with `i32.load` (`memLoadOp` now). Underneath it, NO f32 value was ever converted at an f32 boundary (`const a: f64 = z + 1` with an f32 local was an invalid module on main): `emitExpr` is now a wrapper that reads the emitted WAT's result type from its outermost form (`watResultType`) and converts only when exactly one side is f32 (in valid WAT that never happens, so no valid output changed: golden-WAT 0 entries); an f32 operand meeting an f64 computes in f64; `f32 → i32` uses `i32.trunc_f32_s`. The console twin got `f32AsExpected` on its element and field loads. Test `9_F32Containers` | wasic + console_log f32 |
+| ld23 | OPEN (found fixing sw17, 2026-10-06; fails on main too): a comparison between booleans, `2 < 3 === true`: the equality is typed f64 from its literal-led left side over an i32 comparison result, an invalid module. Repro `ld23_compare_boolean_with_boolean.ts` | wasic + console comparison typing |
 | ld20 | OPEN (found fixing sw32, 2026-10-06): a function that RETURNS a block-bodied arrow (`return () => { c++; return c; };`, one line or several): `Unsupported statement`. The object-literal form (`return { inc: () => { … } }`) works. Repro `ld20_returned_block_arrow.ts` | wasic arrow lifting |
 | ld21 | OPEN (found fixing sw32, 2026-10-06): an object literal returning TWO closures (`{ up: () => { ++v; return v; }, get: () => v }`): `Unsupported expression`. Repro `ld21_object_of_two_closures.ts` | wasic arrow lifting |
 | ld22 | OPEN (found fixing sw32, 2026-10-06): `console.log(rd.g())`, a closure held in a struct field called inside console.log: `cannot emit the expression 'rd.g()'`. Repro `ld22_console_struct_closure_call.ts` | console_log call path |

@@ -264,6 +264,18 @@ high-value subset.
 
 ## Numeric / codegen correctness
 
+- **Operator grouping follows JavaScript's precedence table, in BOTH emitters (2026-10-06,
+  sw10–sw17).** The ternary splits at the FIRST top-level `?` and its own `:` (right-assoc);
+  unary `- ! ~` and `**` apply only when no binary operator is at top level; every
+  same-precedence group (equality, relational, shift, additive, multiplicative) splits at its
+  RIGHTMOST member (left-assoc); `**` at its leftmost (right-assoc). An operator table in
+  precedence order is not enough on its own: table order inside a group is NOT precedence.
+- **A code-shape decision never rests on a type FALLBACK (2026-10-06).** `inferExprType`
+  defaults to f64 for what it does not know. sw15 widens an i32 op to f64 only for a KNOWN float
+  (a float literal, a variable declared f64 / f32); sw16's truthiness test fires only when the
+  EMITTED WAT truncated a float (`i32.trunc_f64_s`). Both first cuts trusted the inference and
+  built invalid WAT; golden-WAT caught them before the gate.
+
 - **A thrown value carries its KIND (owner-approved design change, 2026-10-06, sw44).** The
   exception payload stays `(ptr, len)` (`$__exn_tag`'s signature, which `utils.ts` reads for an
   uncaught throw, is unchanged). Beside it: `$__exn_kind` (0 = string / number / boolean, 1–7 =
