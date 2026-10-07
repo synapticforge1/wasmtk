@@ -112,6 +112,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-06, top-level code beside `main` (sw46, sw47), full gate green.** wasi **441/441**
+> (+`56_TopLevelBesideMain`) · golden-WAT **498 / 0** after a deliberate re-record: 9 entries
+> changed, all sw46 (7 now initialise their top-level `guard` array, 1 gains harmless comments for
+> type-union continuation lines, whitespace in `(call $main )`); all 9 still match Deno; +1 new ·
+> engine 1152 on baseline · wast 64,506 / 0 / 16 · Go 7/7/12 · every other suite as before.
+> Round-1 repros: 20 DIFFER = open silent 20; 17 loud. NOTE: the installed `wasmtk` is a shim
+> over this repo's `src/`, so a source edit DURING a gate run leaks into the rest of the run.
+>
 > **2026-10-06, the thrown kind (sw44), full gate green.** wasi **440/440** (+`15_ThrownKind`,
 > +`15_ThrownKindAsync`) · golden-WAT **497 / 0** after a deliberate re-record: 25 entries
 > changed, every line sw44's (the kind global and its sets, catch `__kind` locals, `$__exn_str`,
