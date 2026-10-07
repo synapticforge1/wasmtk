@@ -118,6 +118,11 @@
     string itself for a thrown string; `e instanceof Error` is a run-time test, now FALSE for a
     thrown string (as in JavaScript; it used to be always true). Re-throws and awaited rejections
     keep the kind (sw44). Tests `15_ThrownKind`, `15_ThrownKindAsync`. Found: sw46.
+19. **Top-level code beside a `main` function runs (2026-10-06).** Defining any function named
+    `main` made the program run ONLY `main`: every other top-level statement was dropped, arrays
+    declared at top level stayed uninitialised, and `main` ran even if never called (sw46). Also
+    fixed: a function's `console.log` of a top-level array printed `0` (sw47). Test
+    `56_TopLevelBesideMain`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

@@ -3397,8 +3397,9 @@ class WasicTranspiler {
           continue;
         }
 
-        // Pattern 1 trailing call: main(); — hasMain handles it
-        if (/^main\s*\(\s*\)\s*;?$/.test(line)) continue;
+        // Pattern 1 trailing call: main(); — KEPT as a top-level statement (sw46, 2026-10-06). It
+        // used to be dropped here for the `call $main` shortcut, which then ran only when nothing
+        // else was at top level; any other statement meant main was never called at all.
 
         // Skip bare closing braces, comment lines, and export/import statements
         if (line === "}" || line === "};" || line === ";") continue;
@@ -12962,10 +12963,13 @@ ${prefixed}
       const arrayLookupFn = (name: string) => {
         const av = this.arrayVars.get(name);
         if (av) {
-          return {
-            ...av,
-            isGlobal: this.moduleGlobals.has(name) && this.moduleArrayVars.has(name),
-          };
+          // The SAME test wasic's own reads use (isModuleGlobalArr). `moduleArrayVars` alone
+          // missed a top-level array read inside a function, and ptr -2 was then emitted as the
+          // constant ADDRESS -2: `console.log(total[1], total.length)` printed `0 0` (sw47,
+          // 2026-10-06). A -2 array is runtime-addressed, so it is `dynamic` for the console path.
+          const isGlobal = this.isModuleGlobalArr(name) ||
+            (this.moduleGlobals.has(name) && this.moduleArrayVars.has(name));
+          return { ...av, isGlobal, dynamic: av.dynamic || av.ptr === -2 };
         }
         const ta = this.typedArrayVars.get(name);
         if (ta) {
@@ -13418,10 +13422,13 @@ ${prefixed}
       const arrayLookupFn = (name: string) => {
         const av = this.arrayVars.get(name);
         if (av) {
-          return {
-            ...av,
-            isGlobal: this.moduleGlobals.has(name) && this.moduleArrayVars.has(name),
-          };
+          // The SAME test wasic's own reads use (isModuleGlobalArr). `moduleArrayVars` alone
+          // missed a top-level array read inside a function, and ptr -2 was then emitted as the
+          // constant ADDRESS -2: `console.log(total[1], total.length)` printed `0 0` (sw47,
+          // 2026-10-06). A -2 array is runtime-addressed, so it is `dynamic` for the console path.
+          const isGlobal = this.isModuleGlobalArr(name) ||
+            (this.moduleGlobals.has(name) && this.moduleArrayVars.has(name));
+          return { ...av, isGlobal, dynamic: av.dynamic || av.ptr === -2 };
         }
         const ta = this.typedArrayVars.get(name);
         if (ta) {
@@ -19978,7 +19985,15 @@ ${sum}
     // In library mode skip entirely: no entry point, and top-level statements (console.log etc.) must not
     // influence hasConsoleLog / helper flags for the library binary.
     const hasUserStart = this.functions.some((f) => f.name === "_start");
-    const hasMain = !hasUserStart && this.functions.some((f) => f.name === "main");
+    // The `call $main` shortcut only when the top level is empty or nothing but `main()` calls.
+    // It used to win whenever a `main` function existed, so every OTHER top-level statement was
+    // dropped (`console.log("before"); main(); console.log("after")` printed only main's output),
+    // async or not (sw46, 2026-10-06). Otherwise the top level runs as written, `main()` included.
+    const startStmts = this.startBodyLines.filter((l) => l.trim() !== "");
+    const onlyMainCalls = startStmts.length === 0 ||
+      (startStmts.length === 1 && /^main\s*\(\s*\)\s*;?$/.test(startStmts[0].trim()));
+    const hasMain = !hasUserStart && this.functions.some((f) => f.name === "main") &&
+      onlyMainCalls;
     let startBody: string;
     if (this.mode === "library") {
       startBody = ""; // unused in library mode — _start is never emitted

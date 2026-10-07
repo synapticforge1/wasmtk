@@ -33,11 +33,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
   (the `Math` additions) and Phase 4 (the user page) wait on the owner's decisions D1–D6.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **21 open silent-wrong, 17 open
-  loud** (2026-10-06: f32 in containers fixed, sw43 + ld18; sw45 found and fixed; ld19 found).
-  - **sw46 (found 2026-10-06, the same on main): with an async `main()`, every other top-level
-    statement is dropped.** Silent, and any async program with top-level code hits it. First
-    candidate when work resumes.
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **20 open silent-wrong, 17 open
+  loud** (2026-10-06: sw46 + sw47 fixed).
   - NEXT: the console-only silent rows (sw20 `rem_u`, sw24 escapes, sw25 bool branches, sw32),
     then the wasic operator rows (sw10–sw17; sw15, an operator typed from its LEFT operand, also
     breaks `x * -k` in `console.log`), then Phase 0b audit round 2.
@@ -88,6 +85,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Completed — dated summaries (details in the files named)
 
+- **2026-10-06 — top-level code beside `main`** (compiler-bugs.md sw46, sw47): the top level runs
+  as written; a function's `console.log` reads top-level arrays correctly.
 - **2026-10-06 — the thrown kind** (compiler-bugs.md sw44; owner approved): `String(e)`, `${e}`,
   `instanceof` of a caught value follow what was thrown.
 - **2026-10-06 — f32 in containers** (compiler-bugs.md sw43, ld18, sw45): f32 arrays and struct
