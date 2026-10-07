@@ -3019,9 +3019,17 @@ class WasicTranspiler {
         if (retObjLine) {
           // Build outer scope (params + top-level declarations before the return)
           const outerVarNames = new Set<string>(factoryParams.map((p) => p.name));
+          // Declared i32 / bool locals: what a box (a 4-byte i32 cell, initialised at the
+          // declaration) can hold. sw32 boxes these even for ONE mutating arrow; a parameter (no
+          // declaration fills its box) or an f64 (the cell would truncate it) is not boxed alone.
+          const boxableLocals = new Set<string>();
           for (const bl of bodyLines) {
-            const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*(?::\s*\w+)?\s*=/);
-            if (vm) outerVarNames.add(vm[1]);
+            const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+))?\s*=/);
+            if (vm) {
+              outerVarNames.add(vm[1]);
+              const vt = vm[2] ? mapType(vm[2]) : undefined;
+              if (vt === "i32" || vt === "bool") boxableLocals.add(vm[1]);
+            }
           }
           // Extract object literal content
           let od = 0, oStart = -1, oEnd = -1;
@@ -3067,12 +3075,14 @@ class WasicTranspiler {
                 }
               }
               // Detect mutations: id++, ++id, id--, --id, id op= x, id = x (not ==)
+              // All three alternatives: `id++`, `++id` (group 2, missed when only group 1 was read)
+              // and `id op= x`.
               for (
-                const [, id] of bodyPart.matchAll(
+                const mm of bodyPart.matchAll(
                   /\b(\w+)\s*(?:\+\+|--)|(?:\+\+|--)\s*(\w+)|\b(\w+)\s*(?:[+\-*\/%&|^]|<<|>>|>>>)?=(?!=)/g,
                 )
               ) {
-                const mutId = id || "";
+                const mutId = mm[1] || mm[2] || mm[3] || "";
                 if (mutId && outerVarNames.has(mutId)) mutatedVars.add(mutId);
               }
               // Also catch augmented assignments like count += 1
@@ -3082,9 +3092,15 @@ class WasicTranspiler {
                 if (outerVarNames.has(id)) mutatedVars.add(id);
               }
             });
+            // A captured variable an arrow MUTATES lives in a heap box, even with ONE arrow: a
+            // closure captures by reference, so `n++` must survive the call. Only arrows sharing
+            // it (>= 2) were boxed; a lone `inc: () => { n++; return n; }` incremented a copy and
+            // returned 1 every time (sw32, 2026-10-06).
             const shared = new Set<string>();
             for (const [id, arrowSet] of refByArrow) {
-              if (arrowSet.size >= 2 && mutatedVars.has(id)) shared.add(id);
+              if (mutatedVars.has(id) && (arrowSet.size >= 2 || boxableLocals.has(id))) {
+                shared.add(id);
+              }
             }
             if (shared.size > 0) sharedMutableCaptures = shared;
           }

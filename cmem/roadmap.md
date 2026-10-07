@@ -123,6 +123,11 @@
     declared at top level stayed uninitialised, and `main` ran even if never called (sw46). Also
     fixed: a function's `console.log` of a top-level array printed `0` (sw47). Test
     `56_TopLevelBesideMain`.
+20. **Console `%`, escapes and boolean ternaries; closures that count (2026-10-06).** `-7 % 4`
+    printed `1`; a float `%` would not build; `"C:\\tmp"` printed a tab; `n > 0 ? true : false`
+    printed `1`; and a closure mutating its captured counter returned the same value on every
+    call (sw20, ld02, sw24, sw25, sw32). Test `7b_ConsoleOperatorsAndClosures`. Found: sw48
+    (a mutated captured PARAMETER still copies), ld20–ld22 (closure forms refused).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
