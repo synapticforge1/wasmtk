@@ -7,9 +7,11 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
-> **2026-10-06, owner: PAUSE after wasm-math Phase 1 and wait for binaryang to catch up** (H9's
-> `./definitions`, which our SENT 2026-09-30 letter asks for, unblocks H10). Resume from the list
-> below; nothing is half-done.
+> **2026-10-06, end of day, owner: PAUSE.** Since the morning pause: wasm-math Phase 1, its finds,
+> f32 in containers, the thrown kind (sw44), top-level code beside `main`, the console rows, and
+> the operator rows, all merged locally (`1bfd3e3` … `68a60f4`); the `wasm-bundle` reply SENT.
+> Nothing is pushed; nothing is half-done; `main` is clean. Resume from the list below. binaryang
+> builds `wasm-bundle` and, with it or before, `./definitions` (H9 → our H10).
 
 - ⏳ **H6 (workspace letter, owner chose it 2026-09-30).** Done: H6.1 SemVer `2465ad0`, H6.2 the ★
   block `159e0df`, H6.3 the compatibility gate `4d7d8da` + reviewed exceptions `17e2054`, H6.4 the
@@ -56,7 +58,17 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   I2 / H11). Trigger: binaryang RELEASES its one-front-end stage 5 (not in 1.8.x).
 - **The next release** (roadmap.md, the unreleased block since v2.0.3): the compatibility gate's
   floor since v2.0.3 is MINOR (next ≥ 2.1.0; `deno task api-surface --floor`); the Deno floor is
-  written then (workflow.md, release step 2b).
+  written then (workflow.md, release step 2b). **The notes must name the BEHAVIOUR changes since
+  v2.0.3** (the package surface is unchanged, but programs can print differently):
+  - `e instanceof Error` is false for a thrown string or number, and `String(e)` follows what
+    was thrown (sw44);
+  - top-level code beside a `main` function now runs (sw46);
+  - operators group as in JavaScript, and an `i32` mixed with a known float computes as a float
+    (sw10–sw17);
+  - `console.log(-0)` prints `-0` (sw41);
+  - `Math.round` / `sign` / `hypot` match JavaScript exactly (wasm-math Phase 1).
+
+  Whether any of these makes the release MAJOR is the owner's call.
 
 - **Review WasmEdge's AOT shared-library output** (owner, 2026-09-30):
   https://github.com/WasmEdge/WasmEdge. How a wasm module becomes a native library through
