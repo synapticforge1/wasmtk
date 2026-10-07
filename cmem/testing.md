@@ -112,6 +112,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-06, console `%` / escapes / boolean ternaries, closure state (sw20, sw24, sw25,
+> sw32, ld02), full gate green.** wasi **442/442** (+`7b_ConsoleOperatorsAndClosures`) ·
+> golden-WAT **499 / 0**: 1 entry changed (`rem_u` → `rem_s` on positive operands, same
+> result), +1 new · engine 1152 on baseline · wast 64,506 / 0 / 16 · Go 7/7/12 · every other
+> suite as before. Round-1 repros: 17 DIFFER = open silent 17; 17 + 2 = open loud 19.
+>
 > **2026-10-06, top-level code beside `main` (sw46, sw47), full gate green.** wasi **441/441**
 > (+`56_TopLevelBesideMain`) · golden-WAT **498 / 0** after a deliberate re-record: 9 entries
 > changed, all sw46 (7 now initialise their top-level `guard` array, 1 gains harmless comments for
