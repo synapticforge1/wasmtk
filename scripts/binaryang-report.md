@@ -8,6 +8,78 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## DRAFT (not yet sent) — 2026-10-06: `wasm-bundle` — can each producer emit `linking` + `reloc.*`? (measured)
+
+Your 2026-10-06 letter asked, per producer and on the modules our bundle / merge tests use,
+whether the output carries `linking` + `reloc.CODE` when asked, and whether it still runs. We
+measured all four. Short answer: **Rust and Zig yes, today; TinyGo only by bypassing its own
+build step; wasic no, and it needs something from you first.** Then one finding that bears on
+how `wasm-bundle` itself must work.
+
+### How we measured
+
+For each producer: build with and without the relocation flag, list the custom sections
+(`wasm-objdump -h`), count the `R_WASM_MEMORY_ADDR_*` entries (`wasm-tools dump`), validate
+(`wasm-tools validate`), and run it. Presence is not enough, so we also checked that the entries
+still point where they claim. A short script walks `reloc.CODE` and tests every
+`MEMORY_ADDR_SLEB` (the byte before must be `i32.const`, and the immediate a 5-byte padded LEB,
+which is how `wasm-ld` writes a relocatable site) and every `FUNCTION_INDEX_LEB` (the byte before
+must be `call` or `ref.func`). Our fixtures `mathleaf.go` and `mathlib.zig` hold no data
+addresses, so each producer also built a small module with a static table and a string.
+
+### Results
+
+| producer | how relocations are kept | sections | address relocs (SLEB / LEB / I32) | sites correct | runs |
+| --- | --- | --- | --- | --- | --- |
+| **Rust** (rustc nightly 1.100, `wasm32-wasip1`) | `-C link-arg=--emit-relocs` | `linking`, `reloc.CODE`, `reloc.DATA` (+ `reloc..debug_*`) | 221 / 370 / 91 | **221/221 SLEB, 366/366 calls** | yes, identical output |
+| **TinyGo** 0.42 (LLVM 22), `--emit-relocs` via a target file (`"inherits": ["wasip1"], "ldflags": ["--emit-relocs"]`) | flag accepted | `linking`, `reloc.CODE`, `reloc.DATA` | 48 / 180 / 46 (`strlib`) | **0/48 SLEB, 2/151 calls: STALE** | yes, but the relocations are wrong |
+| **TinyGo**, `tinygo build -o x.o` then `wasm-ld --emit-relocs` ourselves | object + our own link | `linking`, `reloc.CODE` | (`mathleaf`: no data addresses) | 1/1 calls | yes (`addi`, `muli`, `clampi` correct) |
+| **Zig** 0.16, normal build | none: no `--emit-relocs`; `-fllvm -flld --emit-relocs` is **silently ignored** (no sections, no error) | none | — | — | yes |
+| **Zig**, `zig build-obj` then `zig wasm-ld --emit-relocs` (Zig ships LLD 21.1) | object + its own linker | `linking`, `reloc.CODE` | 1 / 1 / 0 | 1/1 SLEB | yes (table and string read back) |
+| **wasic** (this repo) | none today | no custom sections at all | — | — | yes (merge pair `18_bundle` runs) |
+
+**TinyGo, in detail.** TinyGo always post-processes the linked module with `wasm-opt`
+(`--asyncify -Oz -g` for `wasip1`). Even `-opt=0 -scheduler=none` still runs it ("no passes
+specified" means it still reads and rewrites the module). Binaryen warns as it does: *"linking
+section is present, so this is not a standard wasm file - binaryen cannot handle this
+properly!"*. It keeps the sections but rewrites the code under them, so the offsets point at the
+wrong bytes. A bundler that trusted them would patch the wrong instructions. The route that works
+is TinyGo's relocatable object (`-o x.o`) linked by `wasm-ld --emit-relocs` with no `wasm-opt`
+after it: proven for the `wasm-unknown` leaf our `go_merge_tests` merge. For `wasip1` we have not
+reproduced the full link, which needs TinyGo's runtime archives. And Asyncify cannot be part of
+that route at all.
+
+**wasic.** It knows every static-data address it writes (its string, array, struct and
+string-array data allocators). But it emits WAT, and binaryang assembles it, so the marks would
+have to survive assembly. Your assembler has no relocatable output today; the only "relocatable"
+in `src/` is Asyncify's legacy option name. And wasic runs your `-Oz` after assembly, which is
+exactly the TinyGo situation above. So for wasic we need from you:
+1. a way to mark an `i32.const` (and a data word) as an address in WAT, and an assembler that
+   writes `linking` / `reloc.CODE` / `reloc.DATA` from those marks;
+2. a pipeline where bundling happens BEFORE optimisation, or an optimiser that keeps relocations.
+
+With (1), the wasic side is ours: tag every data-address constant at emission.
+
+### What follows for `wasm-bundle`
+
+- **Relocations are valid only if nothing rewrote the code after the link wrote them.** So:
+  bundle before you optimise, and **verify before you trust.** A module whose `reloc.CODE` does
+  not match its code (TinyGo's case) should be refused like a module without relocations. Your
+  "never silently" applies to stale relocations as much as to missing ones. The check above is
+  cheap, and our script is yours if useful.
+- Rust and TinyGo also emit relocations for the DWARF sections (`reloc..debug_info` and so on).
+  Bundle them or drop the debug sections; either way, decide it.
+- A producer with no data addresses still gets a `linking` section, possibly with no
+  `reloc.CODE` (`mathlib.zig`). Treat "no `reloc.CODE`" with a `linking` section as "nothing to
+  relocate", not as "unrelocatable".
+
+### The rest of your letter
+
+The conflict policy, WASI import dedup, `_start` handling, and moving `bundle_tests.ts`,
+`merge_tests.ts` and `wasmmerge_guard_tests.ts` to you all fit our side. `witgen` and the
+prompt staying ours, on top of your library call, is what we would have proposed. We will wait for
+`./definitions` (H9 / H10) in its own letter, as you say.
+
 ## SENT 2026-09-30 — 2026-09-30: H10, what wasmtk needs from the shared definitions (H9)
 
 This is about letters H9 (yours: publish the shared definitions D1 / D2 / D3) and H10 (ours:
