@@ -264,6 +264,18 @@ high-value subset.
 
 ## Numeric / codegen correctness
 
+- **A thrown value carries its KIND (owner-approved design change, 2026-10-06, sw44).** The
+  exception payload stays `(ptr, len)` (`$__exn_tag`'s signature, which `utils.ts` reads for an
+  uncaught throw, is unchanged). Beside it: `$__exn_kind` (0 = string / number / boolean, 1–7 =
+  `EXN_KINDS`, Error … URIError) set before every `throw`; a catch copies it into
+  `$<var>__kind` at once (a throw inside the catch body must not change it); `throw e` of a catch
+  variable passes its own kind; a rejected promise stores it at +12 and the await re-throw
+  restores it. Consumers: `String(e)` / `${e}` / `"x" + e` via `$__exn_str`, and
+  `e instanceof <Error family>` as a run-time test (`instanceof Error` = any kind ≥ 1). A catch
+  variable without a declared `__kind` local (`hasExnKind`) keeps the old behaviour, so a scope
+  the pre-scans miss can never produce an invalid module. `e.message` is still the stored text
+  for every kind (JavaScript would give `undefined` for a thrown string).
+
 - **Wasm types in TypeScript: the user's declared type decides, not TypeScript's `number` (owner
   ruling, 2026-09-30).** "It isn't a compiler issue. It is a typescript issue. And is based on
   what the user can ultimately expect to see in typescript versus wasm." TypeScript has no `i32`,

@@ -7,16 +7,18 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 21 | 52 | 0 | 17 |
+| SILENT-WRONG | 21 | 53 | 0 | 17 |
 | LOUD | 17 | 22 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
-80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 63 rows of the Phase 0b round-1 table (sw35 the 48th, sw36 the 49th, sw37–sw40 and ld15 the 50th–54th, 2026-09-30; sw41, ld16, ld17 the 55th–57th, sw42–sw44 and ld18 the 58th–61st, sw45 and ld19 the 62nd–63rd, 2026-10-06) (each row counted as one
+80 classified entries (the 77th: Phase 36 restored, LOUD; the 78th: 24 wast passes resting on V8's own limits, SILENT-WRONG, other; the 79th: `assert_trap` passing on any trap kind, SILENT-WRONG, other, 2026-09-30; the 80th: `modc` of a dynrt-merged library, FIXED 2026-09-30, SILENT-WRONG, other) plus the 64 rows of the Phase 0b round-1 table (sw35 the 48th, sw36 the 49th, sw37–sw40 and ld15 the 50th–54th, 2026-09-30; sw41, ld16, ld17 the 55th–57th, sw42–sw44 and ld18 the 58th–61st, sw45 and ld19 the 62nd–63rd, sw46 the 64th, 2026-10-06) (each row counted as one
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 21** (2026-10-06, evening: f32 in containers fixed, sw43
+**Open silent-wrong in the compiler: 21** (2026-10-06, night: sw44 fixed, the thrown kind now
+tracked; sw46, every top-level statement beside an async `main()` dropped, found: still 21).
+Before that, **21** (2026-10-06, evening: f32 in containers fixed, sw43
 and loud ld18; sw45, a for-of over any array parameter, found and fixed; loud ld19 found: 22 →
 21 silent, 17 loud). Before that, **22** (2026-10-06, later: the Phase 1 finds fixed, sw41
 and loud ld16, ld17; fixing them found sw42 (fixed), sw43 and sw44 (open), and loud ld18: 21 →
@@ -89,7 +91,8 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~sw42~~ | ✅ FIXED 2026-10-06 (found fixing ld16; the same on main): `const t: string = String(s)` printed the string's POINTER (`260`): emitStringAssign's `String(...)` branch sent a string argument down the numeric path. A string argument is now the string itself. Test `7b_ConsoleNumberFormatting` | wasic emitStringAssign `String(...)` |
 | ~~sw43~~ | ✅ FIXED 2026-10-06: an `f32[]` literal was written as 8-byte f64 elements into a reservation of 4 bytes per element, OVERRUNNING the next data segment (`[1.25, 2.5]` turned a following `"true"` into four NUL bytes), and an element read back as a bit pattern (`1072955392`). Now `encodeF32LE`; every load / store chain that sent f32 to `i32.load` / `i32.store` (60 in wasic, 4 in console_log; rewritten by a script that listed each one) is `memLoadOp` / `memStoreOp`; the dynamic-array helpers (`push`, `indexOf`, `find`, `sort`, `flat`, `flatMap`) take an f32 value type. Test `9_F32Containers` | wasic f32 array layout |
 | ~~sw45~~ | ✅ FIXED 2026-10-06 (found fixing sw43; the same on main): `for (const e of v)` over an array PARAMETER read from the pointer itself, iterating the 8-byte header as elements: the sum of an `i32[]` param `[1, 2, 3]` was 7, of an `f64[]` `[1.25, 2.5, 3]` was 3.75. The branch's comment ("no header") was stale: every other read of a parameter array (`arr[i]`) skips the header. No test did a for-of over a parameter. Test `9_F32Containers` | wasic for-of |
-| sw44 | OPEN (found fixing ld16, 2026-10-06): `String(e)` of a catch variable. wasic stores every caught value as its message and does not track WHAT was thrown, so a declared `const m: string = String(e)` always prefixes `Error: ` (wrong for a thrown string: Deno `custom`), while the console form prints the bare message (wrong for a thrown `Error`: Deno `Error: custom`). Either needs the thrown kind at run time. Repro `sw44_string_of_catch_var_kind_unknown.ts` | wasic exception model |
+| ~~sw44~~ | ✅ FIXED 2026-10-06 (owner approved the design change): `String(e)` of a catch variable guessed what was thrown (a declaration always prefixed `Error: `, the console never did), and `e instanceof Error` was TRUE at compile time. Now the thrown KIND travels with the exception: `$__exn_kind` (0 = string / number / boolean, 1–7 = `EXN_KINDS`) is set before every `throw` (a re-throw passes the catch variable's own kind), a catch copies it into `$<var>__kind`, and a rejected promise carries it in its +12 word. `String(e)`, `${e}` and `"x" + e` go through `$__exn_str` (`Name: message`, `Name` for an empty message, the value itself for kind 0); `e instanceof <Error family>` is a run-time test; `e instanceof Error ? e.message : <else>` decides at run time when `<else>` is not the same text. Tests `15_ThrownKind`, `15_ThrownKindAsync` | wasic exception model |
+| sw46 | OPEN (found fixing sw44, 2026-10-06; the same on main): with an `async function main()` called at top level, EVERY OTHER top-level statement is dropped, before the call as well as after: `console.log("before main"); main(); console.log("after main")` prints only what `main` prints. Repro `sw46_statements_after_async_main_dropped.ts` | wasic `_start` with async main |
 | sw24 | `console.log("C:\\tmp")` double-decoded: `C:\tmp` → `C:<TAB>mp` | console_log per-iov |
 | sw25 | `console.log(n > 0 ? true : false)`: `true` → `1` | console_log |
 | sw26 (LOUD since 2026-09-30: the console fallback now aborts, `cannot emit the expression …`) | `"x" + (a < b ? "lo" : "hi")`: `xlo` → `x0` | console_log |

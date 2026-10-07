@@ -112,6 +112,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-06, the thrown kind (sw44), full gate green.** wasi **440/440** (+`15_ThrownKind`,
+> +`15_ThrownKindAsync`) · golden-WAT **497 / 0** after a deliberate re-record: 25 entries
+> changed, every line sw44's (the kind global and its sets, catch `__kind` locals, `$__exn_str`,
+> run-time `instanceof`, the promise kind word, data offsets moved by the seven `Name: `
+> strings), +2 new · engine 1152 on baseline (wasmtime / wasmer / wazero accept the new global) ·
+> wast 64,506 / 0 / 16 · Go 7/7/12 · every other suite as before. Round-1 repros: 21 DIFFER =
+> open silent 21 (sw44 out, sw46 in); 17 loud.
+>
 > **2026-10-06, f32 in containers + for-of over array params (sw43, ld18, sw45), full gate
 > green.** wasi **438/438** (+`9_F32Containers`) · golden-WAT **495 / 0**: ZERO existing entries
 > changed (every rewrite touches only f32 or a for-of over a parameter, and the corpus has

@@ -1003,6 +1003,20 @@ function encodeF32LE(val: number): string {
   );
 }
 
+/** sw44 (2026-10-06): the Error family a `throw` can carry, by kind number. 0 is "not an Error"
+ *  (a thrown string, number or boolean). `$__exn_kind` holds the kind of the exception in flight;
+ *  a catch variable keeps its own copy in `$<var>__kind`. */
+const EXN_KINDS = [
+  "",
+  "Error",
+  "TypeError",
+  "RangeError",
+  "SyntaxError",
+  "EvalError",
+  "ReferenceError",
+  "URIError",
+];
+
 /** The memory load for a value of WAT type `t`. The chains this replaces sent `f32` to
  *  `i32.load`, so an f32 struct field or array element was an i32 (ld18, sw43; 2026-10-06). */
 function memLoadOp(t: string | undefined | null): string {
@@ -1594,6 +1608,19 @@ class WasicTranspiler {
   private needsNumericHelpers = false;
   private needsStringHelpers = false;
   private needsStringOpHelpers = false;
+  /** sw44: `$__exn_str` (String() of a catch variable, by thrown kind) is needed. Its seven
+   *  `Name: ` strings are allocated on first use (exnStrPrefixes). */
+  private _needsExnStr = false;
+  private exnStrPrefixes: Array<[number, number]> = [];
+  private get needsExnStr(): boolean {
+    return this._needsExnStr;
+  }
+  private set needsExnStr(v: boolean) {
+    if (v && !this._needsExnStr) {
+      this.exnStrPrefixes = EXN_KINDS.map((n) => n ? this.allocString(`${n}: `) : [0, 0]);
+    }
+    this._needsExnStr = v;
+  }
   private needsStringExtHelpers = false; // Phase 27: trim/charCodeAt/case/replace/pad/repeat/split
   private needsStrGatherHelper = false;
   private needsArrPrintHelper = false;
@@ -6460,6 +6487,9 @@ class WasicTranspiler {
             if (/^\w+$/.test(e) && this.moduleStringConsts.has(e)) {
               const [off, ln] = this.moduleStringConsts.get(e)!;
               emitTmplConcat(`(i32.const ${off})`, `(i32.const ${ln})`);
+            } else if (/^\w+$/.test(e) && this.hasExnKind(e, locals)) {
+              tmplStmts.push(...this.exnStrToStrOp(e)); // sw44: `${e}` of a caught Error
+              emitTmplConcat(`(local.get $__str_op_ptr)`, `(local.get $__str_op_len)`);
             } else if (/^\w+$/.test(e) && locals.get(e) === "string") {
               emitTmplConcat(`(local.get $${e}_ptr)`, `(local.get $${e}_len)`);
             } else {
@@ -6559,19 +6589,34 @@ class WasicTranspiler {
       return tmplStmts.join(`\n${ind}`);
     }
     // VAR instanceof Error ? VAR.message : <else> — idiomatic catch pattern.
-    // In wasic, all exceptions are stored as plain strings (ptr+len); e.message === e and
-    // `instanceof Error` is always true, so the THEN branch is always taken regardless of the
-    // else expression (String(VAR), `${VAR}`, etc.). Simplify to a direct ptr/len copy.
+    // A caught value is stored as its message (ptr+len), so e.message === e. Since sw44
+    // (2026-10-06) its `__kind` local says whether it was an Error, so the choice below is real.
     {
       const errTernary = initExpr.match(
-        /^(\w+)\s+instanceof\s+Error\s*\?\s*\1\.message\s*:\s*.+$/,
+        /^(\w+)\s+instanceof\s+Error\s*\?\s*\1\.message\s*:\s*(.+)$/,
       );
       if (errTernary) {
         const varE = errTernary[1]!;
+        // sw44: a catch variable now KNOWS whether it holds an Error. The copy below is exact when
+        // the else branch yields the same text as the message (`String(e)`, `${e}`, e); any other
+        // else (`"not an error"`) is a real run-time choice on the variable's kind.
+        const elseE = errTernary[2]!.trim();
+        const sameText = elseE === varE || elseE === `String(${varE})` ||
+          elseE === `\`\${${varE}}\``;
+        const copyMsg = [
+          `(local.set $${varName}_ptr (local.get $${varE}_ptr))`,
+          `${ind}(local.set $${varName}_len (local.get $${varE}_len))`,
+        ].join("\n");
+        if (locals.get(varE) === "string" && (sameText || !this.hasExnKind(varE, locals))) {
+          return copyMsg;
+        }
         if (locals.get(varE) === "string") {
+          const elseWat = this.emitStringAssign(varName, elseE, locals);
           return [
-            `(local.set $${varName}_ptr (local.get $${varE}_ptr))`,
-            `${ind}(local.set $${varName}_len (local.get $${varE}_len))`,
+            `(if (i32.ne (local.get $${varE}__kind) (i32.const 0))`,
+            `${ind}  (then ${copyMsg.replace(/\n\s*/g, " ")})`,
+            `${ind}  (else`,
+            `${ind}    ${elseWat}))`,
           ].join("\n");
         }
       }
@@ -6966,6 +7011,18 @@ class WasicTranspiler {
       const argType: WatType = this.inferExprType(argExpr, locals);
       // String(catchVar) where the arg is a caught exception: produce "Error: <message>"
       // matching JavaScript's Error.prototype.toString() behaviour.
+      // sw44 (2026-10-06): by WHAT was thrown, as Error.prototype.toString does: a thrown string
+      // is itself, an Error is `Name: message` (just `Name` for an empty message). This always
+      // prefixed "Error: ", wrong for a thrown string, and for TypeError & co.
+      if (argType === "string" && this.hasExnKind(argExpr, locals)) {
+        this.needsStringOpHelpers = true;
+        this.needsExnStr = true;
+        return [
+          `(call $__exn_str (local.get $${argExpr}__kind) (local.get $${argExpr}_ptr) (local.get $${argExpr}_len))`,
+          `${ind}(local.set $${varName}_len)`,
+          `${ind}(local.set $${varName}_ptr)`,
+        ].join("\n");
+      }
       if (argType === "string" && this.catchVarNames.has(argExpr)) {
         this.needsStringOpHelpers = true;
         const [prefixPtr, prefixLen] = this.allocString("Error: ");
@@ -7083,6 +7140,12 @@ class WasicTranspiler {
           concatAppend(`(local.get $__concat_self_ptr)`, `(local.get $__concat_self_len)`);
           return;
         }
+        // A caught value in a concat stringifies by what was thrown (sw44).
+        if (/^\w+$/.test(part.trim()) && this.hasExnKind(part.trim(), locals)) {
+          stmts.push(...this.exnStrToStrOp(part.trim()));
+          concatAppend(`(local.get $__str_op_ptr)`, `(local.get $__str_op_len)`);
+          return;
+        }
         // Template literal: expand each segment as a concat operation
         if (part.startsWith("`") && part.endsWith("`")) {
           const tParts2 = this.splitTemplateLiteral(part.slice(1, -1));
@@ -7094,7 +7157,10 @@ class WasicTranspiler {
             } else {
               const eCC = seg.value.trim();
               const eTypeCC = this.inferExprType(eCC, locals);
-              if (eTypeCC === "string") {
+              if (/^\w+$/.test(eCC) && this.hasExnKind(eCC, locals)) {
+                stmts.push(...this.exnStrToStrOp(eCC)); // sw44
+                concatAppend(`(local.get $__str_op_ptr)`, `(local.get $__str_op_len)`);
+              } else if (eTypeCC === "string") {
                 const ptrLenCC = this.quietEmit(() => this.emitStringPtrLen(eCC, locals));
                 if (ptrLenCC !== "(i32.const 0) (i32.const 0)") {
                   const [pW, lW] = splitTwoWatExprs(ptrLenCC);
@@ -7494,6 +7560,57 @@ class WasicTranspiler {
    *  original unsuffixed `__forof_idx`, so non-nested loops emit byte-identical WAT. The
    *  matching pre-scans declare one local per for…of statement in the body — an upper bound
    *  on nesting depth, so the name resolved here is always declared. */
+  /** True for a `catch (e)` variable, including the `__catch_e` alias a shadowing catch uses. Such
+   *  a variable has a `$<name>__kind` local holding what was thrown (sw44). */
+  private isCatchVarName(name: string): boolean {
+    return this.catchVarNames.has(name) ||
+      (name.startsWith("__catch_") && this.catchVarNames.has(name.slice("__catch_".length)));
+  }
+
+  /**
+   * `$__exn_str(kind, ptr, len) → (ptr, len)`: a caught value as `String(e)` gives it (sw44). Kind 0
+   * (a thrown string / number / boolean) is the value itself; an Error-family kind is
+   * `Name: message`, or `Name` alone for an empty message (Error.prototype.toString).
+   */
+  private getExnStrWat(): string {
+    const named = EXN_KINDS.map((_, k) => k).filter((k) => k > 0);
+    const bare = named.map((k) => {
+      const [p, l] = this.exnStrPrefixes[k];
+      return `    (if (i32.eq (local.get $k) (i32.const ${k})) (then (return (i32.const ${p}) (i32.const ${
+        l - 2
+      }))))`;
+    }).join("\n");
+    const prefixed = named.map((k) => {
+      const [p, l] = this.exnStrPrefixes[k];
+      return `    (if (i32.eq (local.get $k) (i32.const ${k}))\n      (then (return (call $__str_concat (i32.const ${p}) (i32.const ${l}) (local.get $p) (local.get $l)))))`;
+    }).join("\n");
+    return `  ;; String(e) of a caught value, by what was thrown (sw44)
+  (func $__exn_str (param $k i32) (param $p i32) (param $l i32) (result i32 i32)
+    (if (i32.eqz (local.get $k)) (then (return (local.get $p) (local.get $l))))
+    (if (i32.eqz (local.get $l)) (then
+${bare}))
+${prefixed}
+    (local.get $p) (local.get $l)
+  )`;
+  }
+
+  /** Statements that put `String(<catch var>)` (by thrown kind, sw44) into the `$__str_op` pair,
+   *  for a template or concat part: `${e}` and `"x" + e` of a caught Error are `Error: msg`. */
+  private exnStrToStrOp(name: string): string[] {
+    this.needsStringOpHelpers = true;
+    this.needsExnStr = true;
+    return [
+      `(call $__exn_str (local.get $${name}__kind) (local.get $${name}_ptr) (local.get $${name}_len))`,
+      `(local.set $__str_op_len)`,
+      `(local.set $__str_op_ptr)`,
+    ];
+  }
+
+  /** True when `name` is a catch variable whose `__kind` local was declared in this scope. */
+  private hasExnKind(name: string, locals: Map<string, WatType>): boolean {
+    return this.isCatchVarName(name) && locals.has(`${name}__kind`);
+  }
+
   private forOfIdxLocal(): string {
     return this.forOfDepth === 0 ? "__forof_idx" : `__forof_idx${this.forOfDepth}`;
   }
@@ -8153,7 +8270,10 @@ class WasicTranspiler {
         const ptrlen = arg === ""
           ? `(i32.const 0) (i32.const 0)`
           : this.emitStringPtrLen(arg, locals);
-        return `(call $__promise_reject ${ptrlen})`;
+        // sw44: what is rejected with: `new TypeError(…)` is its kind, a string 0.
+        const rejCtor = arg.match(/^new\s+(\w+)\s*\(/)?.[1];
+        const rejKind = rejCtor && EXN_KINDS.indexOf(rejCtor) > 0 ? EXN_KINDS.indexOf(rejCtor) : 0;
+        return `(call $__promise_reject ${ptrlen} (i32.const ${rejKind}))`;
       }
     }
     // Phase 13.4b: `Promise.allSettled([…])` → a promise that NEVER rejects, fulfilling with a struct
@@ -10552,10 +10672,9 @@ class WasicTranspiler {
       }
     }
 
-    // instanceof with a NON-user-class (a built-in like Error / TypeError). wasic models caught
-    // exceptions as plain strings, so the idiomatic `e instanceof Error` (narrow a catch variable
-    // before reading `.message`) is treated as TRUE for the Error family; other unmodelled built-ins
-    // resolve to FALSE. Resolved at compile time. (Mirrors the `instanceof Error ? …` ternary path.)
+    // instanceof with a NON-user-class (a built-in like Error / TypeError). For a catch variable
+    // it is a run-time test of what was thrown (sw44, below). Anything else keeps the old
+    // compile-time answer: TRUE for the Error family, FALSE for other unmodelled built-ins.
     {
       const instBM = expr.match(/^(.+?)\s+instanceof\s+(\w+)$/);
       if (instBM && !this.classDefs.has(instBM[2]!)) {
@@ -10569,7 +10688,17 @@ class WasicTranspiler {
           "URIError",
           "AggregateError",
         ]);
-        const resWat = `(i32.const ${ERR_FAMILY.has(instBM[2]!) ? 1 : 0})`;
+        // sw44 (2026-10-06): a catch variable knows what was thrown, so the answer is a RUN-TIME
+        // test of its kind: `instanceof Error` is any Error-family kind (subclasses included),
+        // `instanceof TypeError` only its own. A thrown string is not an Error (JavaScript agrees).
+        // Without the kind local (some other scope) the old compile-time answer stands.
+        const instVar = instBM[1]!.trim();
+        const kIdx = EXN_KINDS.indexOf(instBM[2]!);
+        const resWat = /^\w+$/.test(instVar) && this.hasExnKind(instVar, locals) && kIdx > 0
+          ? (kIdx === 1
+            ? `(i32.ne (local.get $${instVar}__kind) (i32.const 0))`
+            : `(i32.eq (local.get $${instVar}__kind) (i32.const ${kIdx}))`)
+          : `(i32.const ${ERR_FAMILY.has(instBM[2]!) ? 1 : 0})`;
         const ctxBase = watBaseType(defaultType as WatType);
         if (ctxBase === "f64") return `(f64.convert_i32_s ${resWat})`;
         if (ctxBase === "i64") return `(i64.extend_i32_s ${resWat})`;
@@ -11176,9 +11305,18 @@ class WasicTranspiler {
       this.needsExceptionTag = true;
       const throwExpr = throwMatch[1].trim();
 
+      // sw44 (2026-10-06): record WHAT is thrown. `new TypeError(…)` is kind 2, a string or number
+      // 0; a re-throw of a catch variable passes on that variable's own kind.
+      const ctorM = throwExpr.match(
+        /^new\s+(Error|TypeError|RangeError|SyntaxError|EvalError|ReferenceError|URIError)\s*\(/,
+      );
+      const kindSet = /^\w+$/.test(throwExpr) && this.hasExnKind(throwExpr, locals)
+        ? `(global.set $__exn_kind (local.get $${throwExpr}__kind))`
+        : `(global.set $__exn_kind (i32.const ${ctorM ? EXN_KINDS.indexOf(ctorM[1]) : 0}))`;
+
       // Helper to emit the WASM throw instruction for a static string in data memory
       const throwExnTag = (ptr: number, len: number): string =>
-        `(throw $__exn_tag (i32.const ${ptr}) (i32.const ${len}))`;
+        `${kindSet}\n      (throw $__exn_tag (i32.const ${ptr}) (i32.const ${len}))`;
 
       // sw01 (H12 Phase 0, 2026-09-29): every built-in Error constructor with the `(message)`
       // signature is thrown the same way as `Error` — wasic models a caught exception as its message
@@ -11220,11 +11358,11 @@ class WasicTranspiler {
         : null);
       if (throwArg !== null) {
         const assignWat = this.emitStringAssign("__throw_msg", throwArg, locals);
-        return `${assignWat}\n      (throw $__exn_tag (local.get $__throw_msg_ptr) (local.get $__throw_msg_len))`;
+        return `${assignWat}\n      ${kindSet}\n      (throw $__exn_tag (local.get $__throw_msg_ptr) (local.get $__throw_msg_len))`;
       }
       // throw someVar (string variable — ptr/len locals)
       if (/^\w+$/.test(throwExpr) && locals.get(throwExpr) === "string") {
-        return `(throw $__exn_tag (local.get $${throwExpr}_ptr) (local.get $${throwExpr}_len))`;
+        return `${kindSet}\n      (throw $__exn_tag (local.get $${throwExpr}_ptr) (local.get $${throwExpr}_len))`;
       }
       // sw01: a NUMBER or BOOLEAN (`throw 42`, `throw code`, `throw n > 0`) is thrown as its string
       // form, which is what the catch variable prints. Both of these used to be `proc_exit(0)`: a
@@ -11235,7 +11373,7 @@ class WasicTranspiler {
           ["i32", "i64", "f32", "f64", "bool"].includes(locals.get(throwExpr) as string))
       ) {
         const assignWat = this.emitStringAssign("__throw_msg", `String(${throwExpr})`, locals);
-        return `${assignWat}\n      (throw $__exn_tag (local.get $__throw_msg_ptr) (local.get $__throw_msg_len))`;
+        return `${assignWat}\n      ${kindSet}\n      (throw $__exn_tag (local.get $__throw_msg_ptr) (local.get $__throw_msg_len))`;
       }
       // Anything else (an object, a class instance, a call of unknown type) has no model here.
       // Refuse it rather than exit 0.
@@ -15064,6 +15202,10 @@ class WasicTranspiler {
             ? [
               `${pad}(local.set $${internalCatchVar}_len)`,
               `${pad}(local.set $${internalCatchVar}_ptr)`,
+              // sw44: keep what was thrown; a throw inside the catch body must not change it.
+              ...(locals.has(`${internalCatchVar}__kind`)
+                ? [`${pad}(local.set $${internalCatchVar}__kind (global.get $__exn_kind))`]
+                : []),
             ]
             : [`${pad}(drop)`, `${pad}(drop)`];
 
@@ -15279,6 +15421,7 @@ class WasicTranspiler {
     if (this.needsStringOpHelpers || this.needsStrGatherHelper || this.needsStringExtHelpers) {
       parts.push(this.getStringOpHelperWat());
     }
+    if (this.needsExnStr) parts.push(this.getExnStrWat());
     if (this.needsStringExtHelpers) parts.push(this.getStringExtHelperWat());
     // $__fd_write_all is gated on the SAME flag as the `$fd_write` import above, so the helper
     // exists in every module that can call it and in no module that cannot.
@@ -15327,17 +15470,21 @@ class WasicTranspiler {
     // Phase 13.3: a rejected await re-throws the reason string (disc==1 → throw $__exn_tag), so a
     // surrounding try/catch catches it. Only emitted when needsPromiseReject (keeps resolve/then-only
     // programs exception-free). $__promise_reject builds a settled-rejected promise from a string.
+    // sw44: a rejected promise carries what was thrown (the $__exn_kind value) in its +12 pad word;
+    // the await re-throw restores it, so a catch sees the reason's kind.
     const rej = this.needsPromiseReject
       ? `\n    (if (i32.eq (i32.load offset=8 (local.get $p)) (i32.const 1))` +
-        `\n      (then (throw $__exn_tag (i32.load offset=16 (local.get $p)) (i32.load offset=24 (local.get $p)))))`
+        `\n      (then (global.set $__exn_kind (i32.load offset=12 (local.get $p)))` +
+        `\n        (throw $__exn_tag (i32.load offset=16 (local.get $p)) (i32.load offset=24 (local.get $p)))))`
       : "";
     const rejectFn = this.needsPromiseReject
-      ? `\n  (func $__promise_reject (param $ptr i32) (param $len i32) (result i32)` +
+      ? `\n  (func $__promise_reject (param $ptr i32) (param $len i32) (param $kind i32) (result i32)` +
         `\n    (local $p i32)` +
         `\n    (local.set $p (call $__promise_alloc))` +
         `\n    (i32.store (local.get $p) (i32.const 1))` +
         `\n    (i32.store offset=4 (local.get $p) (i32.const 2))` +
         `\n    (i32.store offset=8 (local.get $p) (i32.const 1))` +
+        `\n    (i32.store offset=12 (local.get $p) (local.get $kind))` +
         `\n    (i32.store offset=16 (local.get $p) (local.get $ptr))` +
         `\n    (i32.store offset=24 (local.get $p) (local.get $len))` +
         `\n    (local.get $p))`
@@ -15504,6 +15651,10 @@ class WasicTranspiler {
       L.push(`        (i32.store (local.get $res) (i32.const 1))`);
       L.push(`        (i32.store offset=4 (local.get $res) (i32.const 2))`);
       L.push(`        (i32.store offset=8 (local.get $res) (i32.const 1))`);
+      // sw44: the reason's kind travels with it.
+      L.push(
+        `        (i32.store offset=12 (local.get $res) (i32.load offset=12 (local.get $p${i})))`,
+      );
       L.push(
         `        (i64.store offset=16 (local.get $res) (i64.load offset=16 (local.get $p${i})))`,
       );
@@ -18643,15 +18794,26 @@ ${sum}
       if (catchVarPre && catchVarPre[1]) {
         const cv = catchVarPre[1];
         this.catchVarNames.add(cv);
+        // sw44: each catch variable's copy of the thrown kind (declared once per name).
+        // Registered in `locals` too: every use checks for it and keeps the old behaviour when a
+        // catch was pre-scanned by some other path (hasExnKind).
+        const declareKind = (n: string) => {
+          if (!declaredLocals.some(([d]) => d === `${n}__kind`)) {
+            declaredLocals.push([`${n}__kind`, "i32"]);
+            locals.set(`${n}__kind`, "i32");
+          }
+        };
         if (!locals.has(cv)) {
           declaredLocals.push([`${cv}_ptr`, "i32"], [`${cv}_len`, "i32"]);
           locals.set(cv, "string");
           this.stringVars.add(cv);
+          declareKind(cv);
         } else if (locals.get(cv) === "string") {
           // Catch var shadows an outer string — declare alias locals so the outer is not overwritten
           this.catchVarShadows.add(cv);
           const alias = `__catch_${cv}`;
           declaredLocals.push([`${alias}_ptr`, "i32"], [`${alias}_len`, "i32"]);
+          declareKind(alias);
         }
       }
     }
@@ -18753,6 +18915,9 @@ ${sum}
         /\bconsole\.(log|error|warn)\(.*\w\(\s*[^)\s"'][^)]*?[[.(`]/.test(l) ||
         // `String(x)` in a console argument goes through the same resolver (ld16, 2026-10-06).
         (/\bconsole\.(log|error|warn)\b/.test(l) && /\bString\s*\(/.test(l)) ||
+        // A catch variable stringifies through $__exn_str into this pair (sw44). Over-declares
+        // when it is never stringified; Binaryen strips it.
+        ([...locals.keys()].some((k) => k.endsWith("__kind")) && /\bcatch\s*\(/.test(l)) ||
         // Printing a string-enum variable routes through $__enum_str_<Enum>, whose multi-value
         // (ptr,len) result is captured into this pair. Over-declares slightly when string enums
         // exist but none is printed here — an unused local, which Binaryen strips.
@@ -20440,14 +20605,23 @@ ${sum}
         if (catchVarPre2 && catchVarPre2[1]) {
           const cv2 = catchVarPre2[1];
           this.catchVarNames.add(cv2);
+          // sw44: the catch variable's copy of the thrown kind (see emitFunction).
+          const declareKind2 = (n: string) => {
+            if (!startDeclaredLocals.some(([d]) => d === `${n}__kind`)) {
+              startDeclaredLocals.push([`${n}__kind`, "i32"]);
+              startLocals.set(`${n}__kind`, "i32");
+            }
+          };
           if (!startLocals.has(cv2)) {
             startDeclaredLocals.push([`${cv2}_ptr`, "i32"], [`${cv2}_len`, "i32"]);
             startLocals.set(cv2, "string");
             this.stringVars.add(cv2);
+            declareKind2(cv2);
           } else if (startLocals.get(cv2) === "string") {
             this.catchVarShadows.add(cv2);
             const alias2 = `__catch_${cv2}`;
             startDeclaredLocals.push([`${alias2}_ptr`, "i32"], [`${alias2}_len`, "i32"]);
+            declareKind2(alias2);
           }
         }
       }
@@ -20514,6 +20688,8 @@ ${sum}
           /\bconsole\.(log|error|warn)\(.*\w\(\s*[^)\s"'][^)]*?[[.(`]/.test(l) ||
           // `String(x)` in a console argument (ld16; see emitFunction)
           (/\bconsole\.(log|error|warn)\b/.test(l) && /\bString\s*\(/.test(l)) ||
+          // a catch variable stringifies into this pair (sw44; see emitFunction)
+          ([...startLocals.keys()].some((k) => k.endsWith("__kind")) && /\bcatch\s*\(/.test(l)) ||
           // string-enum variable printed → $__enum_str_<Enum> multi-value capture (see emitFunction)
           (this.stringEnumVars.size > 0 && /\bconsole\.(log|error|warn)\b/.test(l))
         )
@@ -20716,6 +20892,9 @@ ${sum}
       this.needsStringRetGlobals ? `  (global $__str_ret_len (mut i32) (i32.const 0))` : "",
       ...moduleGlobalDecls,
       this.needsExceptionTag ? `  (tag $__exn_tag (export "__exn_tag") (param i32 i32))` : "",
+      // What was thrown (sw44): 0 = a string / number / boolean, 1–7 = an Error-family object
+      // (EXN_KINDS). Set before every throw; a catch copies it into its variable's `__kind` local.
+      this.needsExceptionTag ? `  (global $__exn_kind (mut i32) (i32.const 0))` : "",
       funcTypesWat,
       ``,
       helpers,
