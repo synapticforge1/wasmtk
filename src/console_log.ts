@@ -2328,6 +2328,13 @@ function exprToWat(
       const fn = mathCallM[1];
       const aStr = mathCallM[2].trim();
       const a = aStr ? splitTopLevelArgs(aStr) : [];
+      // `Math` is f64-only: a bigint argument is a TypeError in JavaScript (sw63, 2026-10-09).
+      for (const e of a) {
+        const t = e.trim();
+        if (/^-?\d+n$/.test(t) || (/^\w+$/.test(t) && (locals.get(t) ?? globals?.get(t)) === "i64")) {
+          _diagnosticSink?.(`Math.${fn}: a bigint argument is a TypeError in JavaScript (${t.slice(0, 40)}); use wasMath's i64 / u64`);
+        }
+      }
       const arg0 = exprToWat(
         a[0] ?? "0",
         locals,
@@ -2361,44 +2368,36 @@ function exprToWat(
       if (expectedType === "i32" && (fn === "abs" || fn === "min" || fn === "max")) {
         _mathHelperNeeded?.(`i32_${fn}`);
       }
-      if (fn === "clz32") {
-        return `(i32.clz ${
-          exprToWat(
-            a[0] ?? "0",
-            locals,
-            "i32",
-            funcLookup,
-            allocString,
-            arrayLookup,
-            structLookup,
-            globals,
-          )
+      // clz32 / imul: ToInt32 on each argument, as wasic's emitExpr does (ld27, 2026-10-09): a
+      // literal folds; an f64 / f32 value (read from the emitted WAT's outermost form) goes
+      // through `$__i32_toint32`; a bigint is a TypeError in JavaScript, so a diagnostic.
+      const toInt32 = (e: string): string => {
+        const lit = e.trim();
+        if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+        const w = exprToWat(e, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals);
+        const m = w.trimStart().match(/^\(([\w.]+)(?:\s+\$([\w.$]+))?/);
+        const typed = m?.[1].match(/^(i32|i64|f32|f64)\.(\w+)/);
+        const have = typed
+          ? (/^(eqz?|ne|lt|gt|le|ge)(_[su])?$/.test(typed[2]) ? "i32" : typed[1])
+          : m?.[1] === "local.get" && m[2]
+          ? locals.get(m[2])
+          : m?.[1] === "global.get" && m[2]
+          ? globals?.get(m[2])
+          : undefined;
+        if (have === "i64") return w; // the bigint diagnostic above (sw63)
+        // a float read at i32 can come back as a TRAPPING `trunc_f64_s`; ToInt32 wraps instead
+        const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
+        if (have !== "f64" && have !== "f32" && !truncated) return w;
+        _mathHelperNeeded?.("i32_toint32");
+        return `(call $__i32_toint32 ${
+          exprToWat(e, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals)
         })`;
+      };
+      if (fn === "clz32") {
+        return `(i32.clz ${toInt32(a[0] ?? "0")})`;
       }
       if (fn === "imul") {
-        return `(i32.mul ${
-          exprToWat(
-            a[0] ?? "0",
-            locals,
-            "i32",
-            funcLookup,
-            allocString,
-            arrayLookup,
-            structLookup,
-            globals,
-          )
-        } ${
-          exprToWat(
-            a[1] ?? "0",
-            locals,
-            "i32",
-            funcLookup,
-            allocString,
-            arrayLookup,
-            structLookup,
-            globals,
-          )
-        })`;
+        return `(i32.mul ${toInt32(a[0] ?? "0")} ${toInt32(a[1] ?? "0")})`;
       }
       if (fn === "abs") {
         return expectedType === "i32"

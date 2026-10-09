@@ -10082,6 +10082,15 @@ ${prefixed}
         const mathFn = mathCallMatch[1];
         const argsStr = mathCallMatch[2].trim();
         const args = argsStr ? this.splitArgs(argsStr) : [];
+        // `Math` is f64-only: JavaScript throws a TypeError on a bigint argument, so it is a
+        // compile error, never a silent conversion (sw63, 2026-10-09).
+        for (const a of args) {
+          if (this.inferExprType(a, locals) === "i64") {
+            this.diagnostics.push(
+              `Math.${mathFn}: a bigint argument is a TypeError in JavaScript (${a.trim().slice(0, 40)}); use wasMath's i64 / u64`,
+            );
+          }
+        }
         // Every f64-valued Math result, at the type the context asks for. `const x: i32 =
         // Math.floor(y)` put an f64 into an i32 local, an invalid module (ld15, 2026-10-06). The
         // conversion is the one wasic uses for any f64 in an i32 context (`y as i32`, an f64
@@ -10095,14 +10104,26 @@ ${prefixed}
             ? `(f32.demote_f64 ${w})`
             : w;
 
-        // Always-i32 ops
+        // Always-i32 ops. JavaScript applies ToInt32 to each argument (wrap mod 2³², NaN and
+        // ±Infinity → 0); an f64 argument reached `i32.clz` / `i32.mul` raw, an invalid module
+        // (ld27, 2026-10-09). A literal folds; an f64 / f32 value goes through `$__i32_toint32`.
+        const toInt32 = (a: string): string => {
+          const lit = a.trim();
+          if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+          const w = this.emitExpr(a, locals, "i32");
+          const have = this.watResultType(w, locals);
+          if (have === "i64") return w; // the bigint diagnostic above (sw63)
+          // a float read at i32 can come back as a TRAPPING `trunc_f64_s`; ToInt32 wraps instead
+          const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
+          if (have !== "f64" && have !== "f32" && !truncated) return w;
+          this.mathHelpers.add("i32_toint32");
+          return `(call $__i32_toint32 ${this.emitExpr(a, locals, "f64")})`;
+        };
         if (mathFn === "clz32") {
-          return `(i32.clz ${this.emitExpr(args[0] ?? "0", locals, "i32")})`;
+          return `(i32.clz ${toInt32(args[0] ?? "0")})`;
         }
         if (mathFn === "imul") {
-          const imulWat = `(i32.mul ${this.emitExpr(args[0] ?? "0", locals, "i32")} ${
-            this.emitExpr(args[1] ?? "0", locals, "i32")
-          })`;
+          const imulWat = `(i32.mul ${toInt32(args[0] ?? "0")} ${toInt32(args[1] ?? "0")})`;
           if (defaultType === "f64" || defaultType === "f32") {
             return `(f64.convert_i32_s ${imulWat})`;
           }
@@ -16833,6 +16854,11 @@ ${prefixed}
     }
     for (const h of [...this.mathHelpers].filter((h) => h.startsWith("f64_hypot")).sort()) {
       f64Helpers.push(this.emitHypotHelper(Number(h.slice("f64_hypot".length))));
+    }
+    if (this.mathHelpers.has("i32_toint32")) {
+      f64Helpers.push(`  ;; JavaScript's ToInt32 on an f64 (Math.clz32 / Math.imul arguments, ld27)
+  (func $__i32_toint32 (param f64) (result i32)
+    ${WM_WAT.toint32.body})`);
     }
     const i32Helpers = ["i32_abs", "i32_min", "i32_max"].some((h) => this.mathHelpers.has(h));
     if (!i32Helpers) return f64Helpers.join("\n\n");
