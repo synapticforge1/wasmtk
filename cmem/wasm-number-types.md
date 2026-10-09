@@ -1,8 +1,12 @@
 # Wasm number types in TypeScript: `Math` stays JavaScript's, a typed library carries wasm's (SCOPE, 2026-10-09)
 
-**Status: SCOPE, nothing built. Direction set by the owner 2026-10-09: a complete library, one
-namespace per wasm value type (f64, f32, i32, i64; u32 / u64 as views); see § "The library".
-Waits on T1 (where it lives / its name) to start L1.** Measured 2026-10-09 (`scripts/math/scan_math.ts`,
+**Status: L1 DONE 2026-10-09** — `src/wasmath.ts` (export `./wasMath`): 151 functions with a
+wasm counterpart, each exact to the real instruction on 69,318 calls (`tests/wasmath_tests.ts`,
+inversion-checked); the f64 / f32 `Math`-style functions are defined (bodies) but have no
+instruction to compare until L2 / L3. **Next: L2** (wasic lowers the calls). Earlier: Direction set by the owner 2026-10-09: a complete
+library, one namespace per wasm value type (f64, f32, i32, i64; u32 / u64 as views); see
+§ "The library". DECIDED the same day: T1 = a wasmtk module named `wasMath` (source
+`src/wasmath.ts`); T6 = traps are throws, "so TypeScript and wasm stop the same".** Measured 2026-10-09 (`scripts/math/scan_math.ts`,
 `scripts/math/ops_probe.ts`; Deno vs `wasmtk wasic` + `wasmtk run`). Extends wasm-math-plan.md
 (the declared-type ruling, Phase 1) and replaces its Phase 3 "where the functions live" question.
 
@@ -190,12 +194,14 @@ body, with the same meaning: `RangeError("integer divide by zero")`, `("integer 
 
 ## What stays a decision for the owner
 
-- **T1. Where the library lives, and its name.** The principle rules out a global `Math`
+- **T1. DECIDED (owner, 2026-10-09): a wasmtk module called `wasMath`.** (Was: where the
+  library lives, and its name.) The principle rules out a global `Math`
   extension. A wasmtk module (e.g. `@jrmarcum/wasmtk/num`, or a local file the program imports)
   runs unchanged under Deno and is recognised by wasic. Namespaces named like the type aliases
   (`i32.add`) read naturally; TypeScript allows a type and a value to share a name. (Was
   wasm-math-plan.md D2.)
-- **T6. Traps as throws.** The bodies throw `RangeError` where wasm traps, so a Deno run stops
+- **T6. DECIDED (owner, 2026-10-09): traps are throws, "so TypeScript and wasm stop the
+  same".** The bodies throw `RangeError` where wasm traps, so a Deno run stops
   where the wasm run would. The alternative (a saturating or wrapping body that never throws)
   would make the two DISAGREE at exactly those inputs.
 - **T2. Operators on declared types without the idiom.** `const c: i32 = a + b` cannot agree in
