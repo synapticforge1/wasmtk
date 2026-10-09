@@ -765,6 +765,8 @@ interface StructField {
   size: number;
   /** Phase 21: field declared with `readonly` modifier — writes are a compile-time error. */
   readonly?: boolean;
+  /** A `T | null` tuple element: stored with NO null flag, null is 0 (2026-10-09, sw51). */
+  nullable?: boolean;
   /** Phase 12: for method-type fields in interfaces — stores the function signature. */
   funcType?: { params: WatType[]; result: WatType | null };
   /** Phase 42: when this i32 field is a pointer to a named struct, stores the struct name. */
@@ -1564,6 +1566,22 @@ function inferInitType(
   // str.slice(...) — only if receiver is a known string var (checked at call sites; hint here)
   const sliceLeadId = e.match(/^(\w+)\.slice\s*\(/)?.[1];
   if (sliceLeadId && locals.get(sliceLeadId) === "string") return "string";
+  // 2c. a STRING receiver's member that is not a string: `s.length` is a number, `s.indexOf(x)` a
+  //     number, `s.includes(x)` a boolean. Rule 3 below gave the receiver's own type, so
+  //     `${s.length}` in a concat was typed string and dropped (sw06, 2026-10-09).
+  {
+    const sm = e.match(/^(\w+)\.(\w+)(\s*\(.*\))?$/);
+    if (sm && locals.get(sm[1]) === "string") {
+      const isCall = sm[3] !== undefined;
+      if (!isCall && sm[2] === "length") return "i32";
+      if (
+        isCall && /^(indexOf|lastIndexOf|charCodeAt|codePointAt|search|localeCompare)$/.test(sm[2])
+      ) {
+        return "i32";
+      }
+      if (isCall && /^(includes|startsWith|endsWith)$/.test(sm[2])) return "bool";
+    }
+  }
   // 3. leading identifier has a known declared type — inherit it
   const leadId = e.match(/^(\w+)/)?.[1];
   if (leadId) {
@@ -1662,6 +1680,10 @@ class WasicTranspiler {
   private needsNumericHelpers = false;
   private needsStringHelpers = false;
   private needsStringOpHelpers = false;
+  /** sw08: the `$__<k>_to_new_str` helpers emitStringPtrLen's `String(x)` asked for. */
+  private strOfHelpers: Set<string> = new Set();
+  /** sw08: unsupported string forms met INSIDE a quietEmit probe (their diagnostic suppressed). */
+  private quietStringFailures = 0;
   /** sw44: `$__exn_str` (String() of a catch variable, by thrown kind) is needed. Its seven
    *  `Name: ` strings are allocated on first use (exnStrPrefixes). */
   private _needsExnStr = false;
@@ -1886,6 +1908,10 @@ class WasicTranspiler {
   // Reference types (string, struct, array) use 0-pointer as the null sentinel.
   // Reset at the start of each emitFunction call and before the _start body pre-scan.
   private nullableVarInnerType: Map<string, WatType> = new Map();
+  // Locals bound from a `T | null` tuple element, which has no `__null` flag: null is stored as 0,
+  // so `??` must keep the 0 test for them (and a real 0 reads as null: sw51, open). Reset with
+  // nullableVarInnerType.
+  private zeroNullLocals: Set<string> = new Set();
   // Phase 24: MODULE-LEVEL `T | null` globals — name → inner type + whether the initialiser
   // was `null`. Persistent (unlike nullableVarInnerType, which is per-function), because the
   // companion `$name__null` is a WASM global rather than a local; nullableVarInnerType is
@@ -3722,19 +3748,15 @@ class WasicTranspiler {
     const needsDynamic = new Set<string>();
     for (const fn of this.functions) {
       for (const line of fn.bodyLines) {
-        const m = line.match(
-          /\b(\w+)\.(push|pop|shift|unshift|indexOf|includes|slice|forEach|map|filter|find|reduce|every|some|findIndex|at|reverse|fill|join|sort|flat|flatMap|splice|concat|length)\s*[.(]?/,
-        );
-        if (m) {
-          usedInFunctions.add(m[1]);
-          if (["push", "pop", "shift", "unshift", "splice"].includes(m[2])) needsDynamic.add(m[1]);
-        }
-        // Plain length access: arr.length (no parens)
-        const lm = line.match(/\b(\w+)\.length\b/);
-        if (lm) usedInFunctions.add(lm[1]);
-        // Array element read/write: arr[idx] or arr[idx] = ...
-        const em = line.match(/\b(\w+)\[/);
-        if (em) usedInFunctions.add(em[1]);
+        // Mutators make the array dynamic; EVERY one on the line (the first match only, before).
+        for (
+          const m of line.matchAll(/\b(\w+)\.(push|pop|shift|unshift|splice)\s*\(/g)
+        ) needsDynamic.add(m[1]);
+        // ANY mention of the name counts as a use: a bare `g` (`"g=" + g`, `${g}`, `f(g)`) was
+        // missed, so a top-level array used that way inside a function was never registered as a
+        // module global and was read as a nonexistent local (found with sw09, 2026-10-09). Only
+        // names DECLARED as top-level arrays below are affected.
+        for (const m of line.matchAll(/\b([A-Za-z_]\w*)\b/g)) usedInFunctions.add(m[1]);
       }
     }
     // Also mark arrays as dynamic if startBodyLines uses push/pop on them.
@@ -4891,7 +4913,8 @@ class WasicTranspiler {
       const type = mapType(elem) as WatType;
       const size = (type === "f64" || type === "i64") ? 8 : 4;
       if (offset % size !== 0) offset = Math.ceil(offset / size) * size;
-      fields.push({ name: `_${i}`, type, offset, size });
+      const nullable = /\|\s*(?:null|undefined)\b|\b(?:null|undefined)\s*\|/.test(elem) || undefined;
+      fields.push({ name: `_${i}`, type, offset, size, nullable });
       offset += size;
     }
     return { name, fields, totalSize: offset };
@@ -5804,6 +5827,7 @@ class WasicTranspiler {
         const eqIdx = valuePart.indexOf("=");
         const localName = eqIdx !== -1 ? valuePart.slice(0, eqIdx).trim() : valuePart;
         const defaultExpr = eqIdx !== -1 ? valuePart.slice(eqIdx + 1).trim() : null;
+        if (field.nullable) this.zeroNullLocals.add(localName);
         stmts.push(this.emitFlatFieldBind(field, baseWat, localName, defaultExpr, locals));
       }
     }
@@ -6441,8 +6465,13 @@ class WasicTranspiler {
     const helper = asF64 ? "$__f64_to_str" : type === "i64" ? "$__i64_to_str" : "$__i32_to_str";
     const valWat = this.emitExpr(expr, locals, asF64 ? "f64" : type === "i64" ? "i64" : "i32");
     stmts.push(`(local.set $__tmpl_num_ptr (call $__malloc (i32.const 32)))`);
+    // $__i64_to_str writes console.log's form, `12n`; a string conversion is `12` (sw50,
+    // 2026-10-09: `${big}` and `"c=" + big` printed the `n`). Drop the suffix byte.
+    const callWat = `(call ${helper} ${valWat} (local.get $__tmpl_num_ptr))`;
     stmts.push(
-      `(local.set $__tmpl_num_len (call ${helper} ${valWat} (local.get $__tmpl_num_ptr)))`,
+      `(local.set $__tmpl_num_len ${
+        type === "i64" ? `(i32.sub ${callWat} (i32.const 1))` : callWat
+      })`,
     );
   }
 
@@ -6524,6 +6553,8 @@ class WasicTranspiler {
       // Single expression → String(expr) or string-var/fn copy
       if (parts.length === 1 && parts[0].kind === "expr") {
         const e = parts[0].value.trim();
+        const joined1 = this.arrayAsJoin(e); // sw09
+        if (joined1 !== null) return this.emitStringAssign(varName, joined1, locals);
         const eType = this.inferExprType(e, locals);
         if (eType === "string") return this.emitStringAssign(varName, e, locals);
         return this.emitStringAssign(varName, `String(${e})`, locals);
@@ -6531,8 +6562,12 @@ class WasicTranspiler {
       // Multi-part: build concat chain using emitConcat helper
       const tmplStmts: string[] = [];
       let tmplHasFirst = false;
+      // Empty lenWat2: ptrWat2 is one multi-value (ptr, len) call — see concatAppend below.
       const emitTmplConcat = (ptrWat2: string, lenWat2: string) => {
-        if (!tmplHasFirst) {
+        if (!tmplHasFirst && lenWat2 === "") {
+          tmplStmts.push(ptrWat2, `(local.set $${varName}_len)`, `(local.set $${varName}_ptr)`);
+          tmplHasFirst = true;
+        } else if (!tmplHasFirst) {
           tmplStmts.push(`(local.set $${varName}_ptr ${ptrWat2})`);
           tmplStmts.push(`(local.set $${varName}_len ${lenWat2})`);
           tmplHasFirst = true;
@@ -6552,7 +6587,14 @@ class WasicTranspiler {
           const [off, ln] = this.allocString(seg.value);
           emitTmplConcat(`(i32.const ${off})`, `(i32.const ${ln})`);
         } else {
-          const e = seg.value.trim();
+          // An array, bare (sw09) or joined, renders through the multi-value join helper.
+          const joinedSeg = this.arrayAsJoin(seg.value.trim());
+          const e = joinedSeg ?? seg.value.trim();
+          if (joinedSeg !== null || (/^\w+\.join\s*\(/.test(e) && this.isStringExpr(e, locals))) {
+            const [jP, jL] = splitTwoWatExprs(this.emitStringPtrLen(e, locals));
+            emitTmplConcat(jP, jL);
+            continue;
+          }
           const eType = this.inferExprType(e, locals);
           if (eType === "string") {
             if (/^\w+$/.test(e) && this.moduleStringConsts.has(e)) {
@@ -7079,6 +7121,8 @@ class WasicTranspiler {
     const stringOfMatch = initExpr.match(/^String\s*\((.+?)\)\s*$/);
     if (stringOfMatch) {
       const argExpr = stringOfMatch[1].trim();
+      const joinedArg = this.arrayAsJoin(argExpr); // sw09: String(arr) is arr.join()
+      if (joinedArg !== null) return this.emitStringAssign(varName, joinedArg, locals);
       const argType: WatType = this.inferExprType(argExpr, locals);
       // String(catchVar) where the arg is a caught exception: produce "Error: <message>"
       // matching JavaScript's Error.prototype.toString() behaviour.
@@ -7131,9 +7175,13 @@ class WasicTranspiler {
         ? "$__i64_to_str"
         : "$__i32_to_str";
       const valWat = this.emitExpr(argExpr, locals, argType);
+      // String(12n) is "12": drop $__i64_to_str's console `n` (sw50).
+      const lenCall = `(call ${helperName} ${valWat} (local.get $${varName}_ptr))`;
       return [
         `(local.set $${varName}_ptr (call $__malloc (i32.const 32)))`,
-        `${ind}(local.set $${varName}_len (call ${helperName} ${valWat} (local.get $${varName}_ptr)))`,
+        `${ind}(local.set $${varName}_len ${
+          argType === "i64" ? `(i32.sub ${lenCall} (i32.const 1))` : lenCall
+        })`,
       ].join("\n");
     }
 
@@ -7191,8 +7239,14 @@ class WasicTranspiler {
       }
       // Append ptr+len to the accumulator (varName_ptr/len). First part initializes; rest concat.
       let concatAccumHasValue = false;
+      // An empty lenWat means ptrWat is ONE multi-value (ptr, len) call (e.g. a join helper, as
+      // splitTwoWatExprs returns it): fine as a $__str_concat operand, but a first part must be
+      // taken off the stack, not `local.set` from a two-value call.
       const concatAppend = (ptrWat: string, lenWat: string) => {
-        if (!concatAccumHasValue) {
+        if (!concatAccumHasValue && lenWat === "") {
+          stmts.push(ptrWat, `(local.set $${varName}_len)`, `(local.set $${varName}_ptr)`);
+          concatAccumHasValue = true;
+        } else if (!concatAccumHasValue) {
           stmts.push(`(local.set $${varName}_ptr ${ptrWat})`);
           stmts.push(`(local.set $${varName}_len ${lenWat})`);
           concatAccumHasValue = true;
@@ -7226,16 +7280,21 @@ class WasicTranspiler {
               const [off, ln] = this.allocString(seg.value);
               concatAppend(`(i32.const ${off})`, `(i32.const ${ln})`);
             } else {
-              const eCC = seg.value.trim();
+              const eCC = this.arrayAsJoin(seg.value.trim()) ?? seg.value.trim(); // sw09
               const eTypeCC = this.inferExprType(eCC, locals);
               if (/^\w+$/.test(eCC) && this.hasExnKind(eCC, locals)) {
                 stmts.push(...this.exnStrToStrOp(eCC)); // sw44
                 concatAppend(`(local.get $__str_op_ptr)`, `(local.get $__str_op_len)`);
-              } else if (eTypeCC === "string") {
+              } else if (eTypeCC === "string" || this.isStringExpr(eCC, locals)) {
                 const ptrLenCC = this.quietEmit(() => this.emitStringPtrLen(eCC, locals));
                 if (ptrLenCC !== "(i32.const 0) (i32.const 0)") {
                   const [pW, lW] = splitTwoWatExprs(ptrLenCC);
                   concatAppend(pW, lW);
+                } else {
+                  // It was dropped here, silently (sw06, 2026-10-09).
+                  this.diagnostics.push(
+                    `Unsupported template part in string concatenation: \${${eCC.slice(0, 60)}}`,
+                  );
                 }
               } else {
                 this.emitScalarToStr(eCC, eTypeCC, locals, stmts);
@@ -7377,6 +7436,13 @@ class WasicTranspiler {
             return;
           }
         }
+        // A bare array operand is its join (sw09).
+        const joinedCP = this.arrayAsJoin(part.trim());
+        if (joinedCP !== null) {
+          const [pW, lW] = splitTwoWatExprs(this.emitStringPtrLen(joinedCP, locals));
+          concatAppend(pW, lW);
+          return;
+        }
         // Non-template: use emitStringPtrLen (handles vars, literals, struct fields, array elems, fn calls)
         const simple = this.quietEmit(() => this.emitStringPtrLen(part, locals));
         if (simple !== "(i32.const 0) (i32.const 0)") {
@@ -7465,6 +7531,9 @@ class WasicTranspiler {
       strMethodM &&
       (locals.get(strMethodM[1]) === "string" || this.moduleStringConsts.has(strMethodM[1]))
     ) return true;
+    // arr.join(...) — a string (Phase 28 value form in emitStringPtrLen)
+    const joinM = e.match(/^(\w+)\.join\s*\(/);
+    if (joinM && this.arrayVars.has(joinM[1])) return true;
     // String.fromCharCode(n) / String.fromCodePoint(n) — always produce a string
     if (/^String\.fromCharCode\s*\(/.test(e)) return true;
     if (/^String\.fromCodePoint\s*\(/.test(e)) return true;
@@ -7757,8 +7826,57 @@ ${prefixed}
     return null;
   }
 
+  /** A bare array name where a string is wanted (`${arr}`, `"x=" + arr`, `String(arr)`) is
+   *  `arr.join()` in JS. Until 2026-10-09 the string paths read it as the i32 pointer and printed
+   *  e.g. `v=260` (sw09). Returns the `.join()` rewrite, `null` if `e` is not an array, or a
+   *  diagnostic plus an empty literal for an array kind the join helper cannot render. */
+  private arrayAsJoin(e: string): string | null {
+    if (!/^\w+$/.test(e)) return null;
+    const a = this.arrayVars.get(e);
+    if (
+      a && (a.elemType === "i32" || a.elemType === "f64") && !a.isStringArr && !a.is2D &&
+      !a.structTypeName && !a.isFuncPtrArr
+    ) return `${e}.join()`;
+    if (a || this.typedArrayVars.has(e)) {
+      this.diagnostics.push(`Unsupported array in string context: ${e} (use ${e}.join(...))`);
+      return `""`;
+    }
+    return null;
+  }
+
   private emitStringPtrLen(expr: string, locals: Map<string, WatType>): string {
     expr = expr.trim();
+    // `String(x)` as a (ptr, len) pair, built by a `$__<type>_to_new_str` helper. Only
+    // emitStringAssign knew it, so an ARGUMENT `s.indexOf(String(n))` searched for "" and gave 0
+    // (sw08, 2026-10-09).
+    {
+      const so = expr.match(/^String\s*\(([\s\S]*)\)$/);
+      if (so && parenDepthNeverNegative(so[1])) {
+        const arg = so[1].trim();
+        if (/^\w+$/.test(arg) && this.hasExnKind(arg, locals)) {
+          this.needsStringOpHelpers = true;
+          this.needsExnStr = true;
+          return `(call $__exn_str (local.get $${arg}__kind) (local.get $${arg}_ptr) (local.get $${arg}_len))`;
+        }
+        const joined = this.arrayAsJoin(arg);
+        if (joined !== null) return this.emitStringPtrLen(joined, locals);
+        const rawT = this.inferExprType(arg, locals);
+        if (rawT === "string" || this.isStringExpr(arg, locals)) {
+          return this.emitStringPtrLen(arg, locals);
+        }
+        const t = watBaseType(rawT);
+        if (rawT === "bool") {
+          this.strOfHelpers.add("bool");
+          return `(call $__bool_to_new_str ${this.emitExpr(arg, locals, "i32")})`;
+        }
+        if (t === "i32" || t === "i64" || t === "f64" || t === "f32") {
+          const k = t === "f32" ? "f64" : t;
+          this.needsNumericHelpers = true;
+          this.strOfHelpers.add(k);
+          return `(call $__${k}_to_new_str ${this.emitExpr(arg, locals, k as WatType)})`;
+        }
+      }
+    }
     // String variable (or param) — use locals map for accuracy
     if (/^\w+$/.test(expr) && locals.get(expr) === "string") {
       return `(local.get $${expr}_ptr) (local.get $${expr}_len)`;
@@ -8094,8 +8212,41 @@ ${prefixed}
     // aborts the compile rather than silently becoming the empty string (e.g. a wrong `===` result).
     if (this.emitDiagSuppressDepth === 0) {
       this.diagnostics.push(`Unsupported string expression: ${expr.slice(0, 80)}`);
+    } else {
+      // Inside a speculative probe the diagnostic is suppressed; COUNT it, so a probe whose
+      // result stands on this "" can be rejected rather than used (sw08's silent half).
+      this.quietStringFailures++;
     }
     return `(i32.const 0) (i32.const 0)`;
+  }
+
+  /** `$__<k>_to_new_str(v) → (ptr, len)`: a number or boolean as a fresh string, for
+   *  emitStringPtrLen's `String(x)` (sw08). Numbers use the same 32-byte buffer emitStringAssign
+   *  does; booleans the static "true" / "false". */
+  private getStrOfWat(): string {
+    const out: string[] = [];
+    for (const k of ["i32", "i64", "f64"]) {
+      if (!this.strOfHelpers.has(k)) continue;
+      out.push(`  (func $__${k}_to_new_str (param $v ${k}) (result i32 i32)
+    (local $p i32)
+    (local.set $p (call $__malloc (i32.const 32)))
+    (local.get $p)
+    ${
+        k === "i64"
+          ? `(i32.sub (call $__i64_to_str (local.get $v) (local.get $p)) (i32.const 1)) ;; no "n" (sw50)`
+          : `(call $__${k}_to_str (local.get $v) (local.get $p))`
+      }
+  )`);
+    }
+    if (this.strOfHelpers.has("bool")) {
+      const [tp, tl] = this.allocString("true");
+      const [fp, fl] = this.allocString("false");
+      out.push(`  (func $__bool_to_new_str (param $v i32) (result i32 i32)
+    (if (local.get $v) (then (return (i32.const ${tp}) (i32.const ${tl}))))
+    (i32.const ${fp}) (i32.const ${fl})
+  )`);
+    }
+    return out.join("\n");
   }
 
   // -------------------------------------------------------------------------
@@ -9623,32 +9774,23 @@ ${prefixed}
           return asDefault(`(f64.abs ${this.emitExpr(args[0] ?? "0", locals, "f64")})`);
         }
 
-        // min / max — i32 helper in i32 context, native f64.min/max otherwise
-        if (mathFn === "min") {
-          if (defaultType === "i32") {
-            this.mathHelpers.add("i32_min");
-            return `(call $__i32_min ${this.emitExpr(args[0] ?? "0", locals, "i32")} ${
-              this.emitExpr(args[1] ?? "0", locals, "i32")
-            })`;
+        // min / max — i32 helper in i32 context, native f64.min/max otherwise. N-ARY, folded left
+        // (`max(max(a, b), c)`): only the first two arguments were read, so `Math.max(1, 5, 9)`
+        // was 5 (sw28, 2026-10-09). One argument is itself; none is ±Infinity, as in JavaScript.
+        // Two arguments emit exactly what they did.
+        if (mathFn === "min" || mathFn === "max") {
+          if (args.length === 0) {
+            return asDefault(`(f64.const ${mathFn === "max" ? "-inf" : "inf"})`);
           }
-          return asDefault(
-            `(f64.min ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
-              this.emitExpr(args[1] ?? "0", locals, "f64")
-            })`,
+          const isI32 = defaultType === "i32";
+          if (isI32) this.mathHelpers.add(`i32_${mathFn}`);
+          const ws = args.map((a) => this.emitExpr(a, locals, isI32 ? "i32" : "f64"));
+          const folded = ws.slice(1).reduce(
+            (acc, w) =>
+              isI32 ? `(call $__i32_${mathFn} ${acc} ${w})` : `(f64.${mathFn} ${acc} ${w})`,
+            ws[0],
           );
-        }
-        if (mathFn === "max") {
-          if (defaultType === "i32") {
-            this.mathHelpers.add("i32_max");
-            return `(call $__i32_max ${this.emitExpr(args[0] ?? "0", locals, "i32")} ${
-              this.emitExpr(args[1] ?? "0", locals, "i32")
-            })`;
-          }
-          return asDefault(
-            `(f64.max ${this.emitExpr(args[0] ?? "0", locals, "f64")} ${
-              this.emitExpr(args[1] ?? "0", locals, "f64")
-            })`,
-          );
+          return isI32 ? folded : asDefault(folded);
         }
 
         // Math.round: JavaScript's rule (nearest, ties toward +∞, −0 kept), via $__math_round.
@@ -10338,6 +10480,20 @@ ${prefixed}
         const lhsWatP = this.emitExpr(lhsQQ, locals, defaultType);
         if (!/^\w+$/.test(lhsQQ)) {
           // Complex LHS expression: not nullable in WASM, ignore RHS
+          return lhsWatP;
+        }
+        // A VALUE (a number or boolean that is not tracked nullable above) is never null: `x ?? 5`
+        // is `x`. The 0-is-null test below is the reference convention only; applied to an i32
+        // param it turned 0 into 5 (sw19, 2026-10-09). An i32 is a value unless it is a known
+        // pointer (struct, array, typed array, class instance, closure, `any`).
+        const lhsT = locals.get(lhsQQ) ?? this.moduleGlobals.get(lhsQQ)?.type;
+        const isPtrI32 = this.structVars.has(lhsQQ) || this.arrayVars.has(lhsQQ) ||
+          this.typedArrayVars.has(lhsQQ) || this.classVars.has(lhsQQ) ||
+          this.closureTypedVars.has(lhsQQ) || this.anyVars.has(lhsQQ);
+        if (
+          lhsT === "f64" || lhsT === "f32" || lhsT === "i64" || lhsT === "bool" ||
+          (lhsT === "i32" && !isPtrI32 && !this.zeroNullLocals.has(lhsQQ))
+        ) {
           return lhsWatP;
         }
         const rhsWatP = this.emitExpr(rhsQQ, locals, defaultType);
@@ -13325,7 +13481,11 @@ ${prefixed}
         };
       };
       const dotCallLookupFn: DotCallLookup = (token) => {
+        const qsfMark = this.quietStringFailures;
         const result = this.quietEmit(() => this.emitExpr(token, locals, "i32"));
+        // A result that stands on an unsupported string ("" in its place) is not a result
+        // (sw08): reject it so the console path reports the argument instead of printing 0.
+        if (this.quietStringFailures > qsfMark) return undefined;
         if (result === "(unreachable)" || result.startsWith("(;?")) return undefined;
         // Determine return type from the expression
         // Phase 47: arr[idx].method(args) — resolve the element class's method return type
@@ -13390,6 +13550,13 @@ ${prefixed}
           // Boolean-returning array methods: every, some, includes
           if (
             ["every", "some", "includes"].includes(methodName2) && this.arrayVars.has(receiver2)
+          ) {
+            return { type: "bool", wat: result };
+          }
+          // ... and string methods: `s.includes("b")` printed `1` (sw07, 2026-10-09).
+          if (
+            ["includes", "startsWith", "endsWith"].includes(methodName2) &&
+            (locals.get(receiver2) === "string" || this.moduleStringConsts.has(receiver2))
           ) {
             return { type: "bool", wat: result };
           }
@@ -13528,7 +13695,8 @@ ${prefixed}
         const qqT = this.nullableVarInnerType.get(qqLhs) ??
           this.inferExprType(qqLhs, nlLocals);
         const qqBt = qqT === "f64" || qqT === "f32" ? "f64" : "i32";
-        return { wat: this.emitExpr(tok, nlLocals, qqBt), type: qqBt };
+        // A boolean stays `bool` so the console prints `false`, not `0` (sw19's console half).
+        return { wat: this.emitExpr(tok, nlLocals, qqBt), type: qqT === "bool" ? "bool" : qqBt };
       });
       const segments = parseConsoleLogArgs(
         logMatch[1],
@@ -13781,7 +13949,11 @@ ${prefixed}
         };
       };
       const dotCallLookupFnErr: DotCallLookup = (token) => {
+        const qsfMark = this.quietStringFailures;
         const result = this.quietEmit(() => this.emitExpr(token, locals, "i32"));
+        // A result that stands on an unsupported string ("" in its place) is not a result
+        // (sw08): reject it so the console path reports the argument instead of printing 0.
+        if (this.quietStringFailures > qsfMark) return undefined;
         if (result === "(unreachable)" || result.startsWith("(;?")) return undefined;
         // Phase 47: arr[idx].method(args) — resolve the element class's method return type
         // so console.log formats the result correctly (emitExpr already does vtable dispatch).
@@ -13844,6 +14016,13 @@ ${prefixed}
           // Boolean-returning array methods: every, some, includes (mirror of dotCallLookupFn)
           if (
             ["every", "some", "includes"].includes(methodName2) && this.arrayVars.has(receiver2)
+          ) {
+            return { type: "bool", wat: result };
+          }
+          // ... and string methods (sw07; mirror of dotCallLookupFn)
+          if (
+            ["includes", "startsWith", "endsWith"].includes(methodName2) &&
+            (locals.get(receiver2) === "string" || this.moduleStringConsts.has(receiver2))
           ) {
             return { type: "bool", wat: result };
           }
@@ -13979,7 +14158,8 @@ ${prefixed}
         const qqT = this.nullableVarInnerType.get(qqLhs) ??
           this.inferExprType(qqLhs, nlLocals);
         const qqBt = qqT === "f64" || qqT === "f32" ? "f64" : "i32";
-        return { wat: this.emitExpr(tok, nlLocals, qqBt), type: qqBt };
+        // A boolean stays `bool` so the console prints `false`, not `0` (sw19's console half).
+        return { wat: this.emitExpr(tok, nlLocals, qqBt), type: qqT === "bool" ? "bool" : qqBt };
       });
       const segments = parseConsoleLogArgs(
         errMatch[2],
@@ -15582,6 +15762,7 @@ ${prefixed}
       parts.push(this.getStringOpHelperWat());
     }
     if (this.needsExnStr) parts.push(this.getExnStrWat());
+    if (this.strOfHelpers.size > 0) parts.push(this.getStrOfWat());
     if (this.needsStringExtHelpers) parts.push(this.getStringExtHelperWat());
     // $__fd_write_all is gated on the SAME flag as the `$fd_write` import above, so the helper
     // exists in every module that can call it and in no module that cannot.
@@ -18027,6 +18208,7 @@ ${sum}
     this.catchVarShadows = new Set();
     this.forOfDepth = 0;
     this.nullableVarInnerType = new Map();
+    this.zeroNullLocals = new Set();
     // Re-seed module-level `T | null` globals — the reset above is per-function, but their
     // companion `$g__null` is a WASM global visible from every body.
     for (const [gn, gi] of this.moduleNullableGlobals) this.nullableVarInnerType.set(gn, gi.inner);
@@ -20166,6 +20348,7 @@ ${sum}
       this.classVars = new Map();
       this.forOfDepth = 0;
       this.nullableVarInnerType = new Map();
+      this.zeroNullLocals = new Set();
       // Re-seed module-level `T | null` globals (see the matching reset in emitFunction).
       for (const [gn, gi] of this.moduleNullableGlobals) {
         this.nullableVarInnerType.set(gn, gi.inner);
