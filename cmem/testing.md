@@ -112,6 +112,18 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-09, values converted to strings, `Math.min`/`max`, `??` on numbers (sw06–sw09, sw19,
+> sw28; found and fixed sw50, ld24, ld25), full gate green.** wasi **444/444**
+> (+`11_StringConversions`, which fails on main) · golden-WAT **501 / 0** after a deliberate
+> re-record: 9 entries changed, each a console `String(x)` now built by the shared multi-value
+> helper (`$__exn_str`, `$__<type>_to_new_str`; same values), +1 new. A FIRST cut also changed
+> `24_NullableTupleReturnAndFlags` (`val ?? -1` lost its 0 test, so a null tuple element became
+> 0): caught reading the golden diff, fixed before the gate, and it exposed sw51 · engine 1152 on
+> baseline · wast 64,506 / 0 / 16 · Go 7/7/12 · bindgen 142 · bundle, merge, mod, jstyper, dync
+> 0 failed · varscope 12 · typed_decl 18 · engine_tests 11 · wast_runner 8 · witgen 23 ·
+> wasic_seam 10 · hybrid + wasmmerge_guard 15. Round-1 repros: 5 DIFFER = open silent 5 (sw36,
+> sw37, sw48, sw49, sw51); 17 + 3 = open loud 20.
+>
 > **2026-10-06, operator precedence / grouping / typing (sw10–sw17), full gate green.** wasi
 > **443/443** (+`4_OperatorSemantics`) · golden-WAT **500 / 0** after a deliberate re-record: 4
 > entries changed (`a - b + c` regrouped in the date library, i32-identical; two `i32` vs

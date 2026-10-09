@@ -534,12 +534,14 @@ function promoteF32(wat: string, type: string | null | undefined): string {
 export type LogSegment =
   | { kind: "literal"; text: string } // static string (embedded in data section)
   | { kind: "i32var"; name: string } // local i32 variable
-  | { kind: "i64var"; name: string } // local i64 variable
+  // `strConv`: the i64 is inside a template or concatenation, string conversion, so `12` not
+  // console.log's `12n` (sw50, 2026-10-09). Set by parseConsoleLogArgs.
+  | { kind: "i64var"; name: string; strConv?: boolean } // local i64 variable
   // `console`: a WHOLE console argument, printed with console.log's formatting (−0 as `-0`), not
   // string conversion (`${-0}` is `0`). Set by parseConsoleLogArgs only (sw41, 2026-10-06).
   | { kind: "f64var"; name: string; console?: boolean } // local f64 variable
   | { kind: "i32expr"; wat: string } // arbitrary WAT expression yielding i32
-  | { kind: "i64expr"; wat: string } // arbitrary WAT expression yielding i64
+  | { kind: "i64expr"; wat: string; strConv?: boolean } // arbitrary WAT expression yielding i64
   | { kind: "f64expr"; wat: string; console?: boolean } // arbitrary WAT expression yielding f64
   | { kind: "strvar"; ptrLocal: string; lenLocal: string } // string variable (ptr + len i32 locals)
   | { kind: "boolvar"; name: string } // bool-typed local (i32, 0=false 1=true)
@@ -830,9 +832,11 @@ function parseSingleArg(
     const lhsIsStr = /^["'`]/.test(lhs) || locals.get(lhs) === "string";
     const rhsIsStr = /^["'`]/.test(rhs) || locals.get(rhs) === "string";
     if (lhsIsStr || rhsIsStr) {
+      // An array operand of a string concat is string conversion, `.join(",")` (sw09).
+      const asJoined = (p: string) => /^\w+$/.test(p) && arrayLookup?.(p) ? `${p}.join(",")` : p;
       return [
         ...parseSingleArg(
-          lhs,
+          asJoined(lhs),
           locals,
           funcLookup,
           allocString,
@@ -845,7 +849,7 @@ function parseSingleArg(
           closureVarLookup,
         ),
         ...parseSingleArg(
-          rhs,
+          asJoined(rhs),
           locals,
           funcLookup,
           allocString,
@@ -1196,11 +1200,18 @@ function parseSingleArg(
   if (joinMatch && allocString) {
     const arrName = joinMatch[1];
     const arrInfo = arrayLookup?.(arrName);
-    if (arrInfo?.dynamic) {
+    if (arrInfo && !arrInfo.customLoadOp) {
       const sepRaw = joinMatch[2];
       const sep = sepRaw ? sepRaw.slice(1, -1) : ",";
       const [sepPtr, sepLen] = allocString(sep);
-      const arrWat = arrInfo.ptr === -1 ? `(local.get $${arrName})` : `(local.get $${arrName})`;
+      // Every array has the [length, capacity] header, so a STATIC array (its address a
+      // constant) and a module array (a global) join the same way as a dynamic one, which was
+      // the only kind accepted (sw09, 2026-10-09).
+      const arrWat = arrInfo.isGlobal
+        ? `(global.get $${arrName})`
+        : (arrInfo.ptr === -1 || arrInfo.ptr === -2 || arrInfo.dynamic)
+        ? `(local.get $${arrName})`
+        : `(i32.const ${arrInfo.ptr})`;
       return [{ kind: "joinarr", arrWat, sepPtr, sepLen, elemType: arrInfo.elemType }];
     }
   }
@@ -1574,7 +1585,11 @@ function parseSingleArg(
     const nw = _nullishResolver(token, locals);
     if (nw !== undefined) {
       return [{
-        kind: nw.type === "f64" || nw.type === "f32" ? "f64expr" : "i32expr",
+        kind: nw.type === "f64" || nw.type === "f32"
+          ? "f64expr"
+          : nw.type === "bool"
+          ? "boolexpr"
+          : "i32expr",
         wat: promoteF32(nw.wat, nw.type),
       }];
     }
@@ -1838,7 +1853,12 @@ function parseTemplateLiteral(
         else if (body[j] === "}") depth--;
         j++;
       }
-      const expr = body.slice(i + 2, j - 1).trim();
+      const rawExpr = body.slice(i + 2, j - 1).trim();
+      // An ARRAY in a template is string conversion: `${nums}` is `nums.join(",")` ("1,2,3"),
+      // not the array's address (sw09, 2026-10-09).
+      const expr = /^\w+$/.test(rawExpr) && arrayLookup?.(rawExpr)
+        ? `${rawExpr}.join(",")`
+        : rawExpr;
       segments.push(
         ...parseSingleArg(
           expr,
@@ -2312,59 +2332,35 @@ function exprToWat(
           })`
           : asExpected(`(f64.abs ${arg0})`);
       }
-      if (fn === "min") {
-        return expectedType === "i32"
-          ? `(call $__i32_min ${
-            exprToWat(
-              a[0] ?? "0",
-              locals,
-              "i32",
-              funcLookup,
-              allocString,
-              arrayLookup,
-              structLookup,
-              globals,
-            )
-          } ${
-            exprToWat(
-              a[1] ?? "0",
-              locals,
-              "i32",
-              funcLookup,
-              allocString,
-              arrayLookup,
-              structLookup,
-              globals,
-            )
-          })`
-          : asExpected(`(f64.min ${arg0} ${arg1})`);
-      }
-      if (fn === "max") {
-        return expectedType === "i32"
-          ? `(call $__i32_max ${
-            exprToWat(
-              a[0] ?? "0",
-              locals,
-              "i32",
-              funcLookup,
-              allocString,
-              arrayLookup,
-              structLookup,
-              globals,
-            )
-          } ${
-            exprToWat(
-              a[1] ?? "0",
-              locals,
-              "i32",
-              funcLookup,
-              allocString,
-              arrayLookup,
-              structLookup,
-              globals,
-            )
-          })`
-          : asExpected(`(f64.max ${arg0} ${arg1})`);
+      if (fn === "min" || fn === "max") {
+        // N-ary, folded left, as wasic's emitExpr (sw28, 2026-10-09): only two arguments were
+        // read. One argument is itself; none is ±Infinity. Two emit exactly what they did.
+        if (a.length === 0) return asExpected(`(f64.const ${fn === "max" ? "-inf" : "inf"})`);
+        const isI32 = expectedType === "i32";
+        const ws = isI32
+          ? a.map((x) =>
+            exprToWat(x, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals)
+          )
+          : [
+            arg0,
+            ...a.slice(1).map((x, k) =>
+              k === 0 ? arg1 : exprToWat(
+                x,
+                locals,
+                "f64",
+                funcLookup,
+                allocString,
+                arrayLookup,
+                structLookup,
+                globals,
+              )
+            ),
+          ];
+        const folded = ws.slice(1).reduce(
+          (acc, w) => isI32 ? `(call $__i32_${fn} ${acc} ${w})` : `(f64.${fn} ${acc} ${w})`,
+          ws[0],
+        );
+        return isI32 ? folded : asExpected(folded);
       }
       if (fn === "sqrt") return asExpected(`(f64.sqrt ${arg0})`);
       if (fn === "floor") return asExpected(`(f64.floor ${arg0})`);
@@ -3235,6 +3231,12 @@ export function parseConsoleLogArgs(
       only.console = true;
       _mathHelperNeeded?.("f64_to_str_console");
     }
+    // An i64 inside a template or a concatenation is string conversion: no `n` (sw50).
+    if (args[i].trim().startsWith("`") || hasTopLevelQuote(args[i]) || argSegs.length > 1) {
+      for (const sg of argSegs) {
+        if (sg.kind === "i64var" || sg.kind === "i64expr") sg.strConv = true;
+      }
+    }
     // A numeric LITERAL is formatted at compile time (parseSingleArg, as string conversion):
     // `console.log(-0.0)` printed `0`.
     const lit = args[i].trim();
@@ -3541,6 +3543,10 @@ export function emitConsoleLog(
         } else {
           callExpr = `(call ${f64Printer(seg)} ${seg.wat} ${destExpr})`;
         }
+        // string conversion of an i64: drop the `n` (sw50)
+        if ((seg.kind === "i64var" || seg.kind === "i64expr") && seg.strConv) {
+          callExpr = `(i32.sub ${callExpr} (i32.const 1))`;
+        }
 
         if (!runtimeCursor) {
           // cursor = compileCursor + result_of_call
@@ -3696,6 +3702,10 @@ export function emitConsoleLog(
           callExpr = `(call $__i64_to_str ${seg.wat} (i32.const ${scratchPtr}))`;
         } else {
           callExpr = `(call ${f64Printer(seg)} ${seg.wat} (i32.const ${scratchPtr}))`;
+        }
+        // string conversion of an i64: drop the `n` (sw50)
+        if ((seg.kind === "i64var" || seg.kind === "i64expr") && seg.strConv) {
+          callExpr = `(i32.sub ${callExpr} (i32.const 1))`;
         }
 
         statements.push(
