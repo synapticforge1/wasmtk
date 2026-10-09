@@ -6,7 +6,7 @@ export function safeDivide(a: i32, b: i32): i32 {
     // This should trigger a Wasm 'unreachable' or WASI 'proc_exit'
     throw new Error("Division by zero"); 
   }
-  return a / b;
+  return i32.div(a, b);
 }
 
 console.log(safeDivide(10, 2)); // Should print 5

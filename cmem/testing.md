@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-09, later that night, integer `/` is a compile error (owner; sw36, sw37), full gate
+> green.** wasi **452/452** (10 corpus programs rewritten to `i32.div` / f64 operands, same
+> output) · golden-WAT **509**: exactly those 11 entries changed (10 programs + the date bundle's
+> wasic step), re-recorded · typed_decl **25** (+6 refused shapes, +1 accepted) · wasic_seam 10 ·
+> every other suite as below · wast 64,506 / 0 / 16 · engine cross-check on baseline ·
+> api-surface matches.
+>
 > **2026-10-09, night, wasMath L3 ("CR, in both"; sw57–sw59, sw61, sw63, ld27, ld28, ld33),
 > full gate green.** wasi **452/452** (+`38_MathEdgeCasesL3`) · golden-WAT **509**: 15 entries
 > changed ONLY inside the merged mathlib (checked with the mathlib functions stripped: program code
@@ -866,11 +873,10 @@ from rsxtk!")/`build`→`.wasm`/`add`/`list`/`clean`. Manual verify command is i
   that does `guard[5000000]` (OOB read → trap → nonzero exit) on failure. A passing `run` proves
   semantics. (Written when a wasic uncaught `throw` exited 0; since sw01, 2026-09-29, it exits 1,
   but the guard pattern is still the one the fixtures use.)
-- **Integer division** in tests: `(a / b) | 0` to match TS float-`number` semantics (Binaryen -Oz
-  elides the `| 0` no-op). This convention WORKS AROUND a divergence: `/` of two `i32` operands
-  is `i32.div_s` (truncating), where TypeScript divides as floats. RULED BY DESIGN (owner,
-  2026-09-30; design-decisions.md § "Wasm types in TypeScript"): a Deno run is not the reference
-  for `i32`, so the convention (or `// @allow-output-diff`) stays. The declared-f64 case is sw36.
+- **Integer division** in tests (2026-10-09): `i32.div(a, b)` (wasMath) for the truncated
+  quotient, `f64.div(a, b)` or f64 operands for the fraction. A plain `/` between integers,
+  `(a / b) | 0` included, is a COMPILE ERROR since the owner's decision (design-decisions.md §
+  "Wasm types in TypeScript"). The old `(a / b) | 0` convention is gone from the corpus.
 
 ## Single-test quick loop
 

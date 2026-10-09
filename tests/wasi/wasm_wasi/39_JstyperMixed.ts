@@ -15,7 +15,7 @@ function countDigits(n: i32): i32 {
   let x: i32 = n < 0 ? -n : n;
   while (x > 0) {
     count = count + 1;
-    x = (x / 10) | 0;
+    x = i32.div(x, 10);
   }
   return count;
 }

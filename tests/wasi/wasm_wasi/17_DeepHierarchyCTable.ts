@@ -10,7 +10,7 @@ class Account {
   }
 
   calculateBonus(): i32 {
-    return this.balance / 100;
+    return i32.div(this.balance, 100);
   }
 }
 
@@ -23,7 +23,7 @@ class PremiumAccount extends Account {
   }
 
   override calculateBonus(): i32 {
-    return (this.balance / 100) * this.multiplier;
+    return i32.div(this.balance, 100) * this.multiplier;
   }
 }
 

@@ -8,7 +8,8 @@
  *     `WM_WAT` below; WasicTranspiler registers every helper the program uses as an ordinary
  *     function (typed params and result), so calls, conversions and printing need no new path;
  *   - `f64` `Math`-style members and constants → `Math.<name>`, so `f64.*` and `Math.*` share one
- *     implementation (the design: one V8-exact library, wasm-number-types.md Track M);
+ *     implementation (the correctly rounded mathlib, which `src/wasmath.ts` also runs in Deno:
+ *     "CR, in both", wasm-number-types.md L3);
  *   - `f32` `Math`-style members → `__wm_f32_<name>`, a small TypeScript helper (`WM_F32_TS`) that
  *     is EXACTLY the TypeScript body: `Math.fround(Math.sin(Math.fround(a)))`.
  *
@@ -23,6 +24,16 @@
  *
  * @module
  */
+
+/** The diagnostic for a plain `/` between integers (owner decision, 2026-10-09; closes sw36 /
+ *  sw37): TypeScript divides as floats (`7 / 2` is 3.5) and wasm's `i32.div_s` truncates (3), so
+ *  the two can never agree. The program states which one it means with wasMath; running it under
+ *  Deno is unchanged. Both emitters (wasic's emitExpr and `/=`, console_log's exprToWat) raise it. */
+export function intDivisionDiagnostic(expr: string): string {
+  return `integer division '${expr.trim().slice(0, 60)}': TypeScript gives a fraction (7 / 2 is 3.5) ` +
+    `but wasm truncates (3). Say which you mean with wasMath: i32.div(a, b) for the truncated ` +
+    `quotient, f64.div(a, b) for the fraction`;
+}
 
 /** True for an import specifier that names the wasMath module. */
 export function isWasMathSpecifier(spec: string): boolean {

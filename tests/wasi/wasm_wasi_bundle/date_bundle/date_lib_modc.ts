@@ -11,12 +11,12 @@
 // branch-light algorithms (http://howardhinnant.github.io/date_algorithms.html), which are
 // exact integer math valid across the entire proleptic Gregorian calendar.
 //
-// Integer division: every `/` that must truncate toward zero is written `(a / b) | 0` per the
-// project idiom (TypeScript `type i32 = number` is float at runtime; `| 0` forces i32
-// truncation, matching WASM `i32.div_s`). For all realistic inputs the dividends here are
-// non-negative, so truncation == floor and the round-trips are exact.
+// Integer division: every quotient that must truncate toward zero is `i32.div(a, b)` (wasMath),
+// which is `i32.div_s` in wasm and the same truncation in TypeScript. (It was `(a / b) | 0`; since
+// 2026-10-09 a plain `/` between integers is a compile error.) For all realistic inputs the
+// dividends here are non-negative, so truncation == floor and the round-trips are exact.
 
-type i32 = number;
+import { i32 } from "../../../../src/wasmath.ts";
 
 /** 1 if `year` is a Gregorian leap year, else 0. */
 /** @export */
@@ -43,11 +43,11 @@ export function daysInMonth(year: i32, month: i32): i32 {
 /** @export */
 export function daysFromCivil(year: i32, month: i32, day: i32): i32 {
   const y: i32 = month <= 2 ? year - 1 : year;
-  const era: i32 = ((y >= 0 ? y : y - 399) / 400) | 0;
+  const era: i32 = i32.div(y >= 0 ? y : y - 399, 400);
   const yoe: i32 = y - era * 400;               // [0, 399]
   const mp: i32 = month > 2 ? month - 3 : month + 9; // [0, 11]
-  const doy: i32 = (((153 * mp + 2) / 5) | 0) + day - 1; // [0, 365]
-  const doe: i32 = yoe * 365 + ((yoe / 4) | 0) - ((yoe / 100) | 0) + doy; // [0, 146096]
+  const doy: i32 = i32.div(153 * mp + 2, 5) + day - 1; // [0, 365]
+  const doe: i32 = yoe * 365 + i32.div(yoe, 4) - i32.div(yoe, 100) + doy; // [0, 146096]
   return era * 146097 + doe - 719468;
 }
 
@@ -61,15 +61,15 @@ export function weekdayFromDays(z: i32): i32 {
 /** @export */
 export function yearFromDays(z: i32): i32 {
   const zz: i32 = z + 719468;
-  const era: i32 = ((zz >= 0 ? zz : zz - 146096) / 146097) | 0;
+  const era: i32 = i32.div(zz >= 0 ? zz : zz - 146096, 146097);
   const doe: i32 = zz - era * 146097;           // [0, 146096]
-  const a: i32 = (doe / 1460) | 0;
-  const b: i32 = (doe / 36524) | 0;
-  const c: i32 = (doe / 146096) | 0;
-  const yoe: i32 = ((doe - a + b - c) / 365) | 0; // [0, 399]
+  const a: i32 = i32.div(doe, 1460);
+  const b: i32 = i32.div(doe, 36524);
+  const c: i32 = i32.div(doe, 146096);
+  const yoe: i32 = i32.div(doe - a + b - c, 365); // [0, 399]
   const y: i32 = yoe + era * 400;
-  const doy: i32 = doe - (365 * yoe + ((yoe / 4) | 0) - ((yoe / 100) | 0)); // [0, 365]
-  const mp: i32 = ((5 * doy + 2) / 153) | 0;     // [0, 11]
+  const doy: i32 = doe - (365 * yoe + i32.div(yoe, 4) - i32.div(yoe, 100)); // [0, 365]
+  const mp: i32 = i32.div(5 * doy + 2, 153);     // [0, 11]
   const m: i32 = mp < 10 ? mp + 3 : mp - 9;      // [1, 12]
   return m <= 2 ? y + 1 : y;
 }
@@ -78,14 +78,14 @@ export function yearFromDays(z: i32): i32 {
 /** @export */
 export function monthFromDays(z: i32): i32 {
   const zz: i32 = z + 719468;
-  const era: i32 = ((zz >= 0 ? zz : zz - 146096) / 146097) | 0;
+  const era: i32 = i32.div(zz >= 0 ? zz : zz - 146096, 146097);
   const doe: i32 = zz - era * 146097;
-  const a: i32 = (doe / 1460) | 0;
-  const b: i32 = (doe / 36524) | 0;
-  const c: i32 = (doe / 146096) | 0;
-  const yoe: i32 = ((doe - a + b - c) / 365) | 0;
-  const doy: i32 = doe - (365 * yoe + ((yoe / 4) | 0) - ((yoe / 100) | 0));
-  const mp: i32 = ((5 * doy + 2) / 153) | 0;
+  const a: i32 = i32.div(doe, 1460);
+  const b: i32 = i32.div(doe, 36524);
+  const c: i32 = i32.div(doe, 146096);
+  const yoe: i32 = i32.div(doe - a + b - c, 365);
+  const doy: i32 = doe - (365 * yoe + i32.div(yoe, 4) - i32.div(yoe, 100));
+  const mp: i32 = i32.div(5 * doy + 2, 153);
   return mp < 10 ? mp + 3 : mp - 9;
 }
 
@@ -93,13 +93,13 @@ export function monthFromDays(z: i32): i32 {
 /** @export */
 export function dayFromDays(z: i32): i32 {
   const zz: i32 = z + 719468;
-  const era: i32 = ((zz >= 0 ? zz : zz - 146096) / 146097) | 0;
+  const era: i32 = i32.div(zz >= 0 ? zz : zz - 146096, 146097);
   const doe: i32 = zz - era * 146097;
-  const a: i32 = (doe / 1460) | 0;
-  const b: i32 = (doe / 36524) | 0;
-  const c: i32 = (doe / 146096) | 0;
-  const yoe: i32 = ((doe - a + b - c) / 365) | 0;
-  const doy: i32 = doe - (365 * yoe + ((yoe / 4) | 0) - ((yoe / 100) | 0));
-  const mp: i32 = ((5 * doy + 2) / 153) | 0;
-  return doy - (((153 * mp + 2) / 5) | 0) + 1;
+  const a: i32 = i32.div(doe, 1460);
+  const b: i32 = i32.div(doe, 36524);
+  const c: i32 = i32.div(doe, 146096);
+  const yoe: i32 = i32.div(doe - a + b - c, 365);
+  const doy: i32 = doe - (365 * yoe + i32.div(yoe, 4) - i32.div(yoe, 100));
+  const mp: i32 = i32.div(5 * doy + 2, 153);
+  return doy - i32.div(153 * mp + 2, 5) + 1;
 }

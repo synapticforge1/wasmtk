@@ -13,7 +13,7 @@ export function tryDivide(a: i32, b: i32): DivResult {
   if (b === 0) {
     return { value: 0, hasError: 1 };
   }
-  return { value: a / b, hasError: 0 };
+  return { value: i32.div(a, b), hasError: 0 };
 }
 
 console.log(tryDivide(10, 2)); // { value: 5, hasError: 0 }

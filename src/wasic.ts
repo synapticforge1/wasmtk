@@ -126,7 +126,7 @@ import { type ExternalFuncDef, mergeWasmWat, type WasmWatType } from "./wasmmerg
 import { gateVarToLet, maskCode } from "./varscope.ts";
 import { findUntypedDeclarations } from "./decltypes.ts";
 import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
-import { type WmHelper, WM_WAT } from "./wasmath_lower.ts";
+import { intDivisionDiagnostic, type WmHelper, WM_WAT } from "./wasmath_lower.ts";
 import {
   type ClosureVarLookup,
   type DataAllocator,
@@ -11234,6 +11234,9 @@ ${prefixed}
         const baseType = watBaseType(numType);
         const isFloat = baseType === "f64" || baseType === "f32";
         const suffix = isFloat ? f64suf : i32suf;
+        // `/` between integers: TypeScript gives a fraction, wasm truncates (owner, 2026-10-09).
+        // bigint division truncates in both, so only i32 is refused.
+        if (op === "/" && baseType === "i32") this.diagnostics.push(intDivisionDiagnostic(expr));
         // f64.rem does not exist in WebAssembly; use x - trunc(x/y)*y formula instead.
         if (op === "%" && isFloat) {
           const lWat = this.emitExpr(lhs, locals, numType);
@@ -13042,6 +13045,9 @@ ${prefixed}
       const opType = alwaysI32 ? "i32" : watBaseType(varType);
       const isFloat = opType === "f64" || opType === "f32";
       const suffix = isFloat ? fOp : iOp;
+      if (op === "/=" && opType === "i32") {
+        this.diagnostics.push(intDivisionDiagnostic(`${varName} /= ${rhs}`));
+      }
       const getWatVar = isGlobal ? `(global.get $${varName})` : `(local.get $${varName})`;
       const rhsWat = this.emitExpr(rhs, locals, opType);
       // f64.rem does not exist in WebAssembly; emit formula for %=

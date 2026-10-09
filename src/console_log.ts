@@ -29,6 +29,8 @@
  *       (trailing zeros stripped). Precision beyond 6 digits is truncated.
  */
 
+import { intDivisionDiagnostic } from "./wasmath_lower.ts";
+
 // ---------------------------------------------------------------------------
 // Memory layout constants
 // ---------------------------------------------------------------------------
@@ -3012,6 +3014,8 @@ function exprToWat(
       : opType === "i64"
       ? i32op.replace(/^i32\./, "i64.")
       : i32op;
+    // `/` between integers: refused, as in wasic's emitExpr (owner, 2026-10-09).
+    if (watOp === "i32.div_s") _diagnosticSink?.(intDivisionDiagnostic(expr));
     const lW = exprToWat(
       lhs,
       locals,
