@@ -50,7 +50,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   - **Owner, 2026-10-09: build it as a COMPLETE library, f64 included**: namespaces `f64`, `f32`,
     `i32`, `i64` (+ `u32` / `u64` views), each function a TypeScript body exact to wasm plus a
     lowering; `Math.*` and `f64.*` share the V8-exact helpers. Order L1 (bodies + batteries) → L2
-    (wasic lowering) → L3 (f64 parity, the Math bugs) → L4 (operator bugs). Starts on T1.
+    (wasic lowering) → L3 (f64 parity, the Math bugs) → L4 (operator bugs). T1 decided: a wasmtk
+    module `wasMath`; T6: traps are throws. **L1 DONE 2026-10-09** (`src/wasmath.ts`, export
+    `./wasMath`, 151 functions exact to the real instructions, `tests/wasmath_tests.ts`).
+    **NEXT: L2**, wasic lowering the calls.
 - ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **6 open silent-wrong, 22 open
   loud** (2026-10-09: sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 fixed; sw50, sw54–sw56, ld21,
   ld24–ld26 fixed with them; the Math scan found sw57–sw60, ld27–ld29).
