@@ -1,6 +1,5 @@
 //Multiple captures
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 function multiCapture(a: i32, b: f64) {
   return (val: i32) => (val + a) * b;
 }

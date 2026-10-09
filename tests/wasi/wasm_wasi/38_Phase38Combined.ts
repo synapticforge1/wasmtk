@@ -1,6 +1,5 @@
 // Phase 38 — Combined: all extended Math functions together
-type f64 = number;
-type i32 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Pythagorean identity: sin²(x) + cos²(x) = 1
 const angle: f64 = Math.PI / 5;

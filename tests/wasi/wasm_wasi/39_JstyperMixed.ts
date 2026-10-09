@@ -1,7 +1,6 @@
 // Phase 39 — jstyper mixed-type output
 // Represents typed .ts with i32, f64, string, and bool function params/returns
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 type bool = boolean;
 
 function clamp(v: f64, lo: f64, hi: f64): f64 {

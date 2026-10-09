@@ -1,6 +1,5 @@
 // Phase 36 — Simple conditional types: generic conditional type as variable annotation
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Toggle: if T is i32 → f64; otherwise → i32
 type Toggle<T> = T extends i32 ? f64 : i32;

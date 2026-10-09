@@ -1,6 +1,5 @@
 // Phase 51.3 — Nested tuple types, literals, destructuring, and params.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Nested tuple as a function parameter, destructured.
 function addNested([[a, b], c]: [[i32, i32], i32]): i32 {

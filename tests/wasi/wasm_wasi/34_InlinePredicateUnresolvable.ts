@@ -4,8 +4,7 @@
 // own type, so there is no layout to resolve `s.weight` against. Skipping narrowing here would
 // read whatever occupies that offset and print it as a number — the exact silent-wrong failure
 // 34_InlinePredicateTargetNarrowing pins the fix for. It must abort with a diagnostic instead.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Shape {
   kind: i32;

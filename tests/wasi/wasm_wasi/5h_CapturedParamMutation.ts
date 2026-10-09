@@ -2,7 +2,7 @@
 // captured local does since sw32: `adder(100)` then `.add(1)`, `.add(2)` gives 101 103 (was
 // 101 102). The parameter is moved into a heap cell on entry; the factory's own reads of it, before
 // the closure is made, still see the value.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function adder(base: i32) {
   return { add: (x: i32) => { base += x; return base; } };

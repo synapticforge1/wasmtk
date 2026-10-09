@@ -1,6 +1,5 @@
 // Phase 31 — Advanced TypedArray tests: runtime length, Uint8Array, .set(), function params
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // ── Runtime length ───────────────────────────────────────────────────────────
 const n: i32 = 4;

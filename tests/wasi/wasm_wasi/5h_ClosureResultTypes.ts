@@ -1,8 +1,7 @@
 // H12, 2026-10-09 (sw52): an arrow in a returned object literal with no return annotation was
 // typed i32 whatever it returned, so a boolean printed 1 / 0 and an f64 was truncated. Its result
 // is now typed from what it returns, in the factory's scope.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function flagger(on: boolean) {
   return { flip: () => { on = !on; return on; } };

@@ -7,7 +7,7 @@
 //   2. console.log string === / !== only handled local/literal/array-element operands; fn-call /
 //      field / slice / method operands silently compared against the empty string.
 //   3. The string `!==` return was inverted (returned true for EQUAL strings).
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function getName(): string {
   return "bob";

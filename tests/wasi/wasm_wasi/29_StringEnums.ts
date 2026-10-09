@@ -1,7 +1,7 @@
 // Phase 29: String Enums
 // Tests: string enum declaration, direct log, assignment to string variable,
 //        comparisons, switch on string enum, mixed numeric+string enum file.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 enum Color {
   Red = "red",

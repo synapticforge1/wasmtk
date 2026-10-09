@@ -1,7 +1,6 @@
 // Phase 40: combined — multiple declare interface + declare const bindings.
 // deno-lint-ignore-file
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 declare interface Display {
   show(value: i32): void;

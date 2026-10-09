@@ -1,6 +1,5 @@
 // Phase 36 — Conditional types as function parameter and return types
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // If T is i32 → f64; otherwise → i32
 type NumCond<T> = T extends i32 ? f64 : i32;

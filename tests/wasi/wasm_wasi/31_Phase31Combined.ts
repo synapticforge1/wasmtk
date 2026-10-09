@@ -1,6 +1,5 @@
 // Phase 31 — Combined test: Int32Array, Float64Array, Uint8Array together
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // ── Int32Array — all features ─────────────────────────────────────────────────
 const ints: Int32Array = new Int32Array([5, 10, 15, 20]);

@@ -1,7 +1,7 @@
 // deno-fmt-ignore-file
 // Regression (2026-06-30): a module-GLOBAL array read/written INSIDE a function must resolve its base
 // to (global.get $arr), not the raw (i32.const -2) sentinel (was reading address -2 → 0).
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 const arr: i32[] = [10, 20, 30];
 function get1(): i32 { return arr[1]; }
 function setAt(i: i32, v: i32): void { arr[i] = v; }

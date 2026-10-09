@@ -1,9 +1,6 @@
 // Phase 41: WIT generation covers all wasic numeric return types.
 // deno-lint-ignore-file
-type i32 = number;
-type i64 = bigint;
-type f32 = number;
-type f64 = number;
+import { i32, i64, f32, f64 } from "../../../src/wasmath.ts";
 type bool = boolean;
 
 export function getInt(): i32 {

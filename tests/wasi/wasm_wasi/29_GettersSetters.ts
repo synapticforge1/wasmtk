@@ -1,8 +1,7 @@
 // Phase 29: Getters and Setters
 // Tests: f64 getter/setter pair, i32 getter/setter pair, computed getter,
 //        setter with validation logic, this.prop inside methods, chained read-after-write.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 class Temperature {
   _celsius: f64;

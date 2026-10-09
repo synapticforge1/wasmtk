@@ -1,5 +1,5 @@
 // Phase 52 combined — void / chained assignment / `in` / Array.from-of-isArray / fromCodePoint.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface Cfg {
   width: i32;

@@ -1,4 +1,4 @@
-type i32 = number; // Alias for 32-bit integer
+import { i32 } from "../../../src/wasmath.ts"; // Alias for 32-bit integer
 
 // Test: No parameters, implicit return
 const getAnswer = (): i32 => 42;

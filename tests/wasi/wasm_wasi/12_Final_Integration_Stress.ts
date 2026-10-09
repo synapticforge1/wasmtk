@@ -1,5 +1,5 @@
 // Final_Integration_Stress.ts
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface MatrixManager {
   addRow: (vals: i32[]) => i32;

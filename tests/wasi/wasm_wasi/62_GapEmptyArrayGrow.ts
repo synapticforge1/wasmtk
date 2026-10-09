@@ -1,7 +1,7 @@
 // deno-fmt-ignore-file
 // Compiler-gap regression (2026-06-30): Gap 5.3 — an empty `[]` reconstructed each loop iteration and
 // pushed must grow from capacity 0 (grow uses max(cap*2, 8)); the rows must not alias.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 const grid: i32[][] = [];
 for (let i = 0; i < 3; i++) {
   const row: i32[] = [];

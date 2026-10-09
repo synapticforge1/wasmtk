@@ -1,6 +1,5 @@
 // Phase 48: Number constants
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function main(): void {
   const nanVal: f64 = Number.NaN;

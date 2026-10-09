@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 // Module-level state accessed by the transform function — avoids closure capture,
 // so addOffset can be passed as a bare table-index funcref to mapArray.

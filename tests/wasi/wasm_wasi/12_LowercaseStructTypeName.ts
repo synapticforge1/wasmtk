@@ -4,8 +4,7 @@
 // every bundled struct, and each `p.field` aborted as "unsupported expression"
 // (tests/bundle_tests.ts StructImport). Names here deliberately start lower-case / underscore.
 
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface vec_Vec2 {
   x: f64;

@@ -7,8 +7,7 @@ export function isTruthyString(a: string): boolean {
 }
 
 // Comparison within a ternary
-type f64 = number; // Alias for clarity
-type i32 = number; // Alias for clarity
+import { i32, f64 } from "../../../src/wasmath.ts"; // Alias for clarity // Alias for clarity
 export function ternaryCompare(a: f64, b: f64): i32 {
   return a > b ? 1 : 0;
 }

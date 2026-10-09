@@ -1,5 +1,5 @@
 // The "Escape" Test
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 function createScaler(multiplier: i32) {
   return (val: i32) => val * multiplier; 
 }

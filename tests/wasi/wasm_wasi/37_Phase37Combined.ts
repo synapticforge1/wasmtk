@@ -1,5 +1,5 @@
 // Phase 37 — flat() + flatMap() combined
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 // ── flat() ────────────────────────────────────────────────────────────────────
 const nested: i32[][] = [[10, 20], [30, 40], [50]];

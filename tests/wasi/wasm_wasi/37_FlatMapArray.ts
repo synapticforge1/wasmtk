@@ -1,6 +1,6 @@
 // Phase 37 — flatMap()
 // Tests: flatMap(fn) maps each element to an array and flattens one level
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 // fn: i32 → [v, v*2]
 function expand(v: i32): i32[] {

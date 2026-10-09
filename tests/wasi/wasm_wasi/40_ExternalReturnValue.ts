@@ -1,7 +1,6 @@
 // Phase 40: external interface methods with i32 and f64 return values.
 // deno-lint-ignore-file
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 declare const sensor: {
   readInt(): i32;

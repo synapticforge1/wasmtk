@@ -1,5 +1,5 @@
 // Equality
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testEqI32(a: i32, b: i32): boolean {
   return a == b;
 }

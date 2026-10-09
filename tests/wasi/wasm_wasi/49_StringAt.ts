@@ -1,5 +1,5 @@
 // Phase 49: String.prototype.at(index)
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function main(): void {
   const s: string = "hello world";

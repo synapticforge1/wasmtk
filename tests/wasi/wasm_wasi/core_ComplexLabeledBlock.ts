@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testLabeledBlock(x: i32): i32 {
   let val: i32 = 0;
 

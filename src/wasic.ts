@@ -126,6 +126,7 @@ import { type ExternalFuncDef, mergeWasmWat, type WasmWatType } from "./wasmmerg
 import { gateVarToLet, maskCode } from "./varscope.ts";
 import { findUntypedDeclarations } from "./decltypes.ts";
 import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
+import { type WmHelper, WM_WAT } from "./wasmath_lower.ts";
 import {
   type ClosureVarLookup,
   type DataAllocator,
@@ -843,6 +844,8 @@ interface FuncDef {
   /** Phase 18: true for functions pre-registered from external .wasm imports. The real body is
    *  spliced in by mergeOneWasmImport; emitFunction must not emit any stub for these. */
   isPhase18Import?: boolean;
+  /** wasMath L2: a helper whose body is raw WAT (wasmath_lower.ts `WM_WAT`). */
+  wasmathWat?: WmHelper;
   /** Phase 5h: variables in a return-object that are shared across multiple closures AND mutated. */
   sharedMutableCaptures?: Set<string>;
   /** Phase 5h: captured params that are heap cell pointers (boxed) rather than plain values. */
@@ -881,6 +884,8 @@ function mapType(ts: string): WatType {
   // Note: "void" is intercepted at each call site before mapType is invoked; it never reaches here.
   if (t === "i32" || t === "int") return "i32";
   if (t === "i64") return "i64";
+  // wasMath's u64 is a bigint (the i64 bits read unsigned); its u32 is a number, so it stays f64.
+  if (t === "u64") return "i64";
   if (t === "f32") return "f32";
   if (t === "bigint") return "i64";
   if (t === "bool" || t === "boolean") return "bool"; // boolean → bool pseudo-type (WAT i32)
@@ -2088,6 +2093,27 @@ class WasicTranspiler {
         exported: false,
         bodyLines: [],
         isPhase18Import: true, // mergeOneWasmImport splices the real body; skip stub emission
+      });
+    }
+    // wasMath L2: the bundler rewrote each wasMath call to `__wm_<ns>_<member>`; register every
+    // helper the program uses (and the helpers those call) as an ordinary typed function, so the
+    // existing call, conversion and printing paths apply. Its body is raw WAT.
+    const wmUsed = new Set<string>();
+    const addWm = (key: string) => {
+      if (wmUsed.has(key) || !WM_WAT[key]) return;
+      wmUsed.add(key);
+      for (const dep of WM_WAT[key].uses ?? []) addWm(dep);
+    };
+    for (const m of this.src.matchAll(/\b__wm_(\w+)\b/g)) addWm(m[1]);
+    for (const key of wmUsed) {
+      const h = WM_WAT[key];
+      this.functions.push({
+        name: `__wm_${key}`,
+        params: h.params.map((t, i) => ({ name: `p${i}`, type: t as WatType })),
+        result: h.result as WatType,
+        exported: false,
+        bodyLines: [],
+        wasmathWat: h,
       });
     }
   }
@@ -10221,8 +10247,10 @@ ${prefixed}
     // Special constants — must be checked before the identifier fallback.
     // null/undefined/true/false are typed to match defaultType so binary ops don't produce
     // a type mismatch (e.g. f64.eq with an i32 rhs).
-    if (expr === "NaN") return "(f64.const nan)";
-    if (expr === "Infinity") return "(f64.const inf)";
+    // In an f32 context they are f32 constants: an f64.const passed to an f32 parameter built an
+    // invalid module (ld32, 2026-10-09, found by the wasMath corpus program).
+    if (expr === "NaN") return defaultType === "f32" ? "(f32.const nan)" : "(f64.const nan)";
+    if (expr === "Infinity") return defaultType === "f32" ? "(f32.const inf)" : "(f64.const inf)";
 
     // isNaN(x) → f64.ne x x (NaN is the only value not equal to itself)
     {
@@ -18825,6 +18853,13 @@ ${sum}
     // Phase 18: externals pre-registered from imported .wasm files have no body here;
     // mergeOneWasmImport splices the real WAT body after transpilation.
     if (fn.isPhase18Import) return "";
+    // wasMath L2: a raw-WAT helper (wasmath_lower.ts), emitted as written.
+    if (fn.wasmathWat) {
+      const h = fn.wasmathWat;
+      const params = h.params.map((t, i) => `(param $p${i} ${t})`).join(" ");
+      const result = `(result ${h.result === "bool" ? "i32" : h.result})`;
+      return `  (func $${fn.name} ${params} ${result}${h.locals ? `\n    ${h.locals}` : ""}\n    ${h.body}\n  )`;
+    }
 
     // Phase 5f: closure factory — emit heap-alloc body + trampoline, skip normal body emit
     if (fn.isClosureFactory && fn.returnedArrow) return this.emitClosureFactory(fn);

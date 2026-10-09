@@ -1,6 +1,5 @@
 // Core_Globals.ts
-type f64 = number;
-type i32 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 const PI: f64 = 3.14159;
 let counter: i32 = 0;
 

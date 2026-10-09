@@ -3,7 +3,7 @@
 // `const av = a.unwrap()` temporaries — see cmem). Now the parenDepthNeverNegative guard makes the
 // compound expression fall through to the binary-op loop.
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 class Box {
   v: i32;

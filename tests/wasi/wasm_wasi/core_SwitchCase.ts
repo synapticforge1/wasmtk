@@ -1,4 +1,4 @@
-type i32 = number; // Alias for 32-bit integer
+import { i32 } from "../../../src/wasmath.ts"; // Alias for 32-bit integer
 export function testSwitch(value: i32): i32 {
   let result: i32 = 0;
 

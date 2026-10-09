@@ -1,5 +1,5 @@
 // Phase 47: method override across a 3-class hierarchy
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 class Shape {
   x: i32;

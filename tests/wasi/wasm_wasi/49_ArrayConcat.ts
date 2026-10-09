@@ -1,6 +1,5 @@
 // Phase 49: Array.prototype.concat(other)
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function main(): void {
   // i32 concat

@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function getNullableValue(kind: i32): i32 | null {
   if (kind === 0) return null;

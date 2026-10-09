@@ -1,7 +1,6 @@
 // Phase 12 — Array Methods
 // Tests: indexOf, includes, slice, forEach, map, filter, find, reduce
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 type bool = boolean;
 
 // ── Setup ────────────────────────────────────────────────────────────────────

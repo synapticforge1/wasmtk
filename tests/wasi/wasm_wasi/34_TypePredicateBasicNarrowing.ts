@@ -1,7 +1,6 @@
 // Phase 34 — Type predicates: a `s is Circle` guard used both as a boolean value and as an
 // if-condition, narrowing a base-typed reference so a derived-only field is readable.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Shape {
   kind: i32; // 0 = Circle, 1 = Square

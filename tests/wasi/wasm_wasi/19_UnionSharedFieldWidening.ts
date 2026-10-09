@@ -1,5 +1,4 @@
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Guard: same field name at the SAME type in every variant — one shared slot, unchanged.
 type Same =

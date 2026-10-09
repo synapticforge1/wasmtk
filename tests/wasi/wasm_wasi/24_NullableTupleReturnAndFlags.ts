@@ -1,5 +1,4 @@
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Tuple containing a nullable primitive and a nullable struct pointer
 type NullableTuple = [i32 | null, f64];

@@ -9,7 +9,7 @@
 //   negative
 //   finally
 //   custom error
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 function divide(a: i32, b: i32): i32 {
   if (b === 0) {
     throw new Error("Division by zero");

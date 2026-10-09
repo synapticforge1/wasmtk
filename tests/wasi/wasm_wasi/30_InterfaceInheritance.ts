@@ -1,6 +1,5 @@
 // Phase 30: interface inheritance — interface B extends A
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Entity {
   id: i32;

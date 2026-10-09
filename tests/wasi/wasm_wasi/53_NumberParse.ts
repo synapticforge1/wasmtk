@@ -3,8 +3,7 @@
 // a 0x/0X prefix is honored when radix is 16 or omitted). parseFloat reads an optional sign,
 // integer/fraction, and e-exponent. No valid leading digits -> NaN. Exercised via the
 // assign-then-log value path (direct console.log(parseInt(...)) routes through a local).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function main(): void {
   const a: f64 = Number.parseInt("42", 10);

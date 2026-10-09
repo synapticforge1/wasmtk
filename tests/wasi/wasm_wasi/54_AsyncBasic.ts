@@ -3,8 +3,7 @@
 // Covers: async fn returning i32/f64, sequential awaits, await on an async call with a param,
 // await Promise.resolve (i32 + f64), and an annotated `const x: T = await ...` (every declaration
 // states its type since 2026-09-28; the old un-annotated form is now a compile error).
-type f64 = number;
-type i32 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 async function getN(): Promise<i32> {
   return 42;

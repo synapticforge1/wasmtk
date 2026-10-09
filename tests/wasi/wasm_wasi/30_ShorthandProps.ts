@@ -1,6 +1,5 @@
 // Phase 30: shorthand property notation in struct literals and returns
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Vec2 {
   x: f64;

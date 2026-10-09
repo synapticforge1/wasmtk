@@ -2,8 +2,7 @@
 // parseStructs now collects all interface / object-type declarations and builds them in
 // dependency order, so a derived interface declared BEFORE its base still inherits every field
 // (the old source-order pass silently dropped inherited fields on a forward `extends` reference).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Declared derived-first on purpose: the bases (C, B, A) appear AFTER their users.
 interface D extends C {

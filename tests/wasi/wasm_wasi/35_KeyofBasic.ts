@@ -1,6 +1,5 @@
 // Phase 35 — keyof T: inline type annotation as string parameter/variable
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Point {
   x: f64;

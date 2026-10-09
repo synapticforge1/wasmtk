@@ -1,7 +1,7 @@
 // Phase 34 — Type predicates: narrowing with interface inheritance (Phase 30)
 // Passing a derived-type pointer to a function expecting the base type, then
 // narrowing inside that function allows access to derived-type-only fields.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface Entity {
   kind: i32;

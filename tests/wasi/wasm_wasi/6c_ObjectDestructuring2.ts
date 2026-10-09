@@ -1,4 +1,4 @@
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 interface Vec2 {
   x: f64;
   y: f64;

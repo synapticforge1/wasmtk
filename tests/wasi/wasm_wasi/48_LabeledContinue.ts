@@ -1,5 +1,5 @@
 // Phase 48: labeled continue
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function main(): void {
   // continue outer skips j=3,4 for each i

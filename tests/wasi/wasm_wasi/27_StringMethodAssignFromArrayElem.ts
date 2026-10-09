@@ -3,7 +3,7 @@
 // stub (empty result); it now delegates a last resort to emitStringPtrLen, which resolves a string
 // method on a bracket receiver. (join()-as-a-value and slice() on a bracket receiver remain gaps.)
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const words: string[] = ["abc", "def", "ghi"];
 

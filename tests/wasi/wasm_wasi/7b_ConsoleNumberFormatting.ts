@@ -4,9 +4,7 @@
 //   ld16: String(x) inside console.log called an undefined `$String`.
 //   sw42: String(<string>) printed the string's pointer (`260`), in a declaration too.
 //   ld17: console.log of an f32 value built an invalid module.
-type i32 = number;
-type f32 = number;
-type f64 = number;
+import { i32, f32, f64 } from "../../../src/wasmath.ts";
 
 const nz: f64 = -0;
 const pz: f64 = 0;

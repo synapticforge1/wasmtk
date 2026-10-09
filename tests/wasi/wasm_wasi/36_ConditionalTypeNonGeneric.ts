@@ -1,6 +1,5 @@
 // Phase 36 — Non-generic conditional types (evaluated at declaration time)
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Evaluated at compile time — no type parameter:
 type TrueResult  = i32 extends i32    ? string : f64;   // i32 extends i32    → true  → string

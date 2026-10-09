@@ -1,6 +1,5 @@
 // Phase 36 — Combined: generic + non-generic conditional types + function signatures
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Generic: if T is i32 → f64; otherwise → i32
 type AsFloat<T> = T extends i32 ? f64 : i32;

@@ -2,7 +2,7 @@
 // access, inherited fields, method dispatch, and instanceof all work at module scope (previously
 // class code had to live inside a function). Self-checking via the check()/guard trap pattern.
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

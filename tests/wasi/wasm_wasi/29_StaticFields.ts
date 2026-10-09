@@ -2,8 +2,7 @@
 // Tests: static field init, increment in constructor, multiple classes,
 //        console.log of static field directly, read via static method,
 //        static field write outside constructor, f64 static field.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 class Widget {
   id: i32;

@@ -1,4 +1,4 @@
-type u32 = number;
+import { u32 } from "../../../src/wasmath.ts";
 export function testGtU32(a: u32, b: u32): boolean {
   return a > b;
 }

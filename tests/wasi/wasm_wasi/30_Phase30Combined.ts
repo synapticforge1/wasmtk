@@ -1,6 +1,5 @@
 // Phase 30: combined — namespace + interface inheritance + shorthand props
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // --- Namespace ---
 namespace Vector {

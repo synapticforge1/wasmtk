@@ -2,8 +2,7 @@
 //   Two numbers give a number: `x || 7` is 7 for x = 0 (it was `true`, or an invalid module).
 //   A boolean mixed with a number prints what JavaScript prints: `!a && b` is 0, not `true`.
 //   The left side is evaluated once; conditions keep the boolean short-circuit.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 let calls: i32 = 0;
 function bump(v: i32): i32 {

@@ -1,7 +1,6 @@
 // Phase 33 — Intersection types: flat merge of an f64-first and an i32-second interface,
 // initialised and read back through an exported function.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Positionable {
   x: f64;

@@ -1,7 +1,7 @@
 // Regression (2026-09-28): string literals with escaped quotes were matched with `"([^"]*)"`, which
 // stops at the first `\"`. A string ARGUMENT to a call inside console.log(...) then became "" (the
 // 2026-05-31 JSON-work residual), and a string ENUM member fell to the numeric branch.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 enum Quote {
   Plain = "plain",

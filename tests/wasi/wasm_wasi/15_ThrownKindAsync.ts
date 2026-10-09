@@ -2,7 +2,7 @@
 // string, so the caught value is not an Error (it was `instanceof Error` = true at compile time).
 // Kept apart from 15_ThrownKind.ts: with an async main() in a file, the other top-level
 // statements are dropped (sw46, open).
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 async function main(): Promise<void> {
   try {

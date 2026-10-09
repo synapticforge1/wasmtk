@@ -1,6 +1,6 @@
 // Phase 28 — Extended Array Methods
 // Tests: every, some, findIndex, at, reverse, fill, join, sort
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 type bool = boolean;
 
 // ── Setup ─────────────────────────────────────────────────────────────────────

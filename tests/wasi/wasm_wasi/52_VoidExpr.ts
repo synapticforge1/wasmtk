@@ -1,5 +1,5 @@
 // Phase 52.5 — `void expr` evaluates the expression for its side effects and discards the result.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 let counter: i32 = 0;
 

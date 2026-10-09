@@ -2,7 +2,7 @@
 // Report issue 3 (MEDIUM): a module-scope try/catch with a bound catch var aborted
 // (`$e_ptr/$e_len cannot be resolved`) — _start's local decls were built from startLocals only, missing
 // the (ptr,len) pair the catch handler pushed to startDeclaredLocals.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 function fail(): void { throw new Error("bad"); }
 try {
   fail();

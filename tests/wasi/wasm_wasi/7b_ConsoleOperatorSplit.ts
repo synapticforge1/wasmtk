@@ -5,8 +5,7 @@
 //   sw23: n * -2   split at the unary minus
 // Found with them: -n + m was negated whole (-(n + m)), and an integer-only result (1 << n) or an
 // i32 variable was left unconverted where the print expected a float (invalid modules).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const n: i32 = 3;
 const m: i32 = 5;

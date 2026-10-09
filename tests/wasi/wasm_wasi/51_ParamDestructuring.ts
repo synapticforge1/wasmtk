@@ -1,7 +1,6 @@
 // Phase 51.3 — Destructuring in function parameters
 // f({ x, y }: Vec2) desugars to a struct-pointer param + `const { x, y } = __pd` binding.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Vec2 {
   x: f64;

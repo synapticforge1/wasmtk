@@ -1,5 +1,4 @@
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 export function testHeterogeneousTuple(): void {
   console.log("--- Test 1: Heterogeneous Tuple Destructuring ---");

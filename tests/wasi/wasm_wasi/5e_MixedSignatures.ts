@@ -2,7 +2,7 @@
 // Tests arrows with different parameter signatures assigned inside if/else branches.
 // Type aliases for function types are not resolved by the compiler — use explicit
 // inline function type annotations or fully-typed arrow declarations instead.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testMixedTable(op: i32): i32 {
   if (op == 1) {

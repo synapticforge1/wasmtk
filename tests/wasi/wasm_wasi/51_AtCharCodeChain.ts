@@ -2,7 +2,7 @@
 // and silently returned 0; now it computes the char code at the normalized index. Self-checking
 // via the check()/guard trap pattern.
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

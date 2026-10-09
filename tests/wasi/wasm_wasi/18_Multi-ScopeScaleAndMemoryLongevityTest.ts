@@ -1,5 +1,5 @@
 // 1. Natively import functions and linear memory directly from the WASM binary!
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 import { insert_symbol, lookup_symbol } from "./18_symbol_table.wasm";
 
 function runDenoPhase18Test() {

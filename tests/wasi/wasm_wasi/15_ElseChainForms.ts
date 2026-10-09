@@ -4,7 +4,7 @@
 // every branch after the first (the if-handler only recognised a few braced multi-line else forms).
 // NOTE: `deno fmt` de-braces single-statement bodies, so the single-line-BRACED form is exercised
 // with non-trivial bodies (a nested `if`) that fmt preserves inline.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 // Brace-less else-if chain after a single-line if.
 function braceless(n: i32): i32 {

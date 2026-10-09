@@ -4,7 +4,7 @@ export function compareBool(a: boolean, b: boolean): boolean {
 }
 
 // Logical NOT of a comparison
-type i32 = number; // Assuming i32 is defined as a type alias for number
+import { i32 } from "../../../src/wasmath.ts"; // Assuming i32 is defined as a type alias for number
 export function compareNot(a: i32, b: i32): boolean {
   return !(a > b);
 }

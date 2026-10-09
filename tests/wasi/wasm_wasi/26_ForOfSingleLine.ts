@@ -1,5 +1,5 @@
 // Regression: brace-less single-line `for...of` body must not be dropped (was silently skipped).
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 const nums: i32[] = [10, 20, 30];
 let total: i32 = 0;
 for (const n of nums) total = total + n;

@@ -4,7 +4,7 @@
 // `"{" + w + "}"` happened to work only because braces are not counted at all.
 // See design-decisions.md § "Bracket/paren/operator scanners MUST skip string literals".
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testBracketConcat(): void {
   const w: string = "V";

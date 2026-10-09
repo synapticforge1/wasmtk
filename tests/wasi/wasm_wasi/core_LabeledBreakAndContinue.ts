@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testNestedLabels(target: i32): i32 {
   let iterations: i32 = 0;
 

@@ -53,7 +53,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     (wasic lowering) → L3 (f64 parity, the Math bugs) → L4 (operator bugs). T1 decided: a wasmtk
     module `wasMath`; T6: traps are throws. **L1 DONE 2026-10-09** (`src/wasmath.ts`, export
     `./wasMath`, 151 functions exact to the real instructions, `tests/wasmath_tests.ts`).
-    **NEXT: L2**, wasic lowering the calls.
+    **L2 DONE 2026-10-09** (wasic / modc lower the calls; 176 of 199 exact from compiled programs,
+    0 failed, 23 = the Math bugs; corpus programs `39_WasMath*`; the whole corpus takes its types
+    from wasMath; README section "The same values in TypeScript and in WebAssembly"). **NEXT: L3**
+    (bit-exact `Math`: sw57–sw61, sw63, ld27, ld28, ld33), then L4 (ld29–ld31, sw64).
 - ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **6 open silent-wrong, 22 open
   loud** (2026-10-09: sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 fixed; sw50, sw54–sw56, ld21,
   ld24–ld26 fixed with them; the Math scan found sw57–sw60, ld27–ld29).

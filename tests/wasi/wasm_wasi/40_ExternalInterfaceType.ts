@@ -1,6 +1,6 @@
 // Phase 40: declare interface + declare const → named external interface binding.
 // deno-lint-ignore-file
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 declare interface Logger {
   log(ptr: i32): void;

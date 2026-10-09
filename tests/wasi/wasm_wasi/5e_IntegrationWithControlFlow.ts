@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testArrowInLoop(limit: i32): i32 {
   const checker = (n: i32): boolean => n % 2 === 0;
   let count: i32 = 0;

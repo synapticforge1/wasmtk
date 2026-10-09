@@ -11,8 +11,7 @@
  *   - Array destructuring with default values: const [a = 10, b = 20] = arr
  */
 
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // ── for...of over static i32 array ───────────────────────────────────────────
 

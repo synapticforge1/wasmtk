@@ -1,6 +1,6 @@
 // Phase 31 — TypedArray literal initializer: `new Float64Array([...])` must allocate
 // the header and copy the float literal bytes; .length vs .byteLength (8 bytes/element).
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 export function testTypedArrayInitializer(): void {
   console.log("--- Test 2: TypedArray Initializer ---");

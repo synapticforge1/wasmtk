@@ -3,7 +3,7 @@
 // with different names hold different values in the same scope.
 // Note: true block-scoped variable shadowing (same name as a param) is not
 // supported — WASM locals are function-scoped and cannot redeclare a param name.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testShadowing(x: i32): i32 {
   const getX = (): i32 => x;
   const _inner: i32 = 100; // different name — does not shadow x

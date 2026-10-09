@@ -1,7 +1,7 @@
 // Regression: n.toString(radix) with a RUNTIME value (and a runtime radix). Previously only the
 // literal form (14).toString(2) was constant-folded; a runtime n.toString(2) stubbed to 0. Now a
 // $__i32_to_str_radix helper handles base 2..36 across assignment / console.log / template / arg.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const n: i32 = 14;
 const big: i32 = 255;

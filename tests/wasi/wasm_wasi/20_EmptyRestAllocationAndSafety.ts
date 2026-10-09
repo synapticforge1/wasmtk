@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testEmptyRest(): void {
   console.log("--- Test 2: Empty Rest Array Safety ---");

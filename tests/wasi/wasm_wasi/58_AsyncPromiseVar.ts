@@ -2,8 +2,7 @@
 // A local that holds a promise (`const p = asyncFn();`) is tracked so `await p` picks the right
 // $__promise_await_<T> (i32 vs f64) and `p.then(cb)` is recognized as a promise. Aliasing
 // (`const q = p`) carries the tracking for free. (Callbacks are still NAMED functions.)
-type f64 = number;
-type i32 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 async function compute(n: i32): Promise<i32> {
   return n * 100;

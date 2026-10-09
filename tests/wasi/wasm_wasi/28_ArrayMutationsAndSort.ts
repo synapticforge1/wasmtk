@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function descCompare(a: i32, b: i32): i32 {
   return b - a;

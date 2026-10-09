@@ -2,8 +2,7 @@
 // NEVER rejects: each result is a record { status, value | reason }. v1: array-LITERAL argument,
 // value types i32 / f64; the result is a synthesized struct array (status: string, value: T,
 // reason: string) so results[i].status / .value / .reason resolve. Access the field matching status.
-type f64 = number;
-type i32 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 async function compute(n: i32): Promise<i32> {
   return n * 10;

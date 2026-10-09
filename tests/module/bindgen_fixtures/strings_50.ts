@@ -1,6 +1,6 @@
 // bindgen_strings_50: string param + string return functions for bindgen test
 // deno-lint-ignore-file
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function greet(name: string): string {
   return "Hello, " + name + "!";

@@ -4,8 +4,7 @@
 // guarded so the expression falls through to the binary-op loop, which infers the element type from
 // the array (i32[] → i32.add, f64[] → f64.add).
 
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const ints: i32[] = [10, 20, 30, 40];
 const flts: f64[] = [1.5, 2.5, 4.0];

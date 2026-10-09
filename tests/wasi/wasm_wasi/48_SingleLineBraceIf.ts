@@ -8,7 +8,7 @@
 // splitStmts) plus preserving trailing statements in expandInlineBraceChain.
 // NOTE: deno-fmt-ignore-file is required — the single-physical-line forms below
 // are the exact shape under test; `deno fmt` would otherwise expand them.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 // inline if/else, whole body on one line
 function classify(c: i32): i32 { if (c > 0) { return 1; } else { return -1; } }

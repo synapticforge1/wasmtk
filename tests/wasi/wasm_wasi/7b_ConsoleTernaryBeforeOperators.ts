@@ -1,7 +1,7 @@
 // H12 sw03 (2026-09-29): a top-level ternary in a console argument is decided BEFORE any operator
 // split. The conditional binds looser than `+`, `===`, `&&`, but the `+` concat split ran first and
 // cut `ok ? "pass" : "fail: " + msg` at the `+` inside the else branch: `pass` printed `passboom`.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const ok: boolean = true;
 const bad: boolean = false;

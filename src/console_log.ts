@@ -2038,9 +2038,11 @@ function exprToWat(
   }
 
   // Special constants — must be checked before the identifier fallback
+  // NaN / Infinity follow an f32 request: an f64.const handed to an f32 parameter built an invalid
+  // module (ld32, 2026-10-09; wasic's emitExpr twin is fixed the same way).
   const CONSTANTS: Record<string, string> = {
-    NaN: "(f64.const nan)",
-    Infinity: "(f64.const inf)",
+    NaN: expectedType === "f32" ? "(f32.const nan)" : "(f64.const nan)",
+    Infinity: expectedType === "f32" ? "(f32.const inf)" : "(f64.const inf)",
     true: "(i32.const 1)",
     false: "(i32.const 0)",
     null: "(i32.const 0)",

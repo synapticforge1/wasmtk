@@ -14,8 +14,7 @@
  *   - console.log of nullable var (prints "null" or value)
  */
 
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // ── Basic nullable declaration ────────────────────────────────────────────────
 

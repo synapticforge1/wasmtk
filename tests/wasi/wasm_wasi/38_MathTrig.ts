@@ -1,5 +1,5 @@
 // Phase 38 — Trig: sin, cos, tan, atan, atan2, asin, acos
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 // --- sin ---
 console.log(Math.sin(0));                                   // 0

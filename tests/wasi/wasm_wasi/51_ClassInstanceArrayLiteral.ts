@@ -3,7 +3,7 @@
 // so each element gets its constructor call + class tag (previously elements were zero-filled with
 // no tag, so fields read 0 and instanceof was always false). Self-checking via check()/guard trap.
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

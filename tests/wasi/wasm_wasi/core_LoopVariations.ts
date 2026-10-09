@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testLoops(n: i32): i32 {
   let total: i32 = 0;
 

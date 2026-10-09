@@ -3,8 +3,7 @@
 //   sw04: Math.abs(s.charCodeAt(0) - 100) printed 100 (the charCodeAt operand became 0)
 //   sw27: "v=" + (x ?? 5) printed v=0
 // What neither emitter can produce is now a compile error, never a 0 (see the round-1 repros).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const s: string = "abc";
 console.log(Math.abs(s.charCodeAt(0) - 100));

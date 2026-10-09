@@ -1,6 +1,5 @@
 // Phase 32 — Discriminated union types: basic switch narrowing
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 type Shape =
   | { kind: "circle"; radius: f64 }

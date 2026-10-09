@@ -1,5 +1,5 @@
 // NestedClosures.ts
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testNestedClosure(multiplier: i32): i32 {
   const firstLevel = (a: i32): i32 => {
     const secondLevel = (b: i32): i32 => {

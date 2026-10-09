@@ -5,7 +5,7 @@
 //   `n > 3 ? tag(1) : tag(-1)`              built an invalid module
 // and `select` ran BOTH branches, so a call in the branch not taken still happened (`calls`), and
 // when both branches captured a length, the else branch's length was used for either.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 let calls: i32 = 0;
 function tag(k: i32): string {

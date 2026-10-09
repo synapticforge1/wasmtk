@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testStateMachine(input: i32): i32 {
   let state: i32 = 0;
   let counter: i32 = 0;

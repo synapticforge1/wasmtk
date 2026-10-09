@@ -1,5 +1,5 @@
 // Phase_11a_Export.ts
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 /**
  * @export

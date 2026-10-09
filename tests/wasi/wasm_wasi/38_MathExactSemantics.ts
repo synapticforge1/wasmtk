@@ -5,8 +5,7 @@
 //   ld15: a Math result in an i32 / f32 declaration built an invalid module
 //   ld04: Math.max in an i32 console context called a helper nothing emitted
 // A zero's sign is shown through `1 / x`: console.log(-0) itself is sw41 (the printer).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const nan: f64 = NaN;
 const nz: f64 = -0;

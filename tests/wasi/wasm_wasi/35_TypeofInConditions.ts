@@ -1,6 +1,5 @@
 // Phase 35 — typeof: use in console.log, conditions, and nested scopes
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function checkAndLog(n: i32, s: string, b: bool): void {
   console.log("n type:", typeof n);    // n type: number

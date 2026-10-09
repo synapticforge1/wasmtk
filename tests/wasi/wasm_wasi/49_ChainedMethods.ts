@@ -1,5 +1,5 @@
 // Phase 49: Chained array method calls
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function isPos(x: i32): boolean {
   return x > 0;

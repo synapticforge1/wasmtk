@@ -1,7 +1,6 @@
 // bindgen_bool_50: bool-returning exported functions — compiled to WASM library for bindgen test
 // deno-lint-ignore-file
-type f64 = number;
-type i32 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 type bool = boolean;
 
 export function isPositive(x: f64): bool {

@@ -6,7 +6,7 @@
 
 // deno-fmt-ignore-file -- keep the single-physical-line class/constructor forms under test intact
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

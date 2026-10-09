@@ -1,7 +1,7 @@
 // H12 sw05 (2026-09-30): a string argument to a call inside console.log that is not a plain
 // variable or literal was passed as the empty string, silently: count(names[1]) printed 0.
 // It is now built by wasic's string emitter; what nothing can build is a compile error.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface Person {
   name: string;

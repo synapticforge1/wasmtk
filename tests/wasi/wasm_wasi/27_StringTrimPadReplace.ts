@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testStringTransformations(): void {
   console.log("--- Test 2: Trimming, Padding & Replacement ---");

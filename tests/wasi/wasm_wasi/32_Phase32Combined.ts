@@ -1,6 +1,5 @@
 // Phase 32 — Discriminated union types: combined test
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // ── Shape: circle and rectangle ──────────────────────────────────────────────
 type Shape =

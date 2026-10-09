@@ -1,7 +1,6 @@
 // Phase 41: basic WIT generation — exports become WIT export declarations.
 // deno-lint-ignore-file
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 export function add(a: i32, b: i32): i32 {
   return a + b;

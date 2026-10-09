@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function complexFlow(input: i32): i32 {
   let x: i32 = 0;
 

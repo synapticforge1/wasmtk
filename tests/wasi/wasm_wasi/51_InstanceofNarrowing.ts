@@ -3,7 +3,7 @@
 // where the concrete type is NOT known statically and the runtime tag must drive both the
 // branch selection and the narrowed dispatch).
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

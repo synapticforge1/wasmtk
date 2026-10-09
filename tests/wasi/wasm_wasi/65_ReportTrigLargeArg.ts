@@ -3,7 +3,7 @@
 // figs to a single-constant mod-2π subtract. Now a 3-term Cody-Waite split keeps ~13 sig figs.
 // Self-checking (values aren't byte-identical to the JS engine, so we assert tight tolerance bands the
 // OLD reduction would fail): on a miss, read far OOB → WASM trap → nonzero exit. Runs under both engines.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 const guard: i32[] = [0];
 function check(cond: i32): void { if (cond === 0) { const x: i32 = guard[9000000]; console.log(x); } }
 

@@ -2,7 +2,7 @@
 // Tests recursive logic defined inside a function.
 // Recursive arrow self-reference requires typed declaration support not yet
 // implemented; using a nested function declaration instead.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testRecursiveArrow(n: i32): i32 {
   function fact(i: i32): i32 {
     if (i <= 1) return 1;

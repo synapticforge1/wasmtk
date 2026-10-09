@@ -1,6 +1,5 @@
 // Phase 30: namespace — multiple namespaces, interaction with structs and classes
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 namespace Geometry {
   export function circleArea(radius: f64): f64 {

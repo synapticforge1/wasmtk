@@ -1,7 +1,7 @@
 // Phase 52.9 — String.fromCodePoint(n): UTF-8 encode code point(s) into a string.
 // NOTE: multi-byte code points are compared by printed bytes only — wasic .length is the UTF-8
 // byte count while TS .length is UTF-16 code units, so .length is only checked on ASCII results.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const a: string = String.fromCodePoint(65);
 console.log("a:", a); // A

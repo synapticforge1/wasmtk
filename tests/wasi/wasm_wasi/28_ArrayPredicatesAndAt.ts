@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function isPositive(x: i32): boolean {
   return x > 0;

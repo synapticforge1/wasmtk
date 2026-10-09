@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 function createAdder(x: i32) {
   // x must "escape" to the heap because this function returns
   return (y: i32) => x + y;
