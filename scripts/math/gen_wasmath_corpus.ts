@@ -5,8 +5,8 @@
  *
  * Inputs are chosen per parameter type and FILTERED through the TypeScript bodies: an input that
  * throws is left out (a throw ends a program; `39_WasMathStopsTheSame.ts` covers that), and so is a
- * u64 result ≥ 2⁶³ (wasm prints it signed: a known gap). `Math`-style members are included only
- * where they are exact today (`MATH_EXACT`); the rest wait for L3 (cmem/wasm-number-types.md).
+ * u64 result ≥ 2⁶³ (wasm prints it signed: a known gap). Every `Math`-style member is included:
+ * since L3 (2026-10-09) they run the same correctly rounded math library in Deno as in wasm.
  *
  * Usage: deno run -A scripts/math/gen_wasmath_corpus.ts
  */
@@ -15,9 +15,6 @@ import { WM_F32_TS, WM_F64_MATH, WM_WAT } from "../../src/wasmath_lower.ts";
 
 type T = "i32" | "i64" | "f32" | "f64";
 const OUT = "tests/wasi/wasm_wasi/39_WasMathAllFunctions.ts";
-
-/** Math-style members exact in wasm today on the inputs below (measured by the L2 battery). */
-const MATH_EXACT = new Set<string>(Deno.args.length ? Deno.args : []);
 
 const ONE: Record<T, unknown[]> = {
   i32: [2147483647, -7, 0x55555555, 0, -2147483648],
@@ -76,11 +73,10 @@ for (const [key, h] of Object.entries(WM_WAT)) {
   emit(ns, m, params);
 }
 for (const m of WM_F64_MATH) {
-  if (/^[A-Z]/.test(m) || !MATH_EXACT.has(`f64.${m}`)) continue;
+  if (/^[A-Z]/.test(m)) continue;
   emit("f64", m, ["atan2", "pow", "hypot"].includes(m) ? ["f64", "f64"] : ["f64"]);
 }
 for (const m of Object.keys(WM_F32_TS)) {
-  if (!MATH_EXACT.has(`f32.${m}`)) continue;
   emit("f32", m, ["atan2", "pow", "hypot"].includes(m) ? ["f64", "f64"] : ["f64"]);
 }
 for (const ns of ["i32", "u32", "i64", "u64", "f32", "f64"]) {

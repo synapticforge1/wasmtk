@@ -13,7 +13,7 @@
  * ```ts
  * import { f64, i32 } from "@jrmarcum/wasmtk/wasMath";
  * const q: i32 = i32.div(7, 2);      // 3 in both; i32.div(1, 0) throws in both
- * const s: f64 = f64.sin(0.5);       // Math.sin in Deno; the V8-exact sin in wasm
+ * const s: f64 = f64.sin(0.5);       // correctly rounded, the same bits in both
  * ```
  *
  * Representation: `i32`, `u32`, `f32` and `f64` values are `number`s (an `f32` is a number that
@@ -21,11 +21,27 @@
  * `u32` / `u64` are unsigned VIEWS of the same bits as `i32` / `i64`. Comparisons return
  * `boolean` (wasm's i32 0 / 1).
  *
- * Status: the TypeScript bodies are complete and checked against the real wasm instructions;
- * `wasmtk wasic` does not yet lower these calls (planned).
+ * The Math-style functions (`sin` … `pow`, `cbrt`) run wasmtk's correctly rounded math library in
+ * Deno, the same library compiled programs link, so they agree to the bit; plain `Math.sin` in
+ * Deno is V8's and may differ by one ulp. `wasmtk wasic` and `modc` lower every call.
  *
  * @module
  */
+
+import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
+
+/** The math library that `wasmtk wasic` / `modc` link into every program using `Math`, run here
+ *  too, so `f64.sin` and the rest give the SAME correctly rounded value in Deno as in wasm (owner
+ *  decision "CR, in both", 2026-10-09). V8's own `Math.sin` & co. may differ by one ulp. Compiled
+ *  on first use: a program that never calls them pays nothing. */
+type MathLib = Record<
+  | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "asinh" | "acosh"
+  | "atanh" | "exp" | "expm1" | "log" | "log1p" | "log2" | "log10" | "cbrt",
+  (a: number) => number
+> & Record<"atan2" | "pow", (a: number, b: number) => number>;
+let mathlib: MathLib | undefined;
+const ml = (): MathLib =>
+  mathlib ??= new WebAssembly.Instance(new WebAssembly.Module(MATHLIB_BYTES)).exports as unknown as MathLib;
 
 // ── Types (a type and a value may share a name: `const x: i32 = i32.add(a, b)`) ──────────────
 
@@ -185,27 +201,28 @@ export const f64 = {
   nearest,
   copysign: copysign64,
 
-  sin: Math.sin,
-  cos: Math.cos,
-  tan: Math.tan,
-  asin: Math.asin,
-  acos: Math.acos,
-  atan: Math.atan,
-  atan2: Math.atan2,
-  sinh: Math.sinh,
-  cosh: Math.cosh,
-  tanh: Math.tanh,
-  asinh: Math.asinh,
-  acosh: Math.acosh,
-  atanh: Math.atanh,
-  exp: Math.exp,
-  expm1: Math.expm1,
-  log: Math.log,
-  log1p: Math.log1p,
-  log2: Math.log2,
-  log10: Math.log10,
-  pow: Math.pow,
-  cbrt: Math.cbrt,
+  /** Correctly rounded, in Deno AND in wasm: wasmtk's math library (see `ml`). */
+  sin: (a: number): number => ml().sin(a),
+  cos: (a: number): number => ml().cos(a),
+  tan: (a: number): number => ml().tan(a),
+  asin: (a: number): number => ml().asin(a),
+  acos: (a: number): number => ml().acos(a),
+  atan: (a: number): number => ml().atan(a),
+  atan2: (a: number, b: number): number => ml().atan2(a, b),
+  sinh: (a: number): number => ml().sinh(a),
+  cosh: (a: number): number => ml().cosh(a),
+  tanh: (a: number): number => ml().tanh(a),
+  asinh: (a: number): number => ml().asinh(a),
+  acosh: (a: number): number => ml().acosh(a),
+  atanh: (a: number): number => ml().atanh(a),
+  exp: (a: number): number => ml().exp(a),
+  expm1: (a: number): number => ml().expm1(a),
+  log: (a: number): number => ml().log(a),
+  log1p: (a: number): number => ml().log1p(a),
+  log2: (a: number): number => ml().log2(a),
+  log10: (a: number): number => ml().log10(a),
+  pow: (a: number, b: number): number => ml().pow(a, b),
+  cbrt: (a: number): number => ml().cbrt(a),
   hypot: (a: number, b: number): number => Math.hypot(a, b),
   round: Math.round,
   sign: Math.sign,
@@ -264,27 +281,27 @@ export const f32 = {
   nearest: (a: number): number => nearest(fr(a)),
   copysign: (a: number, b: number): number => copysign32(fr(a), fr(b)),
 
-  sin: (a: number): number => fr(Math.sin(fr(a))),
-  cos: (a: number): number => fr(Math.cos(fr(a))),
-  tan: (a: number): number => fr(Math.tan(fr(a))),
-  asin: (a: number): number => fr(Math.asin(fr(a))),
-  acos: (a: number): number => fr(Math.acos(fr(a))),
-  atan: (a: number): number => fr(Math.atan(fr(a))),
-  atan2: (a: number, b: number): number => fr(Math.atan2(fr(a), fr(b))),
-  sinh: (a: number): number => fr(Math.sinh(fr(a))),
-  cosh: (a: number): number => fr(Math.cosh(fr(a))),
-  tanh: (a: number): number => fr(Math.tanh(fr(a))),
-  asinh: (a: number): number => fr(Math.asinh(fr(a))),
-  acosh: (a: number): number => fr(Math.acosh(fr(a))),
-  atanh: (a: number): number => fr(Math.atanh(fr(a))),
-  exp: (a: number): number => fr(Math.exp(fr(a))),
-  expm1: (a: number): number => fr(Math.expm1(fr(a))),
-  log: (a: number): number => fr(Math.log(fr(a))),
-  log1p: (a: number): number => fr(Math.log1p(fr(a))),
-  log2: (a: number): number => fr(Math.log2(fr(a))),
-  log10: (a: number): number => fr(Math.log10(fr(a))),
-  pow: (a: number, b: number): number => fr(Math.pow(fr(a), fr(b))),
-  cbrt: (a: number): number => fr(Math.cbrt(fr(a))),
+  sin: (a: number): number => fr(f64.sin(fr(a))),
+  cos: (a: number): number => fr(f64.cos(fr(a))),
+  tan: (a: number): number => fr(f64.tan(fr(a))),
+  asin: (a: number): number => fr(f64.asin(fr(a))),
+  acos: (a: number): number => fr(f64.acos(fr(a))),
+  atan: (a: number): number => fr(f64.atan(fr(a))),
+  atan2: (a: number, b: number): number => fr(f64.atan2(fr(a), fr(b))),
+  sinh: (a: number): number => fr(f64.sinh(fr(a))),
+  cosh: (a: number): number => fr(f64.cosh(fr(a))),
+  tanh: (a: number): number => fr(f64.tanh(fr(a))),
+  asinh: (a: number): number => fr(f64.asinh(fr(a))),
+  acosh: (a: number): number => fr(f64.acosh(fr(a))),
+  atanh: (a: number): number => fr(f64.atanh(fr(a))),
+  exp: (a: number): number => fr(f64.exp(fr(a))),
+  expm1: (a: number): number => fr(f64.expm1(fr(a))),
+  log: (a: number): number => fr(f64.log(fr(a))),
+  log1p: (a: number): number => fr(f64.log1p(fr(a))),
+  log2: (a: number): number => fr(f64.log2(fr(a))),
+  log10: (a: number): number => fr(f64.log10(fr(a))),
+  pow: (a: number, b: number): number => fr(f64.pow(fr(a), fr(b))),
+  cbrt: (a: number): number => fr(f64.cbrt(fr(a))),
   hypot: (a: number, b: number): number => fr(Math.hypot(fr(a), fr(b))),
   round: (a: number): number => Math.round(fr(a)),
   sign: (a: number): number => Math.sign(fr(a)),
