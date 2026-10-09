@@ -81,6 +81,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## binaryang caught up (letter 2026-10-09)
 
+> **Owner, 2026-10-09: the open COMPILER BUGS FIRST, then these items**, so the two do not get
+> conflated (a pin bump moves every optimised binary; a bug fix must be judged on the old pin).
+
 - **binaryang 1.9.0** published `./definitions` (H9: D1 instruction table, 582 entries; D2
   features; D3 trap vocabulary; each with `dataVersion` + `sha256`). **Our H10 is unblocked.**
   1.9.0 also rewrote the optimizer (output moves at every level, within 2% of upstream `-Oz`).
