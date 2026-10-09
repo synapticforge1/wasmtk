@@ -1,8 +1,7 @@
-// sin / cos / tan of a large argument, and pow / expm1 / cosh / sinh, trapped
-// ("float unrepresentable in integer range"): range reduction truncates to i32.
+// These TRAP ("float unrepresentable in integer range"), measured one call per program
+// (2026-10-09): sin/cos/tan(1e300), pow(1e200, 1e200), expm1(-1e10), cosh/sinh(1e10).
+// Correct at the same time: sin/cos at ±2^31, pow(-2.5, 3), expm1(1e10), cosh/sinh(1000).
+// The first trap ends the program, so only the first line runs.
 type f64 = number;
-const big: f64 = 1e10;
-const nb: f64 = -2.5;
-const three: f64 = 3;
-console.log(Math.sin(big), Math.cos(big), Math.tan(big));
-console.log(Math.pow(nb, three), Math.expm1(big), Math.cosh(big), Math.sinh(big));
+const huge: f64 = 1e300;
+console.log(Math.sin(huge));
