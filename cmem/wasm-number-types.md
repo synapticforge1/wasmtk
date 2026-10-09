@@ -1,6 +1,8 @@
 # Wasm number types in TypeScript: `Math` stays JavaScript's, a typed library carries wasm's (SCOPE, 2026-10-09)
 
-**Status: SCOPE, nothing built.** Measured 2026-10-09 (`scripts/math/scan_math.ts`,
+**Status: SCOPE, nothing built. Direction set by the owner 2026-10-09: a complete library, one
+namespace per wasm value type (f64, f32, i32, i64; u32 / u64 as views); see § "The library".
+Waits on T1 (where it lives / its name) to start L1.** Measured 2026-10-09 (`scripts/math/scan_math.ts`,
 `scripts/math/ops_probe.ts`; Deno vs `wasmtk wasic` + `wasmtk run`). Extends wasm-math-plan.md
 (the declared-type ruling, Phase 1) and replaces its Phase 3 "where the functions live" question.
 
@@ -117,11 +119,85 @@ JavaScript has NO exact spelling for these; the library supplies a TypeScript bo
 | `i64` `div`/`rem`/`shr_u`/`clz`/`ctz`/`popcnt`/`rotl` | BigInt bodies with `asIntN` / `asUintN` | the `i64.*` instruction |
 | `reinterpret`s | `DataView` | `f64.reinterpret_i64`, … |
 
+## The library: f64, f32, i32, i64, each complete (owner, 2026-10-09)
+
+> "So we need to implement i64, f32, and i32 math functions then." … "We might as well implement
+> the f64 math functions also as a complete wasm library."
+
+The types possible in BOTH for assignment (2026-10-09): only `number` (= f64) and `bigint`
+(= i64) are JavaScript value types; `i32` and `f32` are subsets of `number` that agree when the
+value is representable. Hence four namespaces, one per wasm value type, each with the SAME shape,
+plus `u32` / `u64` as the unsigned views of `i32` / `i64`:
+
+```ts
+import { f32, f64, i32, i64, u32, u64 } from "<T1: where it lives>";
+type i32 = number;                  // a type and a value may share a name in TypeScript
+const q: i32 = i32.div(a, b);       // Deno runs the body; wasic emits i32.div_s
+const s: f64 = f64.sin(x);          // Deno runs Math.sin; wasic emits the V8-exact sin
+```
+
+Every function: a TypeScript body that computes EXACTLY the wasm result (Deno runs it), and a
+wasm lowering (wasic emits one instruction or a shared helper). A trap in wasm is a throw in the
+body, with the same meaning: `RangeError("integer divide by zero")`, `("integer overflow")`,
+`("invalid conversion to integer")`.
+
+**f64** (TypeScript body: `Math` / plain `number`; wasm: instruction or a V8-exact helper)
+
+| group | functions |
+| --- | --- |
+| instructions | `add` `sub` `mul` `div` `neg` `abs` `sqrt` `min` `max` `ceil` `floor` `trunc` `nearest` (ties-to-even; JavaScript has none, body supplied) `copysign` (body supplied) |
+| JavaScript `Math` | `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` `exp` `expm1` `log` `log1p` `log2` `log10` `pow` `cbrt` `hypot` `round` `sign` + the 8 constants. Wasm: software, bit-exact to V8 (Track M: fdlibm ports; the sw57–sw63 / ld27–ld28 fixes land HERE, and `Math.*` lowers to the same helpers) |
+| conversions | `fromI32` `fromU32` `fromI64` `fromU64` (`convert_*`), `fromF32` (`promote`), `toI32` / `toI64` (`trunc_*_s`, throws where wasm traps), `toI32Sat` / `toI64Sat` (`trunc_sat`), `toI32Wrap` (JavaScript's ToInt32, `x \| 0`), `bits` / `fromBits` (`reinterpret` ↔ i64, via `DataView`) |
+| optional | `random(seed)`: a seeded PRNG with the SAME body in both (e.g. xorshift), so values agree; `Math.random` never can |
+
+**f32** (body: `Math.fround` around f64 operations; wasm: native f32)
+
+| group | functions |
+| --- | --- |
+| instructions | `add` `sub` `mul` `div` `sqrt` (exact: f64 rounding then `fround` equals the f32 operation for these five) `neg` `abs` `min` `max` `ceil` `floor` `trunc` `nearest` `copysign` |
+| beyond wasm | `sin` … `pow` etc. DEFINED as `fround(f64.op(x))` in both (the wasm side computes the f64 helper, then `demote`); exact by definition, NOT C's `sinf` |
+| conversions | `from` (`Math.fround` / `demote`), `fromI32` … `fromU64`, `toI32` … (`trunc_f32_*`, sat), `bits` / `fromBits` (↔ i32) |
+
+**i32** (body: int32 arithmetic on `number`; wasm: native i32) and **u32** (the `_u` view)
+
+| group | functions |
+| --- | --- |
+| instructions | `add` `sub` (`(a ± b) \| 0`), `mul` (`Math.imul`), `div` / `rem` (throw on 0 and −2³¹ / −1; `Math.trunc(a / b)` is exact for int32 operands), `and` `or` `xor` `shl` `shr` (`>>`), `shrU` (`>>>`, as u32), `rotl` `rotr`, `clz` (`Math.clz32`) `ctz` `popcnt`, `eqz`, `extend8` `extend16` |
+| beyond wasm | `abs` (wraps: `abs(-2³¹)` = −2³¹), `min` `max`, `sign`, `pow` (wrapping, by `imul`) |
+| u32 view | `u32.div` `rem` `lt` `gt` `le` `ge` `min` `max` (`>>> 0` operands), `u32.toF64`, printing unsigned |
+| conversions | `fromF64` / `fromF32` (trap / sat / wrap variants as in f64), `wrap` (from i64) |
+
+**i64** (body: `bigint` with `BigInt.asIntN(64, …)`; wasm: native i64) and **u64** (`asUintN`)
+
+| group | functions |
+| --- | --- |
+| instructions | `add` `sub` `mul` (wrap by `asIntN`), `div` / `rem` (BigInt truncates like wasm; throw on 0 and −2⁶³ / −1, where BigInt itself would NOT throw), `and` `or` `xor` `shl` `shr` `shrU` `rotl` `rotr` `clz` `ctz` `popcnt` `eqz` `extend8` `extend16` `extend32` |
+| beyond wasm | `abs` `min` `max` `sign` `pow` (wrapping) |
+| u64 view | the `_u` comparisons, division, `toF64` |
+| conversions | `fromI32` / `fromU32` (`extend_i32_s/u`), `fromF64` / `fromF32` (trap / sat), `toI32` (`wrap`) |
+
+**Order of work (proposal):**
+
+1. **L1. The library as TypeScript.** Every body, runnable in Deno, with a battery per function
+   (`scripts/math/` style: edge values, both signs, overflow, NaN, ±0).
+2. **L2. wasic recognises the library.** Each call lowers to its instruction or helper; the
+   battery then compares Deno and wasm per call, as `math_table.ts` does for `Math`.
+3. **L3. f64 parity (Track M).** The V8-exact helpers (fdlibm ports, non-trapping range
+   reduction, JavaScript's special cases); `Math.*` and `f64.*` share them. Closes
+   sw57–sw61, sw63, ld27, ld28.
+4. **L4. The operator bugs on the way** (ld29 `x | 0`, ld30 / ld31 bigint `**` / bitwise /
+   shifts, sw64), since the i32 / i64 namespaces lower to the same instructions.
+
 ## What stays a decision for the owner
 
-- **T1. Where the library lives.** The principle rules out a global `Math` extension. A wasmtk
-  module (`import { idiv, u32 } from "@jrmarcum/wasmtk/num"`, or a local file the program
-  imports) runs unchanged under Deno and is recognised by wasic. (Was wasm-math-plan.md D2.)
+- **T1. Where the library lives, and its name.** The principle rules out a global `Math`
+  extension. A wasmtk module (e.g. `@jrmarcum/wasmtk/num`, or a local file the program imports)
+  runs unchanged under Deno and is recognised by wasic. Namespaces named like the type aliases
+  (`i32.add`) read naturally; TypeScript allows a type and a value to share a name. (Was
+  wasm-math-plan.md D2.)
+- **T6. Traps as throws.** The bodies throw `RangeError` where wasm traps, so a Deno run stops
+  where the wasm run would. The alternative (a saturating or wrapping body that never throws)
+  would make the two DISAGREE at exactly those inputs.
 - **T2. Operators on declared types without the idiom.** `const c: i32 = a + b` cannot agree in
   general (Deno does not wrap). Options: (a) as now, the declared type decides, plus a
   compile-time NOTE where they can differ (wasm-math-plan.md D6); (b) a strict mode that REQUIRES
@@ -141,6 +217,9 @@ sw57 (`log` family of a negative → 0), sw58 (`sin` / `tan` lose −0), sw59 (`
 (`acosh` / `asinh` / `cosh` / `sinh` last digit), sw61 (`sin(1e18)` impossible value), sw62
 (console line corruption), ld27 (`clz32` / `imul` of an f64: invalid module), ld28 (trig / `pow` /
 `expm1` / `cosh` / `sinh` trap on huge arguments), ld29 (`x | 0` traps out of range: ToInt32).
+A bigint probe the same day: sw63 (`Math` accepts a bigint argument; JavaScript throws), sw64
+(`-a` prints without `n`), ld30 (bigint `**` unsupported), ld31 (bigint `&` `|` `^` `<<` `>>`
+build invalid modules). bigint `+ - * / %` and unary `-` agree.
 
 ## Appendix: every `Math` member, one program per call (2026-10-09, Deno 2.9.7 / V8 15.0)
 
