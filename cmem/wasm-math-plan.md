@@ -1,7 +1,14 @@
 # Wasm types in TypeScript: the declared-type rule and the `Math` additions (SCOPE, 2026-09-30)
 
-**Status (2026-10-09): Phase 1 DONE; Phases 2–4 wait on the owner's decisions D1–D6.** sw36
-and sw37 are now the ONLY open silent-wrong compiler rows. The owner (2026-10-09): "the division
+**Status (2026-10-09, night): Phase 1 DONE; Phase 2 RESOLVED by the owner differently from the
+plan below:** a plain `/` between integers is a COMPILE ERROR that names wasMath's `i32.div` /
+`f64.div` (TypeScript runs unchanged); sw36 and sw37 closed (design-decisions.md § "Wasm types
+in TypeScript"). So **D1 is moot** (no destination makes integer division float). **D2 is
+decided** (wasMath, wasm-number-types.md T1), **D4** became that library, **D5** is MAJOR (3.0.0,
+owner's call), Phase 4's user page is the README section "The same values in TypeScript and in
+WebAssembly". Still open: **D3** (f64 into an i32 destination: trap, saturate or wrap; L4's ld29
+touches it) and **D6** (compile-time notes). The rest of this file is the 2026-09-30 scope, kept
+as the record. Earlier status: Phases 2–4 waited on D1–D6; the owner: "the division
 question deserves more thought first". What has been measured is the two bugs (table below);
 what has NOT is how many corpus programs each D1 option would change. Offered (not started): a
 scratch-branch prototype per option, with golden-WAT and wasi per option, reporting the entries

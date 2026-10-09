@@ -9,12 +9,12 @@ class TemperatureSensor {
 
   // Getter method
   get fahrenheit(): i32 {
-    return (this._celsius * 9 / 5) + 32;
+    return i32.div(this._celsius * 9, 5) + 32;
   }
 
   // Setter method
   set fahrenheit(f: i32) {
-    this._celsius = (f - 32) * 5 / 9;
+    this._celsius = i32.div((f - 32) * 5, 9);
   }
 
   get celsius(): i32 {

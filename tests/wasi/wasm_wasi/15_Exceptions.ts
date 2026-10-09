@@ -14,7 +14,7 @@ function divide(a: i32, b: i32): i32 {
   if (b === 0) {
     throw new Error("Division by zero");
   }
-  return a / b;
+  return i32.div(a, b);
 }
 
 // Basic try/catch: result assigned inside try, catch logs the message.

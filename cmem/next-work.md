@@ -16,7 +16,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > sw51, sw54–sw56, ld26). Suite 449/449. Nothing is pushed; nothing is half-done; `main` is
 > clean. Then the wasm number types were scoped (wasm-number-types.md); its `Math` scan found
 > sw57–sw61 and ld27–ld29 (and sw62, a console bug). wasMath L1, L2, L3 followed (L3 closed the
-> `Math` rows). Open silent-wrong: sw36, sw37 (the owner's division decision), sw62, sw64.
+> `Math` rows), then the owner's division decision (integer `/` is a compile error; sw36, sw37
+> closed). Open silent-wrong: sw62, sw64.
 
 - ⏳ **H6 (workspace letter, owner chose it 2026-09-30).** Done: H6.1 SemVer `2465ad0`, H6.2 the ★
   block `159e0df`, H6.3 the compatibility gate `4d7d8da` + reviewed exceptions `17e2054`, H6.4 the
@@ -36,7 +37,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     Bootstrap (INDEX + CLAUDE.md) is 14.5 KB against a ~10 KB guideline; the rest is the INDEX's
     policy section, which is the owner's to trim.
   - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
-- ⏳ **Wasm types in TypeScript** (wasm-math-plan.md). The owner ruled (2026-09-30): the declared
+- ⏳ **Wasm types in TypeScript** (wasm-math-plan.md). **2026-10-09, night: the division question
+  is DECIDED** (owner): a plain `/` between integers is a compile error naming wasMath's
+  `i32.div` / `f64.div`; sw36, sw37 closed; open decisions left: D3, D6. Before that: the owner
+  ruled (2026-09-30): the declared
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
   (the `Math` additions) and Phase 4 (the user page) wait on the owner's decisions D1–D6. The
@@ -61,11 +65,12 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     off, documented): sw57–sw59, sw61, sw63, ld27, ld28, ld33 fixed, sw60 closed by decision;
     Payne–Hanek trig reduction; 199 / 199 exact from compiled programs. **NEXT: L4** (ld29 `x | 0`,
     ld30 / ld31 bigint `**` / bitwise / shifts, sw64 `-a` printing; the u64 ≥ 2⁶³ printer).
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **4 open silent-wrong, 22 open
-  loud** (2026-10-09, wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33
-  closed; earlier the same day sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 and friends).
-  - Open silent: sw36, sw37 wait on the owner (division); sw62 is a console buffer bug (a long f64
-    line corrupts a later line); sw64 a bigint print (`-a` without `n`, L4).
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **2 open silent-wrong, 22 open
+  loud** (2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
+  wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33; earlier the same day
+  sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 and friends).
+  - Open silent: sw62 is a console buffer bug (a long f64 line corrupts a later line); sw64 a
+    bigint print (`-a` without `n`, L4).
   - NEXT: L4, the 22 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
     compiler bugs BEFORE the binaryang 1.10.0 items below.
   - Nullable gaps left by sw51's option A (no corpus use; design-decisions.md § "Nullable FIELDS
