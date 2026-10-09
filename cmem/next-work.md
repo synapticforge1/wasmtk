@@ -83,7 +83,12 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 - **Offload #1: our regex-over-WAT merging gives way to binaryang's parser** (offload-inventory.md;
   I2 / H11). Trigger: binaryang RELEASES its one-front-end stage 5 (not in 1.8.x).
 - **The next release** (roadmap.md, the unreleased block since v2.0.3): the compatibility gate's
-  floor since v2.0.3 is MINOR (next ≥ 2.1.0; `deno task api-surface --floor`); the Deno floor is
+  floor since v2.0.3 is now **MAJOR** (re-measured 2026-10-09, `deno task api-surface --floor`),
+  set by ONE symbol: `./console_log` `LogSegment`, whose four variants gained an OPTIONAL property
+  (`console?` sw41, `strConv?` sw50). Every v2.0.3 value is still valid. **Owner's call:** record
+  a reviewed exception as `minor` (`deno task api-surface --review ./console_log LogSegment
+  (whole) minor "<reason>"`), which returns the floor to MINOR (next ≥ 2.1.0), or release it as
+  MAJOR. Everything else since v2.0.3 is minor (incl. the new `./wasMath` entrypoint); the Deno floor is
   written then (workflow.md, release step 2b). **The notes must name the BEHAVIOUR changes since
   v2.0.3** (the package surface is unchanged, but programs can print differently):
   - `e instanceof Error` is false for a thrown string or number, and `String(e)` follows what
