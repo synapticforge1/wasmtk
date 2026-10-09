@@ -146,6 +146,12 @@
     parameter lost the change after each call (`101 102` for `101 103`). (sw48, sw49.) Tests
     `4_LogicalOperands`, `5h_CapturedParamMutation`. Found: sw52 (an object-literal arrow with a
     block body is typed i32: a boolean prints `1`, an f64 truncates).
+24. **Closures in a returned object return their real type (2026-10-09).** A closure with no
+    return annotation was typed as an integer, so `() => { on = !on; return on; }` printed
+    `1 0` and an f64 result lost its fraction; and an object whose last value was an
+    expression-bodied closure (`{ …, get: () => v }`) would not compile (sw52, ld21). Test
+    `5h_ClosureResultTypes`. Split off, open: sw53 (a closure changing a captured f64 changes a
+    copy).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
