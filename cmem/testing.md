@@ -112,6 +112,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-09, later, `&&` / `||` operands and boxed parameters (sw48, sw49), full gate green.**
+> wasi **446/446** (+`4_LogicalOperands`, +`5h_CapturedParamMutation`; both fail on main) ·
+> golden-WAT **503 / 0**: 0 entries changed, +2 new. A FIRST cut split `a || b || c` at the first
+> operator and re-grouped 43 library entries (equivalent, not identical); splitting at the last
+> (left-associative) made them byte-identical · engine 1152 on baseline · wast 64,506 / 0 / 16 ·
+> Go 7/7/12 · every other suite as before. Round-1 repros: 4 DIFFER = open silent 4 (sw36, sw37,
+> sw51, sw52); 17 + 3 = open loud 20.
+>
 > **2026-10-09, values converted to strings, `Math.min`/`max`, `??` on numbers (sw06–sw09, sw19,
 > sw28; found and fixed sw50, ld24, ld25), full gate green.** wasi **444/444**
 > (+`11_StringConversions`, which fails on main) · golden-WAT **501 / 0** after a deliberate

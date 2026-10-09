@@ -146,6 +146,7 @@ import {
   setExprFallbackResolver,
   setFuncTableLookup,
   setInstanceofResolver,
+  setLogicalResolver,
   setMathHelperNeededCallback,
   setNullishResolver,
   setStrCmpNeededCallback,
@@ -1032,6 +1033,51 @@ function hasTopLevelBoolOp(e: string): boolean {
   return false;
 }
 
+/** `e` as `lhs || rhs` or `lhs && rhs` when a logical operator is its loosest top-level operator
+ *  (`||` before `&&`, each at its last occurrence; a fully parenthesised `e` is unwrapped), else
+ *  null. A top-level `?` (a
+ *  conditional) or `??` binds looser, so either makes this null. `||=` / `&&=` are not matched. */
+function splitTopLogical(e: string): { op: "||" | "&&"; lhs: string; rhs: string } | null {
+  let s = e.trim();
+  while (s.startsWith("(") && s.endsWith(")") && parenDepthNeverNegative(s.slice(1, -1))) {
+    s = s.slice(1, -1).trim();
+  }
+  const inStr = buildStringLiteralMask(s);
+  let depth = 0, or = -1, and = -1;
+  for (let i = 0; i < s.length; i++) {
+    if (inStr[i]) continue;
+    const ch = s[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    if (depth !== 0) continue;
+    const two = s.slice(i, i + 2);
+    if (two === "??" || (ch === "?" && s[i + 1] !== ".")) return null;
+    // The LAST of each: both are left-associative, `a || b || c` is `(a || b) || c`.
+    if ((two === "||" || two === "&&") && s[i + 2] !== "=") {
+      if (two === "||") or = i;
+      else and = i;
+      i++;
+    }
+  }
+  const at = or !== -1 ? or : and;
+  if (at <= 0) return null;
+  return {
+    op: or !== -1 ? "||" : "&&",
+    lhs: s.slice(0, at).trim(),
+    rhs: s.slice(at + 2).trim(),
+  };
+}
+
+/** The value type of `a && b` / `a || b` over two NUMERIC operand types, or null when there is no
+ *  single one (a bigint mixed with a number). A float operand makes it f64 (sw15's rule). */
+function logicalValueType(lt: string, rt: string): "i32" | "i64" | "f64" | null {
+  const b = (t: string) => watBaseType(t as WatType);
+  const l = b(lt), r = b(rt);
+  if (l === "i64" || r === "i64") return l === r ? "i64" : null;
+  if (l === "f64" || l === "f32" || r === "f64" || r === "f32") return "f64";
+  return l === "i32" && r === "i32" ? "i32" : null;
+}
+
 /** Every binary operator emitExpr splits on (its binaryOps table), for hasTopLevelBinaryOp. */
 const WASIC_BINARY_OPS = [
   "||",
@@ -1555,6 +1601,20 @@ function inferInitType(
   // 2. a comparison or logical operator AT TOP LEVEL → boolean. A match ANYWHERE in the text took
   //    the `>` of `n >> 1` and a comparison nested in a call or parens for one: `"h=" + (n >> 1)`
   //    printed `h=true` (sw14, 2026-10-06).
+  //    `a && b` / `a || b` is one of its OPERANDS (sw49, 2026-10-09): boolean only when both are;
+  //    two numbers give a number; a string operand gives a string. A boolean mixed with a number
+  //    (`!a && b`: `false | number`) stays "bool" here: what it prints is decided at run time,
+  //    which the console handles (logicalMixed) and a string conversion refuses.
+  {
+    const lg = splitTopLogical(e);
+    if (lg) {
+      const lt = inferInitType(lg.lhs, locals, enumValues, functions);
+      const rt = inferInitType(lg.rhs, locals, enumValues, functions);
+      if (lt === "bool" || rt === "bool") return "bool";
+      if (lt === "string" || rt === "string") return "string";
+      return logicalValueType(lt, rt) ?? "bool";
+    }
+  }
   if (hasTopLevelBoolOp(e)) return "bool";
   if (e.startsWith("!") && !e.startsWith("!=")) return "bool";
   // 2b. string-producing expressions
@@ -1682,6 +1742,10 @@ class WasicTranspiler {
   private needsStringOpHelpers = false;
   /** sw08: the `$__<k>_to_new_str` helpers emitStringPtrLen's `String(x)` asked for. */
   private strOfHelpers: Set<string> = new Set();
+  /** sw49: the `$__lor_<t>` scratch globals the operand form of `&&` / `||` used. */
+  private logicalScratch: Set<string> = new Set();
+  /** sw48: a closure factory boxes a mutated captured parameter through `$__box_i32`. */
+  private needsBoxHelper = false;
   /** sw08: unsupported string forms met INSIDE a quietEmit probe (their diagnostic suppressed). */
   private quietStringFailures = 0;
   /** sw44: `$__exn_str` (String() of a catch variable, by thrown kind) is needed. Its seven
@@ -2436,7 +2500,11 @@ class WasicTranspiler {
         this.functions.push(factoryDef);
 
         // Replace the inline arrow expression with a factory call: factoryName(cap1, cap2, ...)
-        const captureArgs = captures.join(", ");
+        // A boxed capture passes its CELL (`__boxref(x)`, the raw local); everywhere else in the
+        // enclosing function a boxed name reads and writes through the cell (sw48).
+        const captureArgs = captures
+          .map((c) => anonDef.boxedCaptures?.has(c) ? `__boxref(${c})` : c)
+          .join(", ");
         return line.slice(0, paramsStart) + `${factoryName}(${captureArgs})` + line.slice(arrowEnd);
       }
     }
@@ -3100,9 +3168,12 @@ class WasicTranspiler {
           // Build outer scope (params + top-level declarations before the return)
           const outerVarNames = new Set<string>(factoryParams.map((p) => p.name));
           // Declared i32 / bool locals: what a box (a 4-byte i32 cell, initialised at the
-          // declaration) can hold. sw32 boxes these even for ONE mutating arrow; a parameter (no
-          // declaration fills its box) or an f64 (the cell would truncate it) is not boxed alone.
-          const boxableLocals = new Set<string>();
+          // declaration) can hold. sw32 boxes these even for ONE mutating arrow; an f64 (the cell
+          // would truncate it) is not boxed alone. An i32 / bool PARAMETER is boxed too: the
+          // function's prologue rebinds it to `$__box_i32(value)` (sw48, 2026-10-09).
+          const boxableLocals = new Set<string>(
+            factoryParams.filter((p) => p.type === "i32" || p.type === "bool").map((p) => p.name),
+          );
           for (const bl of bodyLines) {
             const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+))?\s*=/);
             if (vm) {
@@ -6447,6 +6518,16 @@ class WasicTranspiler {
     stmts: string[],
   ): void {
     this.scalarStrTempsUsed = true;
+    // `!a && b` (a boolean mixed with a number) is `false` or b's digits, decided at run time;
+    // printed as a boolean it read `true` (sw49). Refused here; a console.log argument of its
+    // own prints it right (logicalForConsole).
+    const lg = type === "bool" ? splitTopLogical(expr) : null;
+    if (lg && (this.inferExprType(lg.lhs, locals) === "bool") !== (this.inferExprType(lg.rhs, locals) === "bool")) {
+      this.diagnostics.push(
+        `'${expr.slice(0, 60)}' mixes a boolean and a number in a string; ` +
+          `convert each side explicitly (e.g. a conditional)`,
+      );
+    }
     if (type === "bool") {
       const [tOff, tLen] = this.allocString("true");
       const [fOff, fLen] = this.allocString("false");
@@ -8402,6 +8483,11 @@ ${prefixed}
     // bool is i32 at the WAT level; normalize so all emission uses i32
     if (defaultType === "bool") defaultType = "i32";
     let expr = raw.trim();
+    // sw48: a boxed capture handed to its closure's factory is the cell itself, not its value.
+    {
+      const boxRef = expr.match(/^__boxref\((\w+)\)$/);
+      if (boxRef) return `(local.get $${boxRef[1]})`;
+    }
 
     // Phase 22: strip TypeScript non-null assertion postfix `expr!` → `expr`
     // Guard against != and !== which also end with !
@@ -10656,12 +10742,14 @@ ${prefixed}
         // form also mis-encoded under wasmmerge splice (a `call` nested in an `i32.and` inside a
         // loop `br_if` trapped after reassembly); short-circuiting removes that whole class.
         if (op === "&&" || op === "||") {
-          // Operands by truthiness (sw16): `0.5 && b` is truthy, not a truncated 0.
-          const lWat = this.emitCond(lhs, locals);
-          const rWat = this.emitCond(rhs, locals);
-          const scWat = op === "&&"
-            ? `(if (result i32) ${lWat} (then ${rWat}) (else (i32.const 0)))`
-            : `(if (result i32) ${lWat} (then (i32.const 1)) (else ${rWat}))`;
+          // The value is one of the OPERANDS (sw49): `x || 7` is 7 for x = 0, `z && 9` is 9.
+          // Two booleans keep the boolean form below (the same value); so does every condition,
+          // which emitCond builds without coming here.
+          const lt = this.inferExprType(lhs, locals);
+          const rt = this.inferExprType(rhs, locals);
+          const vt = lt === "bool" || rt === "bool" ? null : logicalValueType(lt, rt);
+          if (vt) return this.convertWat(this.emitLogicalValue(op, lhs, rhs, vt, locals), vt, defaultType);
+          const scWat = this.emitLogicalBool(op, lhs, rhs, locals);
           // Result is i32 0/1; promote if the surrounding context expects a wider type.
           const ctxBase = watBaseType(defaultType as WatType);
           if (ctxBase === "f64") return `(f64.convert_i32_s ${scWat})`;
@@ -11009,6 +11097,12 @@ ${prefixed}
    *  f64 is true when nonzero and not NaN (`|x| > 0`), an i64 when nonzero. Converting an f64 to i32
    *  (`trunc`) made `if (0.5)` false (sw16, 2026-10-06). */
   private emitCond(cond: string, locals: Map<string, WatType>): string {
+    // A condition needs only truthiness: `&&` / `||` at top level is the boolean short-circuit,
+    // whatever its operands (their VALUE form, sw49, is for value contexts).
+    const lg = splitTopLogical(cond);
+    if (lg && !this.logicalHasAny(lg.lhs, lg.rhs)) {
+      return this.emitLogicalBool(lg.op, lg.lhs, lg.rhs, locals);
+    }
     // Decided on the EMITTED WAT, not on inferExprType (which calls `isNaN(x)` f64 though it emits
     // an i32 comparison): when the emitter truncated a float to fit the i32 context, the
     // truncation is replaced by the truthiness test. Everything else is unchanged.
@@ -11019,6 +11113,107 @@ ${prefixed}
       return `(${t}.gt (${t}.abs ${m[2]}) (${t}.const 0))`;
     }
     return w;
+  }
+
+  /** console_log's `&&` / `||` resolver (sw49; see setLogicalResolver there). A boolean mixed
+   *  with another type prints what JavaScript prints through a string conditional: `!a && b` is
+   *  `` !a ? `${b}` : "false" ``. When the NON-boolean operand is on the left, it is both the test
+   *  and a possible result, so it must be a name or a literal (evaluated twice); otherwise the
+   *  argument is refused rather than printed as a boolean. */
+  private logicalForConsole(
+    tok: string,
+    locals: Map<string, WatType>,
+  ): { wat: string; type: string } | { rewrite: string } | undefined {
+    const lg = splitTopLogical(tok);
+    if (!lg || this.logicalHasAny(lg.lhs, lg.rhs)) return undefined;
+    const { op, lhs: L, rhs: R } = lg;
+    const lb = this.inferExprType(L, locals) === "bool";
+    const rb = this.inferExprType(R, locals) === "bool";
+    if (lb && rb) return undefined;
+    if (!lb && !rb) {
+      const vt = logicalValueType(this.inferExprType(L, locals), this.inferExprType(R, locals));
+      return vt ? { wat: this.emitLogicalValue(op, L, R, vt, locals), type: vt } : undefined;
+    }
+    // The string conditional captures through $__str_op_ptr/len; the emitters declare that pair
+    // after emission when the body uses it (`strOpTempDecls`).
+    locals.set("__str_op_ptr", "i32");
+    locals.set("__str_op_len", "i32");
+    // Branches are templates: the console's string conditional takes those as strings (sw02).
+    const str = (x: string) => "`${" + x + "}`";
+    if (lb) {
+      return {
+        rewrite: op === "&&" ? `(${L}) ? ${str(R)} : "false"` : `(${L}) ? "true" : ${str(R)}`,
+      };
+    }
+    if (!/^(?:\w+|-?\d+(?:\.\d+)?)$/.test(L)) {
+      this.diagnostics.push(
+        `console argument: '${tok.slice(0, 60)}' mixes a number and a boolean; ` +
+          `store the left side in a variable first`,
+      );
+      return undefined;
+    }
+    return {
+      rewrite: op === "&&" ? `(${L}) ? ${str(R)} : ${str(L)}` : `(${L}) ? ${str(L)} : ${str(R)}`,
+    };
+  }
+
+  /** True when an operand is a bare `any` variable: those go through dynrt's own `&&` / `||`. */
+  private logicalHasAny(lhs: string, rhs: string): boolean {
+    return [lhs, rhs].some((s) => /^\w+$/.test(s.trim()) && this.anyVars.has(s.trim()));
+  }
+
+  /** `a && b` / `a || b` as a boolean (i32 0/1), short-circuit: the right side runs only when the
+   *  left does not decide. Operands by truthiness (sw16): `0.5 && b` is truthy. */
+  private emitLogicalBool(
+    op: "&&" | "||",
+    lhs: string,
+    rhs: string,
+    locals: Map<string, WatType>,
+  ): string {
+    const lWat = this.emitCond(lhs, locals);
+    const rWat = this.emitCond(rhs, locals);
+    return op === "&&"
+      ? `(if (result i32) ${lWat} (then ${rWat}) (else (i32.const 0)))`
+      : `(if (result i32) ${lWat} (then (i32.const 1)) (else ${rWat}))`;
+  }
+
+  /** `a && b` / `a || b` as the OPERAND JavaScript gives, at type `t` (sw49): `a` is evaluated
+   *  once into `$__lor_<t>`, and that global is read only on the branch that does not evaluate
+   *  `b`, so a nested `&&` / `||` inside `b` cannot clobber it before the read. */
+  private emitLogicalValue(
+    op: "&&" | "||",
+    lhs: string,
+    rhs: string,
+    t: "i32" | "i64" | "f64",
+    locals: Map<string, WatType>,
+  ): string {
+    this.logicalScratch.add(t);
+    const g = `(global.get $__lor_${t})`;
+    const truthy = t === "i32"
+      ? g
+      : t === "i64"
+      ? `(i64.ne ${g} (i64.const 0))`
+      : `(f64.gt (f64.abs ${g}) (f64.const 0))`;
+    const r = this.emitExpr(rhs, locals, t);
+    return `(block (result ${t}) (global.set $__lor_${t} ${this.emitExpr(lhs, locals, t)}) ` +
+      `(if (result ${t}) ${truthy} (then ${op === "&&" ? r : g}) (else ${op === "&&" ? g : r})))`;
+  }
+
+  /** Converts a value of type `from` to the context type `to` (an f64 into i32 truncates, the
+   *  form emitCond turns back into a truthiness test). */
+  private convertWat(w: string, from: "i32" | "i64" | "f64", to: WatType): string {
+    const t = watBaseType(to === "never" ? "i32" : to);
+    if (t === from) return w;
+    if (from === "i32") {
+      return t === "f64" ? `(f64.convert_i32_s ${w})` : t === "i64" ? `(i64.extend_i32_s ${w})`
+        : t === "f32" ? `(f32.convert_i32_s ${w})` : w;
+    }
+    if (from === "f64") {
+      return t === "i32" ? `(i32.trunc_f64_s ${w})` : t === "i64" ? `(i64.trunc_f64_s ${w})`
+        : t === "f32" ? `(f32.demote_f64 ${w})` : w;
+    }
+    return t === "i32" ? `(i32.wrap_i64 ${w})` : t === "f64" ? `(f64.convert_i64_s ${w})`
+      : t === "f32" ? `(f32.convert_i64_s ${w})` : w;
   }
 
   /** True if `expr` has a binary operator at top level (outside brackets and literals). A unary
@@ -13687,6 +13882,7 @@ ${prefixed}
       // Nullish coalescing (`a ?? b`): emitExpr owns the Phase 24 nullable tables, so let it
       // build the if/else. The result type is the LHS's — nullableVarInnerType first (a tracked
       // `T | null` local), else ordinary inference.
+      setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -13722,6 +13918,7 @@ ${prefixed}
       setConsoleDiagnosticSink(undefined);
       setExprFallbackResolver(undefined);
       setNullishResolver(undefined);
+      setLogicalResolver(undefined);
       setEnumStrVarResolver(undefined);
       const { statements, needsHelpers, needsStrGather, needsArrPrintHelper, needsJoinHelper } =
         emitConsoleLog(segments, allocator, "    ", 1, this.iovBase, this.scratchBase);
@@ -14150,6 +14347,7 @@ ${prefixed}
       // Nullish coalescing (`a ?? b`): emitExpr owns the Phase 24 nullable tables, so let it
       // build the if/else. The result type is the LHS's — nullableVarInnerType first (a tracked
       // `T | null` local), else ordinary inference.
+      setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -14185,6 +14383,7 @@ ${prefixed}
       setConsoleDiagnosticSink(undefined);
       setExprFallbackResolver(undefined);
       setNullishResolver(undefined);
+      setLogicalResolver(undefined);
       setEnumStrVarResolver(undefined);
       const {
         statements,
@@ -15763,6 +15962,15 @@ ${prefixed}
     }
     if (this.needsExnStr) parts.push(this.getExnStrWat());
     if (this.strOfHelpers.size > 0) parts.push(this.getStrOfWat());
+    if (this.needsBoxHelper) {
+      parts.push(`  ;; A heap cell holding $v, for a captured parameter a closure mutates (sw48).
+  (func $__box_i32 (param $v i32) (result i32)
+    (local $p i32)
+    (local.set $p (call $__malloc (i32.const 4)))
+    (i32.store (local.get $p) (local.get $v))
+    (local.get $p)
+  )`);
+    }
     if (this.needsStringExtHelpers) parts.push(this.getStringExtHelperWat());
     // $__fd_write_all is gated on the SAME flag as the `$fd_write` import above, so the helper
     // exists in every module that can call it and in no module that cannot.
@@ -19349,16 +19557,30 @@ ${sum}
     // For never-returning functions pass null so return statements emit (return) with no value.
     const blockResult = fn.result === "never" ? null : fn.result;
     this.currentFuncResultTsName = fn.resultTsName ?? null;
-    // Phase 5h: set boxed/shared capture context for this function
-    this.currentBoxedCaptures = fn.boxedCaptures ?? new Set();
+    // Phase 5h: set boxed/shared capture context for this function. The factory's OWN reads and
+    // writes of a shared capture go through its cell too (it holds the cell once declared, or from
+    // the prologue for a parameter); only `__boxref(x)` passes the cell (sw48).
+    this.currentBoxedCaptures = new Set([
+      ...(fn.boxedCaptures ?? []),
+      ...(fn.sharedMutableCaptures ?? []),
+    ]);
     this.currentSharedMutableCaptures = fn.sharedMutableCaptures ?? new Set();
     this.currentClosureCaptureLayout = fn.closureCaptureLayout ?? new Map();
     const savedScalarTemps = this.scalarStrTempsUsed;
     this.scalarStrTempsUsed = false;
-    const body = this.emitBlock(fn.bodyLines, locals, blockResult);
+    // sw48: a boxed parameter is rebound to a heap cell holding its value, before the body runs.
+    const boxedParams = fn.params.filter((p) => this.currentSharedMutableCaptures.has(p.name));
+    if (boxedParams.length > 0) this.needsBoxHelper = true;
+    const body = boxedParams
+      .map((p) => `(local.set $${p.name} (call $__box_i32 (local.get $${p.name})))\n    `)
+      .join("") + this.emitBlock(fn.bodyLines, locals, blockResult);
     // Declare the number/bool → text temps if the body used them and the pre-scan didn't already.
     const scalarTempDecls = this.scalarStrTempsUsed && !seenLocals.has("__tmpl_num_ptr")
       ? `    (local $__tmpl_num_ptr i32)\n    (local $__tmpl_num_len i32)`
+      : "";
+    // Likewise the $__str_op pair, when only emission knew it was needed (sw49's console rewrite).
+    const strOpTempDecls = /\$__str_op_(?:ptr|len)\b/.test(body) && !seenLocals.has("__str_op_ptr")
+      ? `    (local $__str_op_ptr i32)\n    (local $__str_op_len i32)`
       : "";
     this.scalarStrTempsUsed = savedScalarTemps;
     this.currentBoxedCaptures = new Set();
@@ -19383,6 +19605,7 @@ ${sum}
       `  (func $${fn.name} ${exportAttr}${params} ${result}`,
       localDecls ? localDecls : "",
       scalarTempDecls,
+      strOpTempDecls,
       finalBody + neverSuffix,
       `  )`,
     ].filter((l) => l.trim() !== "").join("\n");
@@ -21120,6 +21343,10 @@ ${sum}
         declMap.set("__tmpl_num_ptr", "i32");
         declMap.set("__tmpl_num_len", "i32");
       }
+      if (/\$__str_op_(?:ptr|len)\b/.test(bodyWat) && !declMap.has("__str_op_ptr")) {
+        declMap.set("__str_op_ptr", "i32");
+        declMap.set("__str_op_len", "i32");
+      }
       this.scalarStrTempsUsed = savedScalarTemps;
       const localDecls = [...declMap.entries()]
         .map(([n, t]) => `    (local $${n} ${watBaseType(t)})`)
@@ -21246,6 +21473,8 @@ ${sum}
       // What was thrown (sw44): 0 = a string / number / boolean, 1–7 = an Error-family object
       // (EXN_KINDS). Set before every throw; a catch copies it into its variable's `__kind` local.
       this.needsExceptionTag ? `  (global $__exn_kind (mut i32) (i32.const 0))` : "",
+      // `a && b` / `a || b` as an operand (sw49): the left value, held while its truthiness is tested.
+      ...[...this.logicalScratch].map((t) => `  (global $__lor_${t} (mut ${t}) (${t}.const 0))`),
       funcTypesWat,
       ``,
       helpers,

@@ -329,6 +329,21 @@ export function setNullishResolver(
   _nullishResolver = fn;
 }
 
+/** Resolve `a && b` / `a || b` (sw49): JavaScript gives an OPERAND, not a boolean. wasic answers
+ *  `{ wat, type }` for two numbers (the operand form), `{ rewrite }` for a boolean mixed with
+ *  another type (a string conditional that prints what JavaScript prints), or undefined (two
+ *  booleans, or not a logical expression: the boolean segment below is right). */
+let _logicalResolver:
+  | ((
+    token: string,
+    locals: Map<string, string>,
+  ) => { wat: string; type: string } | { rewrite: string } | undefined)
+  | undefined = undefined;
+/** Inject the `&&` / `||` resolver (sw49). Pass `undefined` to clear it. */
+export function setLogicalResolver(fn: typeof _logicalResolver): void {
+  _logicalResolver = fn;
+}
+
 /** Resolve a string-producing expression (e.g. `s.toUpperCase()`, `arr[i].toUpperCase()`) to a
  *  ptr/len WAT pair via wasic's emitStringPtrLen (captured into temp locals). Set by wasic.ts
  *  around parseConsoleLogArgs. Returns undefined when the token isn't a handled string expr. */
@@ -1595,6 +1610,34 @@ function parseSingleArg(
     }
   }
 
+  // ── `a && b` / `a || b` prints an OPERAND (sw49): `x || 7` is 7, `!a && b` is b's value when
+  // `!a` is true. Only two booleans fall through to the boolean segment below.
+  if (
+    _logicalResolver &&
+    (findTopLevelOp(token, "&&") !== -1 || findTopLevelOp(token, "||") !== -1)
+  ) {
+    const lr = _logicalResolver(token, locals);
+    if (lr && "rewrite" in lr) {
+      return parseSingleArg(
+        lr.rewrite,
+        locals,
+        funcLookup,
+        allocString,
+        enumLookup,
+        arrayLookup,
+        structLookup,
+        dotCallLookup,
+        globals,
+        enumStringLookup,
+        closureVarLookup,
+      );
+    }
+    if (lr) {
+      const kind = lr.type === "f64" ? "f64expr" : lr.type === "i64" ? "i64expr" : "i32expr";
+      return [{ kind, wat: lr.wat } as LogSegment];
+    }
+  }
+
   // ── Boolean expression: &&, ||, !, comparisons → boolexpr (prints "true"/"false")
   // Must run BEFORE Number.*/Math.* so that "Number.MAX_SAFE_INTEGER > 1e16" is caught here,
   // not misidentified as an f64 constant by the Number.* handler.
@@ -2802,6 +2845,20 @@ function exprToWat(
     // a guarded RHS side effect (e.g. `i < len && s.charCodeAt(i) === c`) does not run when the
     // LHS already decides the result. Avoids OOB access and the wasmmerge call-in-i32.and trap.
     if (op === "&&" || op === "||") {
+      // Two numbers: the operand, from wasic (sw49); widened to the type asked.
+      const lr = _logicalResolver?.(expr, locals);
+      if (lr && "wat" in lr) {
+        const widened = widenNumeric(lr.wat, lr.type, expectedType);
+        if (widened !== null) return widened;
+      }
+      // A boolean mixed with a number, as a NUMBER (a sum, a string piece): what it is depends
+      // on the run, and a boolean here printed `true` / built an invalid module. Refused.
+      if (lr && "rewrite" in lr && expectedType !== "i32") {
+        _diagnosticSink?.(
+          `console argument: '${expr.slice(0, 60)}' mixes a boolean and a number inside a larger ` +
+            `expression; give it its own console.log argument or a variable`,
+        );
+      }
       // Operands by truthiness (sw16's console twin): a float operand reached the `if` raw.
       const lWat = condToWat(
         lhs,

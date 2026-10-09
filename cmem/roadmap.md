@@ -140,6 +140,12 @@
     i32 `0` gave `5`; a top-level array named bare in a function would not compile (sw06–sw09,
     sw19, sw28, sw50, ld24, ld25). Test `11_StringConversions`. Found: sw51 (a `T | null` tuple
     element's real `0` reads as null; needs a null flag in the tuple layout).
+23. **`&&` / `||` give an operand; closures keep a mutated parameter (2026-10-09).** `x || 7`
+    printed `true` (or, with a float, would not build); `!a && b` printed `true` where
+    JavaScript prints `0`; conditions are unchanged, byte for byte. A closure mutating a captured
+    parameter lost the change after each call (`101 102` for `101 103`). (sw48, sw49.) Tests
+    `4_LogicalOperands`, `5h_CapturedParamMutation`. Found: sw52 (an object-literal arrow with a
+    block body is typed i32: a boolean prints `1`, an f64 truncates).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
