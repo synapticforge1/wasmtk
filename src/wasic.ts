@@ -148,6 +148,7 @@ import {
   setInstanceofResolver,
   setLogicalResolver,
   setMathHelperNeededCallback,
+  setNullPrintResolver,
   setNullishResolver,
   setStrCmpNeededCallback,
   setStringArrayAllocator,
@@ -766,8 +767,11 @@ interface StructField {
   size: number;
   /** Phase 21: field declared with `readonly` modifier — writes are a compile-time error. */
   readonly?: boolean;
-  /** A `T | null` tuple element: stored with NO null flag, null is 0 (2026-10-09, sw51). */
+  /** Declared `T | null` (or `| undefined`). */
   nullable?: boolean;
+  /** sw51 (option A, owner 2026-10-09): a nullable SCALAR field's flag word (i32, 1 = null), at
+   *  the end of the record, so no user field moves. Pointer-valued fields need none (0 is null). */
+  nullFlagOffset?: number;
   /** Phase 12: for method-type fields in interfaces — stores the function signature. */
   funcType?: { params: WatType[]; result: WatType | null };
   /** Phase 42: when this i32 field is a pointer to a named struct, stores the struct name. */
@@ -1068,6 +1072,11 @@ function splitTopLogical(e: string): { op: "||" | "&&"; lhs: string; rhs: string
     lhs: s.slice(0, at).trim(),
     rhs: s.slice(at + 2).trim(),
   };
+}
+
+/** True when a type text declares `| null` or `| undefined` (either side). */
+function isNullableTypeText(t: string): boolean {
+  return /\|\s*(?:null|undefined)\b|\b(?:null|undefined)\s*\|/.test(t);
 }
 
 /** The value type of `a && b` / `a || b` over two NUMERIC operand types, or null when there is no
@@ -1978,10 +1987,8 @@ class WasicTranspiler {
   // Reference types (string, struct, array) use 0-pointer as the null sentinel.
   // Reset at the start of each emitFunction call and before the _start body pre-scan.
   private nullableVarInnerType: Map<string, WatType> = new Map();
-  // Locals bound from a `T | null` tuple element, which has no `__null` flag: null is stored as 0,
-  // so `??` must keep the 0 test for them (and a real 0 reads as null: sw51, open). Reset with
-  // nullableVarInnerType.
-  private zeroNullLocals: Set<string> = new Set();
+  /** sw51: set while emitting the value half of a flagged field store (no second intercept). */
+  private inNullFieldStore = false;
   // Phase 24: MODULE-LEVEL `T | null` globals — name → inner type + whether the initialiser
   // was `null`. Persistent (unlike nullableVarInnerType, which is per-function), because the
   // companion `$name__null` is a WASM global rather than a local; nullableVarInnerType is
@@ -4654,7 +4661,7 @@ class WasicTranspiler {
       offset += 4;
     }
     // Detect plain data fields (skip method fields already handled)
-    const fieldRe = /(?:(readonly)\s+)?(\w+)\??:\s*([\w\[\]]+)/g;
+    const fieldRe = /(?:(readonly)\s+)?(\w+)\??:\s*([\w\[\]]+)(\s*\|\s*(?:null|undefined)\b)?/g;
     let fm: RegExpExecArray | null;
     while ((fm = fieldRe.exec(body)) !== null) {
       const isReadonly = fm[1] === "readonly";
@@ -4674,6 +4681,7 @@ class WasicTranspiler {
         offset,
         size,
         ...(isReadonly ? { readonly: true } : {}),
+        ...(fm[4] ? { nullable: true } : {}),
       };
       // Phase 42: track struct pointer fields (PascalCase → i32 pointer to another struct)
       if (
@@ -4696,7 +4704,7 @@ class WasicTranspiler {
       offset += size;
     }
     if (fields.length > 0) {
-      this.structDefs.set(name, { name, fields, totalSize: offset });
+      this.structDefs.set(name, { name, fields, totalSize: this.placeNullFlags(fields, offset) });
     }
   }
 
@@ -5044,11 +5052,30 @@ class WasicTranspiler {
       const type = mapType(elem) as WatType;
       const size = (type === "f64" || type === "i64") ? 8 : 4;
       if (offset % size !== 0) offset = Math.ceil(offset / size) * size;
-      const nullable = /\|\s*(?:null|undefined)\b|\b(?:null|undefined)\s*\|/.test(elem) || undefined;
+      const nullable = isNullableTypeText(elem) || undefined;
       fields.push({ name: `_${i}`, type, offset, size, nullable });
       offset += size;
     }
-    return { name, fields, totalSize: offset };
+    return { name, fields, totalSize: this.placeNullFlags(fields, offset) };
+  }
+
+  /** sw51: gives every nullable SCALAR field (i32 / bool / i64 / f32 / f64) a 4-byte flag word
+   *  after the last field (1 = null), and returns the record's new size, rounded to 8 when it
+   *  holds an 8-byte field. A string, struct, array or embedded-tuple field is a pointer or has
+   *  its own layout: 0 already means null there. */
+  private placeNullFlags(fields: StructField[], end: number): number {
+    let off = end;
+    let placed = false;
+    for (const f of fields) {
+      if (!f.nullable || f.nullFlagOffset !== undefined || f.tupleTypeName || f.structType) continue;
+      if (!["i32", "bool", "i64", "f32", "f64"].includes(f.type)) continue;
+      if (off % 4 !== 0) off = Math.ceil(off / 4) * 4;
+      f.nullFlagOffset = off;
+      off += 4;
+      placed = true;
+    }
+    if (placed && fields.some((f) => f.size === 8) && off % 8 !== 0) off = Math.ceil(off / 8) * 8;
+    return off;
   }
 
   /** Natural alignment for embedding a (possibly nested) tuple as an inline field: 8 if it
@@ -5069,7 +5096,11 @@ class WasicTranspiler {
   private tupleTypeName(innerTypesStr: string): string {
     const parts = splitBraceAwareCommas(innerTypesStr).map((t) => {
       const e = t.trim();
-      return e.startsWith("[") && e.endsWith("]") ? this.tupleTypeName(e.slice(1, -1)) : mapType(e);
+      // A nullable element changes the layout (sw51), so it changes the name: `[i32 | null, f64]`
+      // and `[i32, f64]` shared one cached def.
+      return e.startsWith("[") && e.endsWith("]")
+        ? this.tupleTypeName(e.slice(1, -1))
+        : mapType(e) + (isNullableTypeText(e) ? "N" : "");
     });
     return `__Tuple_${parts.join("_")}`;
   }
@@ -5194,7 +5225,7 @@ class WasicTranspiler {
               }
             }
             const fm = line.match(
-              /^(?:(?:private|protected|public|readonly)\s+)*(\w+)\s*[!?]?\s*:\s*([\w\[\]]+)/,
+              /^(?:(?:private|protected|public|readonly)\s+)*(\w+)\s*[!?]?\s*:\s*([\w\[\]]+)(\s*\|\s*(?:null|undefined)\b)?/,
             );
             if (fm) {
               const type = mapType(fm[2]);
@@ -5206,6 +5237,7 @@ class WasicTranspiler {
                 offset: fieldOffset,
                 size,
                 ...(isReadonly ? { readonly: true } : {}),
+                ...(fm[3] ? { nullable: true } : {}),
               });
               fieldOffset += size;
             }
@@ -5216,7 +5248,11 @@ class WasicTranspiler {
       }
 
       // Register struct and class definitions
-      const def: StructDef = { name: className, fields, totalSize: fieldOffset };
+      const def: StructDef = {
+        name: className,
+        fields,
+        totalSize: this.placeNullFlags(fields, fieldOffset),
+      };
       this.structDefs.set(className, def);
       const classDef: ClassDef = { name: className, struct: def, methods: [] };
       this.classDefs.set(className, classDef);
@@ -5357,7 +5393,10 @@ class WasicTranspiler {
       for (const name of this.classDefs.keys()) this.classTags.set(name, nextTag++);
       // Shift all class field offsets by +4 and grow totalSize by 4.
       for (const [, cd] of this.classDefs) {
-        for (const f of cd.struct.fields) f.offset += 4;
+        for (const f of cd.struct.fields) {
+          f.offset += 4;
+          if (f.nullFlagOffset !== undefined) f.nullFlagOffset += 4;
+        }
         cd.struct.totalSize += 4;
       }
     }
@@ -5699,6 +5738,14 @@ class WasicTranspiler {
         } else view.setInt32(field.offset, Math.trunc(val), true);
       }
     }
+    // sw51: a flagged field that is null, undefined or omitted gets its flag (the bytes are 0).
+    for (const field of def.fields) {
+      if (field.nullFlagOffset === undefined) continue;
+      const raw = initFields[field.name]?.trim();
+      if (raw === undefined || raw === "null" || raw === "undefined") {
+        view.setInt32(field.nullFlagOffset, 1, true);
+      }
+    }
     const encoded = Array.from(bytes).map((b) => `\\${b.toString(16).padStart(2, "0")}`).join("");
     if (encoded) this.rawDataSegments.push({ ptr, bytes: encoded });
     return ptr;
@@ -5718,8 +5765,9 @@ class WasicTranspiler {
     const rawFieldsCheck = parseDepth0FieldsWithShorthand(bodyStr);
     // If any field value is a runtime variable (not a numeric literal, bool, or quoted string),
     // this literal cannot be allocated statically — fall through to emitRuntimeStructLiteral.
+    // `null` / `undefined` too: allocStructData stores 0 and sets a flagged field's flag (sw51).
     const isCompileTimeConst = (raw: string): boolean =>
-      raw === "true" || raw === "false" ||
+      raw === "true" || raw === "false" || raw === "null" || raw === "undefined" ||
       /^["'`]/.test(raw) ||
       /^-?\d+(\.\d+)?([eE][+-]?\d+)?n?$/.test(raw);
     for (const [, raw] of Object.entries(rawFieldsCheck)) {
@@ -5766,8 +5814,21 @@ class WasicTranspiler {
       `(local.set $__rt_struct_ptr (call $__malloc (i32.const ${def.totalSize})))`,
     ];
     for (const field of def.fields) {
-      const valExpr = rawFields[field.name] ?? "0";
       const storeOp = memStoreOp(field.type);
+      if (field.nullFlagOffset !== undefined) {
+        // sw51: an omitted flagged field is undefined (flag 1).
+        const { valWat, flagWat } = this.fieldInit(
+          field,
+          rawFields[field.name] ?? "undefined",
+          locals,
+        );
+        stmts.push(`(${storeOp} offset=${field.offset} (local.get $__rt_struct_ptr) ${valWat})`);
+        stmts.push(
+          `(i32.store offset=${field.nullFlagOffset} (local.get $__rt_struct_ptr) ${flagWat})`,
+        );
+        continue;
+      }
+      const valExpr = rawFields[field.name] ?? "0";
       const valWat = this.emitExpr(valExpr, locals, field.type);
       stmts.push(`(${storeOp} offset=${field.offset} (local.get $__rt_struct_ptr) ${valWat})`);
     }
@@ -5804,8 +5865,9 @@ class WasicTranspiler {
   }
 
   /** Phase 51.2: build `{ ...base, k: v }` at runtime. Copies every target field from `base`
-   *  (matched by name, using base's own offset/type), then writes the explicit overrides. Fields
-   *  present in neither remain zero (fresh bump-allocated memory is zero). String fields copied
+   *  (matched by name, using base's own offset/type), then writes the explicit overrides. A field
+   *  present in neither is NOT written (and `__malloc` may hand back a freed block, so it is not
+   *  necessarily zero; a flagged field's flag is written either way, sw51). String fields copied
    *  from base move both the ptr and len words. */
   private emitSpreadStructLiteral(
     def: StructDef,
@@ -5819,12 +5881,28 @@ class WasicTranspiler {
     ];
     for (const field of def.fields) {
       const storeOp = memStoreOp(field.type);
+      // sw51: a flagged field's flag: the override's, else the base field's (0 when the base
+      // field has none), else 1 (in neither: undefined). __malloc does not zero the block.
+      const flagStore = (w: string) =>
+        field.nullFlagOffset === undefined
+          ? []
+          : [`(i32.store offset=${field.nullFlagOffset} (local.get $__rt_struct_ptr) ${w})`];
       if (Object.prototype.hasOwnProperty.call(overrides, field.name)) {
-        const valWat = this.emitExpr(overrides[field.name], locals, field.type);
+        const { valWat, flagWat } = this.fieldInit(field, overrides[field.name], locals);
         stmts.push(`(${storeOp} offset=${field.offset} (local.get $__rt_struct_ptr) ${valWat})`);
+        if (flagWat) stmts.push(...flagStore(flagWat));
+      } else if (!baseInfo?.def.fields.some((f) => f.name === field.name)) {
+        stmts.push(...flagStore(`(i32.const 1)`));
       } else if (baseInfo) {
         const bf = baseInfo.def.fields.find((f) => f.name === field.name);
         if (bf) {
+          stmts.push(
+            ...flagStore(
+              bf.nullFlagOffset === undefined
+                ? `(i32.const 0)`
+                : `(i32.load offset=${bf.nullFlagOffset} ${baseInfo.ptrWat})`,
+            ),
+          );
           if (field.type === "string") {
             stmts.push(
               `(i32.store offset=${field.offset} (local.get $__rt_struct_ptr) (i32.load offset=${bf.offset} ${baseInfo.ptrWat}))`,
@@ -5958,8 +6036,14 @@ class WasicTranspiler {
         const eqIdx = valuePart.indexOf("=");
         const localName = eqIdx !== -1 ? valuePart.slice(0, eqIdx).trim() : valuePart;
         const defaultExpr = eqIdx !== -1 ? valuePart.slice(eqIdx + 1).trim() : null;
-        if (field.nullable) this.zeroNullLocals.add(localName);
         stmts.push(this.emitFlatFieldBind(field, baseWat, localName, defaultExpr, locals));
+        // A flagged field (sw51) binds a nullable local: its `__null` is the field's flag.
+        if (field.nullFlagOffset !== undefined) {
+          this.nullableVarInnerType.set(localName, field.type);
+          stmts.push(
+            `(local.set $${localName}__null (i32.load (i32.add ${baseWat} (i32.const ${field.nullFlagOffset}))))`,
+          );
+        }
       }
     }
     return stmts;
@@ -6002,6 +6086,7 @@ class WasicTranspiler {
         const eqIdx = valuePart.indexOf("=");
         const localName = eqIdx !== -1 ? valuePart.slice(0, eqIdx).trim() : valuePart;
         out.push([localName, field.type]);
+        if (field.nullFlagOffset !== undefined) out.push([`${localName}__null`, "i32"]);
       }
     }
   }
@@ -6038,12 +6123,55 @@ class WasicTranspiler {
         }
       }
       const storeOp = memStoreOp(field.type);
-      const valWat = this.emitExpr(elem, locals, field.type);
+      const { valWat, flagWat } = this.fieldInit(field, elem, locals);
       stmts.push(
         `(${storeOp} offset=${baseOffset + field.offset} (local.get $${basePtr}) ${valWat})`,
       );
+      if (flagWat) {
+        stmts.push(
+          `(i32.store offset=${baseOffset + field.nullFlagOffset!} (local.get $${basePtr}) ${flagWat})`,
+        );
+      }
     }
     return stmts;
+  }
+
+  /** A scalar field's store from an initialiser, at `baseWat` + its offset, and (sw51) its flag
+   *  word's store for a flagged field. */
+  private fieldStore(
+    field: StructField,
+    expr: string,
+    baseWat: string,
+    locals: Map<string, WatType>,
+  ): string[] {
+    const { valWat, flagWat } = this.fieldInit(field, expr, locals);
+    const out = [`(${memStoreOp(field.type)} offset=${field.offset} ${baseWat} ${valWat})`];
+    if (flagWat) out.push(`(i32.store offset=${field.nullFlagOffset!} ${baseWat} ${flagWat})`);
+    return out;
+  }
+
+  /** sw51: for a constructor that writes only the fields it is given: every flag starts at 1
+   *  (an omitted field is undefined); each given field then writes its own. */
+  private nullFlagDefaults(def: StructDef, baseLocal: string): string[] {
+    return def.fields
+      .filter((f) => f.nullFlagOffset !== undefined)
+      .map((f) => `(i32.store offset=${f.nullFlagOffset} (local.get $${baseLocal}) (i32.const 1))`);
+  }
+
+  /** sw51: a field initialiser's value WAT and, for a flagged field, its flag WAT: `null` stores
+   *  0 with flag 1, a nullable source passes its own flag, anything else flag 0. Every runtime
+   *  constructor writes the flag: `__malloc` reuses freed blocks without zeroing them. */
+  private fieldInit(
+    field: StructField,
+    expr: string,
+    locals: Map<string, WatType>,
+  ): { valWat: string; flagWat?: string } {
+    const e = expr.trim();
+    const isNull = e === "null" || e === "undefined";
+    const valWat = this.emitExpr(isNull ? "0" : e, locals, field.type);
+    return field.nullFlagOffset === undefined
+      ? { valWat }
+      : { valWat, flagWat: this.nullFlagOf(e, locals) };
   }
 
   // -------------------------------------------------------------------------
@@ -6572,6 +6700,23 @@ class WasicTranspiler {
    * `1`/`0` (2026-09-28).
    */
   private emitScalarToStr(
+    expr: string,
+    type: WatType,
+    locals: Map<string, WatType>,
+    stmts: string[],
+  ): void {
+    this.emitScalarToStrRaw(expr, type, locals, stmts);
+    // A value that can be null (a nullable local, a flagged field) reads `null` then (sw51).
+    const nt = this.nullPrintTest(expr, locals);
+    if (nt) {
+      const [nOff, nLen] = this.allocString("null");
+      stmts.push(
+        `(if ${nt} (then (local.set $__tmpl_num_ptr (i32.const ${nOff})) (local.set $__tmpl_num_len (i32.const ${nLen}))))`,
+      );
+    }
+  }
+
+  private emitScalarToStrRaw(
     expr: string,
     type: WatType,
     locals: Map<string, WatType>,
@@ -7264,6 +7409,14 @@ class WasicTranspiler {
       const argExpr = stringOfMatch[1].trim();
       const joinedArg = this.arrayAsJoin(argExpr); // sw09: String(arr) is arr.join()
       if (joinedArg !== null) return this.emitStringAssign(varName, joinedArg, locals);
+      // sw51: a value that can be null reads `null`, through emitStringPtrLen's String(x).
+      if (this.nullPrintTest(argExpr, locals)) {
+        return [
+          this.emitStringPtrLen(initExpr, locals),
+          `${ind}(local.set $${varName}_len)`,
+          `${ind}(local.set $${varName}_ptr)`,
+        ].join("\n");
+      }
       const argType: WatType = this.inferExprType(argExpr, locals);
       // String(catchVar) where the arg is a caught exception: produce "Error: <message>"
       // matching JavaScript's Error.prototype.toString() behaviour.
@@ -7760,7 +7913,9 @@ class WasicTranspiler {
     }
     // Phase 42: expression starting with a struct field access (e.g. "a.x + b.x"):
     // if the leading sub-expression is a struct field, infer type from that field.
-    const leadDotM = e.match(/^(\w+)\.(\w+)\b/);
+    // Not across a top-level comparison / logical operator: `d1.c === null` is a boolean, whatever
+    // field it starts with (it was typed f64, 2026-10-09, sw51).
+    const leadDotM = hasTopLevelBoolOp(e) ? null : e.match(/^(\w+)\.(\w+)\b/);
     if (leadDotM) {
       const sv = this.structVars.get(leadDotM[1]);
       if (sv) {
@@ -8001,6 +8156,23 @@ ${prefixed}
         }
         const joined = this.arrayAsJoin(arg);
         if (joined !== null) return this.emitStringPtrLen(joined, locals);
+        // A value that can be null reads `null` (sw51): its value's text otherwise.
+        const nt = this.nullPrintTest(arg, locals);
+        if (nt) {
+          const [nOff, nLen] = this.allocString("null");
+          const t = watBaseType(
+            (/^\w+$/.test(arg)
+              ? this.nullableVarInnerType.get(arg)
+              : this.fieldOfExpr(arg, locals)?.type) ?? "i32",
+          );
+          const val = t === "f64" ? `(call $__f64_to_new_str ${this.emitExpr(arg, locals, "f64")})`
+            : this.inferExprType(arg, locals) === "bool"
+            ? `(call $__bool_to_new_str ${this.emitExpr(arg, locals, "i32")})`
+            : `(call $__i32_to_new_str ${this.emitExpr(arg, locals, "i32")})`;
+          this.needsNumericHelpers = true;
+          this.strOfHelpers.add(val.includes("bool") ? "bool" : t === "f64" ? "f64" : "i32");
+          return `(if (result i32 i32) ${nt} (then (i32.const ${nOff}) (i32.const ${nLen})) (else ${val}))`;
+        }
         const rawT = this.inferExprType(arg, locals);
         if (rawT === "string" || this.isStringExpr(arg, locals)) {
           return this.emitStringPtrLen(arg, locals);
@@ -10612,13 +10784,37 @@ ${prefixed}
       if (qqIdx !== -1) {
         const lhsQQ = expr.slice(0, qqIdx).trim();
         const rhsQQ = expr.slice(qqIdx + 2).trim();
-        const qqInner = this.nullableVarInnerType.get(lhsQQ);
-        if (qqInner && watBaseType(qqInner) !== undefined) {
+        // A nullable local / global (`__null`) or a flagged field (sw51): the flag decides, at the
+        // value's own type. A field used to ignore the right side entirely.
+        // A call to a `T | null` function: its null is the side-channel flag, set BY the call, so
+        // the value is held in the `$__lor_<t>` scratch first (read only on the branch that does
+        // not evaluate the right side). It was taken as never null: `f() ?? d` ignored d (sw51).
+        {
+          const callM = lhsQQ.match(/^(\w+)\s*\(/);
+          const inner = callM && parenDepthNeverNegative(lhsQQ.slice(callM[0].length - 1)) &&
+              lhsQQ.endsWith(")")
+            ? this.nullableFuncReturnType.get(callM[1])
+            : undefined;
+          const it = inner ? watBaseType(inner) : undefined;
+          if (it === "i32" || it === "i64" || it === "f64") {
+            this.logicalScratch.add(it);
+            const g = `$__lor_${it}`;
+            const w = `(block (result ${it}) (global.set ${g} ${this.emitExpr(lhsQQ, locals, it)}) ` +
+              `(if (result ${it}) (global.get $__nullable_ret_flag) (then (global.get ${g})) ` +
+              `(else ${this.emitExpr(rhsQQ, locals, it)})))`;
+            return this.convertWat(w, it, defaultType);
+          }
+        }
+        const qqInner = this.nullableVarInnerType.get(lhsQQ) ??
+          this.fieldOfExpr(lhsQQ, locals)?.type;
+        const qqFlag = qqInner ? this.nullTestWat(lhsQQ, locals) : undefined;
+        if (qqInner && qqFlag) {
           const bt = watBaseType(qqInner);
           const rhsWat = this.emitExpr(rhsQQ, locals, qqInner);
           const lhsWat = this.emitExpr(lhsQQ, locals, qqInner);
-          // $lhsQQ__null is 1 when lhs is null → (then rhs) fires when null
-          return `(if (result ${bt}) (local.get $${lhsQQ}__null) (then ${rhsWat}) (else ${lhsWat}))`;
+          // the flag is 1 when lhs is null → (then rhs) fires when null
+          const qqWat = `(if (result ${bt}) ${qqFlag} (then ${rhsWat}) (else ${lhsWat}))`;
+          return bt === "f32" ? qqWat : this.convertWat(qqWat, bt, defaultType);
         }
         // Pointer/string type: check for null pointer (0).
         // Only applies when lhsQQ is a simple identifier — complex expressions (array
@@ -10640,7 +10836,7 @@ ${prefixed}
           this.closureTypedVars.has(lhsQQ) || this.anyVars.has(lhsQQ);
         if (
           lhsT === "f64" || lhsT === "f32" || lhsT === "i64" || lhsT === "bool" ||
-          (lhsT === "i32" && !isPtrI32 && !this.zeroNullLocals.has(lhsQQ))
+          (lhsT === "i32" && !isPtrI32)
         ) {
           return lhsWatP;
         }
@@ -10825,10 +11021,9 @@ ${prefixed}
           (rhs === "null" || rhs === "undefined" || lhs === "null" || lhs === "undefined")
         ) {
           const varName = (rhs === "null" || rhs === "undefined") ? lhs : rhs;
-          const nlInner = this.nullableVarInnerType.get(varName);
-          if (nlInner) {
-            // Value type with __null flag: 1=is-null
-            const nullFlag = `(local.get $${varName}__null)`;
+          // A value with a flag (a nullable local / global, or a flagged field, sw51): 1 = null.
+          const nullFlag = this.nullTestWat(varName, locals);
+          if (nullFlag && varName !== "null" && varName !== "undefined") {
             return (op === "===" || op === "==") ? nullFlag : `(i32.eqz ${nullFlag})`;
           }
           // String type: check ptr == 0
@@ -11237,6 +11432,105 @@ ${prefixed}
     return "i32";
   }
 
+  /** sw51: the StructField a field-access expression reads (`x.f`, `this.f`, `arr[i].f`, `t[N]`,
+   *  `a.b.f`), or undefined when `expr` is not one. */
+  private fieldOfExpr(expr: string, locals: Map<string, WatType>): StructField | undefined {
+    const e = expr.trim();
+    const defOfVar = (v: string): StructDef | undefined => {
+      if (v === "this") {
+        const cn = this.currentMethodClass;
+        return cn ? this.classDefs.get(cn)?.struct : undefined;
+      }
+      const sv = this.structVars.get(v);
+      if (sv) return sv.def;
+      const cv = this.classVars.get(v);
+      if (cv) return this.classDefs.get(cv.className)?.struct;
+      return undefined;
+    };
+    const tup = e.match(/^(\w+)\[(\d+)\]$/);
+    if (tup) {
+      const d = defOfVar(tup[1]);
+      return d && d.fields.every((f) => /^_\d+$/.test(f.name)) ? d.fields[+tup[2]] : undefined;
+    }
+    const m = e.match(/^(this|\w+)(\[[^\]]+\])?((?:\.\w+)+)$/);
+    if (!m) return undefined;
+    let def: StructDef | undefined;
+    if (m[2]) {
+      const ai = this.arrayVars.get(m[1]);
+      def = ai?.structTypeName ? this.structDefs.get(ai.structTypeName) : undefined;
+    } else def = defOfVar(m[1]);
+    const path = m[3].slice(1).split(".");
+    let field: StructField | undefined;
+    for (let i = 0; i < path.length && def; i++) {
+      field = def.fields.find((f) => f.name === path[i]);
+      if (!field) return undefined;
+      if (i < path.length - 1) {
+        def = field.structType ? this.structDefs.get(field.structType) : undefined;
+        if (!def) return undefined;
+      }
+    }
+    void locals;
+    return field;
+  }
+
+  /** sw51: the load of a nullable field's FLAG word (i32, 1 = null), made from the field's own
+   *  value load by moving its offset by (flag − value): class tag shifts and embedded-tuple
+   *  offsets are already in the emitted offset. undefined when `expr` is not a flagged field or
+   *  its value is not a single load. */
+  private nullFlagLoad(expr: string, locals: Map<string, WatType>): string | undefined {
+    const f = this.fieldOfExpr(expr, locals);
+    if (f?.nullFlagOffset === undefined) return undefined;
+    const w = this.quietEmit(() => this.emitExpr(expr, locals, f.type)).trim();
+    const lm = w.match(/^\((?:i32|i64|f32|f64)\.load\S*(?:\s+offset=(\d+))?\s+([\s\S]+)\)$/);
+    if (!lm || !parenDepthNeverNegative(lm[2])) return undefined;
+    const off = Number(lm[1] ?? 0) + (f.nullFlagOffset - f.offset);
+    return `(i32.load offset=${off} ${lm[2].trim()})`;
+  }
+
+  /** sw51: an i32 that is 1 when `expr` is null, for every null that HAS a flag: a nullable local
+   *  or module global (`__null`), a flagged field, the literals. undefined when `expr` carries no
+   *  null of its own (a plain value, or a pointer whose null is 0). */
+  private nullTestWat(expr: string, locals: Map<string, WatType>): string | undefined {
+    const e = expr.trim();
+    if (e === "null" || e === "undefined") return `(i32.const 1)`;
+    if (/^\w+$/.test(e) && this.nullableVarInnerType.has(e)) {
+      return locals.has(e) || !this.moduleNullableGlobals.has(e)
+        ? `(local.get $${e}__null)`
+        : `(global.get $${e}__null)`;
+    }
+    return this.nullFlagLoad(e, locals);
+  }
+
+  /** sw51: the null test of a name or field access whose text form must read `null`: a nullable
+   *  local or a flagged field of a number / boolean type. undefined for anything else. */
+  private nullPrintTest(expr: string, locals: Map<string, WatType>): string | undefined {
+    const e = expr.trim();
+    if (!/^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)*$/.test(e) || e === "null" || e === "undefined") {
+      return undefined;
+    }
+    const t = /^\w+$/.test(e) ? this.nullableVarInnerType.get(e) : this.fieldOfExpr(e, locals)?.type;
+    if (t !== "i32" && t !== "f64" && t !== "bool") return undefined;
+    return this.nullTestWat(e, locals);
+  }
+
+  /** sw51: console_log's null printer (setNullPrintResolver): a nullable local or flagged field
+   *  of a number / boolean type prints `null` when null, else its value, through a string
+   *  conditional. (A `-0` value prints `0` there, as `${x}` does.) */
+  private nullPrintRewrite(tok: string, locals: Map<string, WatType>): string | undefined {
+    const e = tok.trim();
+    if (!this.nullPrintTest(e, locals)) return undefined;
+    // The string conditional captures through $__str_op_ptr/len (declared after emission).
+    locals.set("__str_op_ptr", "i32");
+    locals.set("__str_op_len", "i32");
+    return `(${e} === null) ? "null" : \`\${${e}}\``;
+  }
+
+  /** sw51: the flag to store with a value `rhs`: 1 for null, the source's own flag when it has one,
+   *  else 0. */
+  private nullFlagOf(rhs: string, locals: Map<string, WatType>): string {
+    return this.nullTestWat(rhs, locals) ?? `(i32.const 0)`;
+  }
+
   /** The local holding boxed `n`'s cell (sw53). */
   private boxSlot(n: string): string {
     return this.currentBoxShadow.has(n) ? `${n}__box` : n;
@@ -11523,6 +11817,28 @@ ${prefixed}
     locals: Map<string, WatType>,
     funcResult: WatType | null,
   ): string {
+    // sw51: a store into a nullable scalar field also writes its flag word: 1 for null (whose
+    // value is stored as 0), the source's own flag for a nullable source, else 0. Compound forms
+    // (`p.a += 1`) come back here desugared to `p.a = p.a + 1`.
+    if (!this.inNullFieldStore) {
+      const am = line.replace(/;\s*$/, "").match(
+        /^((?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+|\w+\[\d+\])\s*=(?!=)\s*([\s\S]+)$/,
+      );
+      const flagLoad = am ? this.nullFlagLoad(am[1], locals) : undefined;
+      if (am && flagLoad) {
+        const rhs = am[2].trim();
+        const isNull = rhs === "null" || rhs === "undefined";
+        const flagWat = this.nullFlagOf(rhs, locals);
+        this.inNullFieldStore = true;
+        let valStmt: string;
+        try {
+          valStmt = this.emitStatement(`${am[1]} = ${isNull ? "0" : rhs};`, locals, funcResult);
+        } finally {
+          this.inNullFieldStore = false;
+        }
+        return `${valStmt}\n      ${flagLoad.replace(/^\(i32\.load/, "(i32.store").slice(0, -1)} ${flagWat})`;
+      }
+    }
     // GC Part 2: `__free(ptr, size);` intrinsic — return a block to the free list (used by the GC + tests).
     {
       const fm = line.replace(/;\s*$/, "").match(/^__free\s*\((.+)\)$/);
@@ -11715,7 +12031,10 @@ ${prefixed}
           }
         }
         const retWat = this.emitExpr(expr, locals, funcResult);
-        return `(global.set $__nullable_ret_flag (i32.const 1))\n      (return ${retWat})`;
+        // A nullable SOURCE (a nullable local / global, a flagged field) passes its own null on:
+        // the result flag is 1 for a value, so it is NOT the source's null (sw51).
+        const srcNull = this.nullTestWat(expr, locals);
+        return `(global.set $__nullable_ret_flag ${srcNull ? `(i32.eqz ${srcNull})` : "(i32.const 1)"})\n      (return ${retWat})`;
       }
       // return { key: val, ... } — interface/struct object literal: malloc struct and store fields
       if (expr.startsWith("{") && this.currentFuncResultTsName) {
@@ -11751,6 +12070,7 @@ ${prefixed}
             const stmts: string[] = [];
             stmts.push(
               `(local.set $__obj_ret (call $__malloc (i32.const ${structDef.totalSize})))`,
+              ...this.nullFlagDefaults(structDef, "__obj_ret"),
             );
             for (const pair of pairs) {
               const ci = pair.indexOf(":");
@@ -11793,6 +12113,7 @@ ${prefixed}
                     }
                     stmts.push(
                       `(local.set $__nested_ptr (call $__malloc (i32.const ${nestedDef.totalSize})))`,
+                      ...this.nullFlagDefaults(nestedDef, "__nested_ptr"),
                     );
                     for (const np of nestedPairs) {
                       const nci = np.indexOf(":");
@@ -11814,10 +12135,19 @@ ${prefixed}
                         );
                       } else {
                         const nstoreOp = memStoreOp(nfield.type);
-                        const nvalWat = this.emitExpr(nvalExpr, locals, nfield.type);
+                        const { valWat: nvalWat, flagWat: nflag } = this.fieldInit(
+                          nfield,
+                          nvalExpr,
+                          locals,
+                        );
                         stmts.push(
                           `(${nstoreOp} offset=${nfield.offset} (local.get $__nested_ptr) ${nvalWat})`,
                         );
+                        if (nflag) {
+                          stmts.push(
+                            `(i32.store offset=${nfield.nullFlagOffset!} (local.get $__nested_ptr) ${nflag})`,
+                          );
+                        }
                       }
                     }
                     stmts.push(
@@ -11833,8 +12163,13 @@ ${prefixed}
                 stmts.push(`(i32.store offset=${field.offset + 4} (local.get $__obj_ret) ${lenW})`);
               } else {
                 const storeOp = memStoreOp(field.type);
-                const valWat = this.emitExpr(valExpr, locals, field.type);
+                const { valWat, flagWat } = this.fieldInit(field, valExpr, locals);
                 stmts.push(`(${storeOp} offset=${field.offset} (local.get $__obj_ret) ${valWat})`);
+                if (flagWat) {
+                  stmts.push(
+                    `(i32.store offset=${field.nullFlagOffset!} (local.get $__obj_ret) ${flagWat})`,
+                  );
+                }
               }
             }
             stmts.push(`(return (local.get $__obj_ret))`);
@@ -11847,17 +12182,11 @@ ${prefixed}
         const tupleDef = this.structDefs.get(this.currentFuncResultTsName);
         if (tupleDef) {
           const innerStr = expr.slice(1, expr.lastIndexOf("]")).trim();
-          const tupleElems = innerStr ? this.splitArgs(innerStr) : [];
+          // emitTupleLiteralStores: nested elements and null flags (sw51) included.
           const stmtsR: string[] = [
             `(local.set $__obj_ret (call $__malloc (i32.const ${tupleDef.totalSize})))`,
+            ...this.emitTupleLiteralStores(innerStr, "__obj_ret", tupleDef, 0, locals),
           ];
-          for (let i = 0; i < tupleElems.length; i++) {
-            const field = tupleDef.fields[i];
-            if (!field) continue;
-            const storeOp = memStoreOp(field.type);
-            const valWat = this.emitExpr(tupleElems[i].trim(), locals, field.type);
-            stmtsR.push(`(${storeOp} offset=${field.offset} (local.get $__obj_ret) ${valWat})`);
-          }
           stmtsR.push(`(return (local.get $__obj_ret))`);
           return stmtsR.join("\n      ");
         }
@@ -12250,20 +12579,10 @@ ${prefixed}
         // Runtime allocation
         const eqBI3 = line.indexOf("= [");
         const vBody3 = eqBI3 !== -1 ? line.slice(eqBI3 + 3).replace(/\]\s*;?\s*$/, "") : "";
-        const elems4 = vBody3 ? this.splitArgs(vBody3) : [];
         const stmtsN: string[] = [
           `(local.set $${namedTupleLitStmt[1]} (call $__malloc (i32.const ${sv.def.totalSize})))`,
+          ...this.emitTupleLiteralStores(vBody3, namedTupleLitStmt[1], sv.def, 0, locals),
         ];
-        for (let i = 0; i < elems4.length; i++) {
-          const field = sv.def.fields[i];
-          if (!field) continue;
-          const storeOp = memStoreOp(field.type);
-          stmtsN.push(
-            `(${storeOp} offset=${field.offset} (local.get $${namedTupleLitStmt[1]}) ${
-              this.emitExpr(elems4[i].trim(), locals, field.type)
-            })`,
-          );
-        }
         return stmtsN.join("\n      ");
       }
     }
@@ -12370,11 +12689,7 @@ ${prefixed}
         if (runtimeInits) {
           for (const [fieldName, exprStr] of Object.entries(runtimeInits)) {
             const field = sv.def.fields.find((f) => f.name === fieldName);
-            if (field) {
-              const storeOp = memStoreOp(field.type);
-              const valWat = this.emitExpr(exprStr, locals, field.type);
-              stmts.push(`(${storeOp} offset=${field.offset} (i32.const ${sv.ptr}) ${valWat})`);
-            }
+            if (field) stmts.push(...this.fieldStore(field, exprStr, `(i32.const ${sv.ptr})`, locals));
           }
         }
         return stmts.join("\n      ");
@@ -12384,19 +12699,15 @@ ${prefixed}
         const structSize = sv.def.totalSize;
         const stmts = [
           `(local.set $${structLetMatch[1]} (call $__malloc (i32.const ${structSize})))`,
+          ...this.nullFlagDefaults(sv.def, structLetMatch[1]),
         ];
+        const baseL = `(local.get $${structLetMatch[1]})`;
         const runtimeInits = this.structVarRuntimeInits.get(structLetMatch[1]);
         // Emit runtime field stores for dynamic values
         if (runtimeInits) {
           for (const [fieldName, exprStr] of Object.entries(runtimeInits)) {
             const field = sv.def.fields.find((f) => f.name === fieldName);
-            if (field) {
-              const storeOp = memStoreOp(field.type);
-              const valWat = this.emitExpr(exprStr, locals, field.type);
-              stmts.push(
-                `(${storeOp} offset=${field.offset} (local.get $${structLetMatch[1]}) ${valWat})`,
-              );
-            }
+            if (field) stmts.push(...this.fieldStore(field, exprStr, baseL, locals));
           }
         }
         // Also emit constant-initialized fields that were stored in initFields
@@ -12408,13 +12719,7 @@ ${prefixed}
           if (runtimeInits && runtimeInits[fieldKey2]) continue; // already handled
           const valStr2 = im2[2].trim();
           const field2 = sv.def.fields.find((f) => f.name === fieldKey2);
-          if (field2) {
-            const storeOp2 = memStoreOp(field2.type);
-            const valWat2 = this.emitExpr(valStr2, locals, field2.type);
-            stmts.push(
-              `(${storeOp2} offset=${field2.offset} (local.get $${structLetMatch[1]}) ${valWat2})`,
-            );
-          }
+          if (field2) stmts.push(...this.fieldStore(field2, valStr2, baseL, locals));
         }
         return stmts.join("\n      ");
       }
@@ -12552,7 +12857,10 @@ ${prefixed}
           // Read the side-channel flag written by the callee
           return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
         }
-        return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null (i32.const 0))`;
+        // A nullable source (local, global, flagged field) passes its null on (sw51).
+        return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null ${
+          this.nullFlagOf(nlInitExpr, locals)
+        })`;
       }
     }
 
@@ -13304,7 +13612,9 @@ ${prefixed}
         if (nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) {
           return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
         }
-        return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null (i32.const 0))`;
+        return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null ${
+          this.nullFlagOf(rhs, locals)
+        })`;
       }
       const varType = locals.get(varName)!;
       // Phase 5h: boxed capture — store through heap pointer
@@ -13994,6 +14304,7 @@ ${prefixed}
       // build the if/else. The result type is the LHS's — nullableVarInnerType first (a tracked
       // `T | null` local), else ordinary inference.
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
+      setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -14030,6 +14341,7 @@ ${prefixed}
       setExprFallbackResolver(undefined);
       setNullishResolver(undefined);
       setLogicalResolver(undefined);
+      setNullPrintResolver(undefined);
       setEnumStrVarResolver(undefined);
       const { statements, needsHelpers, needsStrGather, needsArrPrintHelper, needsJoinHelper } =
         emitConsoleLog(segments, allocator, "    ", 1, this.iovBase, this.scratchBase);
@@ -14459,6 +14771,7 @@ ${prefixed}
       // build the if/else. The result type is the LHS's — nullableVarInnerType first (a tracked
       // `T | null` local), else ordinary inference.
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
+      setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -14495,6 +14808,7 @@ ${prefixed}
       setExprFallbackResolver(undefined);
       setNullishResolver(undefined);
       setLogicalResolver(undefined);
+      setNullPrintResolver(undefined);
       setEnumStrVarResolver(undefined);
       const {
         statements,
@@ -18529,7 +18843,6 @@ ${sum}
     this.catchVarShadows = new Set();
     this.forOfDepth = 0;
     this.nullableVarInnerType = new Map();
-    this.zeroNullLocals = new Set();
     // Re-seed module-level `T | null` globals — the reset above is per-function, but their
     // companion `$g__null` is a WASM global visible from every body.
     for (const [gn, gi] of this.moduleNullableGlobals) this.nullableVarInnerType.set(gn, gi.inner);
@@ -20708,7 +21021,6 @@ ${sum}
       this.classVars = new Map();
       this.forOfDepth = 0;
       this.nullableVarInnerType = new Map();
-      this.zeroNullLocals = new Set();
       // Re-seed module-level `T | null` globals (see the matching reset in emitFunction).
       for (const [gn, gi] of this.moduleNullableGlobals) {
         this.nullableVarInnerType.set(gn, gi.inner);

@@ -339,6 +339,19 @@ let _logicalResolver:
     locals: Map<string, string>,
   ) => { wat: string; type: string } | { rewrite: string } | undefined)
   | undefined = undefined;
+/** A value that can be null without being a pointer (a nullable local, a flagged struct / tuple
+ *  field): wasic answers a rewrite that prints `null` for it, else undefined. A nullable local
+ *  printed `null` only as the single argument (sw51, 2026-10-09). `_inNullPrint` keeps the
+ *  rewrite's own `${x}` from being rewritten again. */
+let _nullPrintResolver:
+  | ((token: string, locals: Map<string, string>) => string | undefined)
+  | undefined = undefined;
+let _inNullPrint = false;
+/** Inject the null-printing resolver (sw51). Pass `undefined` to clear it. */
+export function setNullPrintResolver(fn: typeof _nullPrintResolver): void {
+  _nullPrintResolver = fn;
+}
+
 /** Inject the `&&` / `||` resolver (sw49). Pass `undefined` to clear it. */
 export function setLogicalResolver(fn: typeof _logicalResolver): void {
   _logicalResolver = fn;
@@ -669,6 +682,32 @@ function parseSingleArg(
   closureVarLookup?: ClosureVarLookup,
 ): LogSegment[] {
   token = token.trim();
+
+  // ── A value that can be null (sw51): `null`, else its value. First, before the handlers that
+  // take a plain name or a field access as a number.
+  if (_nullPrintResolver && !_inNullPrint) {
+    const rw = _nullPrintResolver(token, locals);
+    if (rw !== undefined) {
+      _inNullPrint = true;
+      try {
+        return parseSingleArg(
+          rw,
+          locals,
+          funcLookup,
+          allocString,
+          enumLookup,
+          arrayLookup,
+          structLookup,
+          dotCallLookup,
+          globals,
+          enumStringLookup,
+          closureVarLookup,
+        );
+      } finally {
+        _inNullPrint = false;
+      }
+    }
+  }
 
   // ── Template literal: `text ${expr} text ...`
   if (token.startsWith("`") && token.endsWith("`")) {
@@ -2841,6 +2880,17 @@ function exprToWat(
     if (positiveIdx && idx === 0) continue;
     const lhs = expr.slice(0, idx).trim();
     const rhs = expr.slice(idx + op.length).trim();
+    // `x === null` (`!==`, `==`, `!=`, or `undefined`): wasic owns what null IS for x (a nullable
+    // local's `__null` flag, a field's flag word, a null pointer). Compared here as a value, a
+    // nullable local holding 0 printed `true` for `v === null` (2026-10-09, with sw51).
+    if (
+      (op === "===" || op === "!==" || op === "==" || op === "!=") &&
+      [lhs, rhs].some((s) => s === "null" || s === "undefined") && _exprFallbackResolver
+    ) {
+      const r = _exprFallbackResolver(expr, locals);
+      const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
+      if (widened !== null) return widened;
+    }
     // Logical && / || — emit SHORT-CIRCUIT (if/result) form, matching emitExpr in wasic.ts, so
     // a guarded RHS side effect (e.g. `i < len && s.charCodeAt(i) === c`) does not run when the
     // LHS already decides the result. Avoids OOB access and the wasmmerge call-in-i32.and trap.

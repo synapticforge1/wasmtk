@@ -112,6 +112,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-09, late, nullable fields carry a flag word (sw51, owner's option A; sw54–sw56,
+> ld26), full gate green.** wasi **449/449** (+`24_NullableFields`, which fails on main) ·
+> golden-WAT **506 / 0** after a deliberate re-record: 3 entries changed (the nullable tuple's
+> flag word in `24_NullableTupleReturnAndFlags`; the two `25_` tests print their nullable locals
+> through the null printer, same output, larger WAT), +1 new · engine 1152 on baseline · wast
+> 64,506 / 0 / 16 · Go 7/7/12 · every other suite as before. Round-1 repros: 2 DIFFER = open
+> silent 2 (sw36, sw37, waiting on the owner); 16 + 3 = open loud 19.
+>
 > **2026-10-09, night, boxed f64 captures (sw53), full gate green.** wasi **448/448**
 > (+`5h_CapturedFloatMutation`, which fails on main) · golden-WAT **505 / 0**: 2 entries changed
 > (the box helper's comment only), +1 new · engine 1152 on baseline · wast 64,506 / 0 / 16 · Go

@@ -156,6 +156,12 @@
     `add: (x) => { s += x; return s; }` gave `1.75 1.75` for `1.75 3`; the same for an f64
     parameter, and two closures sharing one f64 would not build (sw53). Test
     `5h_CapturedFloatMutation`.
+26. **Nullable fields carry a null flag (2026-10-09, owner's option A).** A `number | null` /
+    `boolean | null` tuple element or interface / class field stored null as 0, so a real `0` read
+    as null and a null read as `0`; it now has a flag word, like a nullable local. With it: a
+    nullable local prints `null` in every position (it did only as console.log's single
+    argument), `console.log(v === null)` reads the flag, and `f() ?? d` on a `T | null` function
+    takes `d` (sw51, sw54–sw56, ld26). Test `24_NullableFields`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
