@@ -35,11 +35,13 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
   (the `Math` additions) and Phase 4 (the user page) wait on the owner's decisions D1–D6.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **5 open silent-wrong, 20 open
-  loud** (2026-10-09: sw06–sw09, sw19, sw28 fixed, sw50, ld24, ld25 found and fixed; sw51 found).
-  - Open silent: sw48, sw49; sw36, sw37 wait on wasm-math D1; sw51 (a `T | null` tuple element
-    has no null flag) needs the owner's call on the tuple layout.
-  - NEXT: sw48 / sw49, then the loud rows, then Phase 0b audit round 2. The owner's order
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **4 open silent-wrong, 20 open
+  loud** (2026-10-09: sw06–sw09, sw19, sw28, sw48, sw49 fixed; sw50, ld24, ld25 found and fixed;
+  sw51, sw52 found).
+  - Open silent: sw52 (object-literal closure results typed i32); sw36, sw37 wait on wasm-math
+    D1; sw51 (a `T | null` tuple element has no null flag) needs the owner's call on the tuple
+    layout.
+  - NEXT: sw52, then the loud rows, then Phase 0b audit round 2. The owner's order
     (2026-10-09): these compiler bugs BEFORE the binaryang 1.10.0 items below.
 - ⏳ **wast: 7 `(module definition …)`s V8 refuses for its own size caps** (`memory64` 1, `table`
   1, `table64` 1, `memory_max_i64` 4). A definition asserts only validity, so binaryang's
@@ -70,7 +72,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   - `console.log(-0)` prints `-0` (sw41);
   - `Math.round` / `sign` / `hypot` match JavaScript exactly (wasm-math Phase 1);
   - an array in a template, concat or `String(...)` is its join; a bigint there drops its `n`;
-    `Math.min` / `max` take every argument; `x ?? d` on a plain number is `x` (2026-10-09).
+    `Math.min` / `max` take every argument; `x ?? d` on a plain number is `x` (2026-10-09);
+  - `a && b` / `a || b` give an operand, not a boolean (`x || 7` is 7), and a closure keeps its
+    changes to a captured parameter (sw48, sw49).
 
   Whether any of these makes the release MAJOR is the owner's call.
 
