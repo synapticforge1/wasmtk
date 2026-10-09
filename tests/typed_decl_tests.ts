@@ -10,7 +10,8 @@
  *   refused: untyped number / string / `new` / call result; untyped array or object pattern;
  *            an arrow missing its return type or a parameter type; a counter that starts
  *            fractional, is updated with `/=`, or is assigned a fraction in the loop body
- *            (multi-line AND one-line `for`, which are parallel emitters in wasic)
+ *            (multi-line AND one-line `for`, which are parallel emitters in wasic); a plain `/`
+ *            between integers anywhere (2026-10-09: TypeScript gives a fraction, wasm truncates)
  *   accepted: reassignment without a type; for-of / counting-for bindings; a typed pattern;
  *            a fully typed arrow or function expression; `Promise<…>`, an object type literal,
  *            a tuple from a call, a union alias from a member, a `T | null` destructured
@@ -112,6 +113,14 @@ const REFUSED: [string, string, string][] = [
     "it starts as '0.5'",
   ],
   ["one-line loop, divided", `for (let i = 64; i > 1; i /= 2) console.log(i);`, "'i /= …'"],
+  // A plain `/` between integers (owner decision 2026-10-09; closes sw36 / sw37): TypeScript
+  // gives a fraction, wasm truncates, so the program must say which with wasMath. Both emitters.
+  ["i32 division, declared f64 (sw36)", `const m: i32 = 5;\nconst n: i32 = 3;\nconst r: f64 = m / n;\nconsole.log(r);`, "integer division 'm / n'"],
+  ["i32 division inside Math (sw37)", `const a: i32 = -7;\nconst b: i32 = 2;\nconst f: f64 = Math.floor(a / b);\nconsole.log(f);`, "integer division 'a / b'"],
+  ["i32 division in a function", `function q(a: i32, b: i32): i32 { return a / b; }\nconsole.log(q(7, 2));`, "integer division 'a / b'"],
+  ["i32 division, the | 0 idiom", `const a: i32 = 7;\nconst b: i32 = 2;\nconst q: i32 = (a / b) | 0;\nconsole.log(q);`, "integer division 'a / b'"],
+  ["i32 /= ", `let a: i32 = 7;\na /= 2;\nconsole.log(a);`, "integer division 'a /= 2'"],
+  ["i32 division in console.log", `const a: i32 = 7;\nconst b: i32 = 2;\nconsole.log(a / b);`, "integer division 'a / b'"],
   [
     "line number counts a block comment",
     `/**\n * four\n * lines\n */\nconst ok: i32 = 1;\nlet n = 5; // the fault\nconsole.log(ok + n);`,
@@ -173,6 +182,19 @@ if (v !== null) {
 }`,
     "7 0.5",
   ],
+  [
+    "division that agrees: f64, bigint, and wasMath's i32.div / f64.div",
+    `import { f64, i32 } from "${new URL("../src/wasmath.ts", import.meta.url).href}";
+type i64 = bigint;
+const x: f64 = 7;
+const y: f64 = 2;
+const p: i64 = 7n;
+const s: i64 = 2n;
+const a: i32 = 7;
+const b: i32 = -2;
+console.log(x / y, p / s, i32.div(a, b), f64.div(a, b));`,
+    "3.5 3n -3 -3.5",
+  ],
 ];
 
 const dir = await Deno.makeTempDir({ prefix: "wasmtk_typed_decl_" });
@@ -191,7 +213,8 @@ try {
   console.log("\n  accepted, and correct when run:");
   for (const [name, body, want] of ACCEPTED) {
     const file = `a_${name.replace(/\W+/g, "_")}.ts`;
-    await Deno.writeTextFile(join(dir, file), H + body + "\n");
+    // A program importing wasMath takes its types from it, not from the header.
+    await Deno.writeTextFile(join(dir, file), (body.startsWith("import") ? "" : H) + body + "\n");
     const c = await run(["wasic", file], dir);
     if (c.code !== 0) {
       ok(name, false, `    compile failed:\n${c.text}`);

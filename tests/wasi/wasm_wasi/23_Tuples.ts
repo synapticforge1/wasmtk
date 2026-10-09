@@ -77,7 +77,7 @@ console.log(sumPair(addends)); // 13
 // ── Mixed-type tuple return ──────────────────────────────────────────────────
 
 function divmod(a: i32, b: i32): [i32, i32] {
-  const q: i32 = (a / b) | 0;
+  const q: i32 = i32.div(a, b);
   const r: i32 = a % b;
   return [q, r];
 }

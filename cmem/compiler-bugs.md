@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 4 | 89 | 0 | 17 |
+| SILENT-WRONG | 2 | 91 | 0 | 17 |
 | LOUD | 22 | 31 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
@@ -16,7 +16,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 4** (2026-10-09, wasMath L3, the math library: sw57, sw58,
+**Open silent-wrong in the compiler: 2** (2026-10-09, the owner's division decision: a plain `/`
+between integers is a compile error pointing at wasMath; sw36 and sw37 closed: 4 → 2, sw62 and
+sw64 left, both console). Before that, **4** (2026-10-09, wasMath L3, the math library: sw57, sw58,
 sw59, sw61, sw63 fixed and sw60 closed by the owner's decision "CR, in both"; loud ld27, ld28,
 ld33 fixed: 10 → 4 silent (sw36, sw37 on wasm-math D1; sw62, sw64 console), 25 → 22 loud).
 Before that, **10** (2026-10-09, wasMath L2 and the corpus program found
@@ -126,8 +128,8 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~sw21~~ | ✅ FIXED 2026-09-30 (with sw05; LOUD since earlier that day): `console.log((a+1)*(a+2))`: `20` → `5`. The paren unwrap stripped the first `(` and the last `)` of any expression shaped `(…)`; it now unwraps only a matching outer pair. Repro now MATCH | console_log paren strip |
 | ~~sw22~~ | ✅ FIXED 2026-09-30 (LOUD since that morning): `console.log(a ** 2)`: `9` → `0`. `*` split inside `**`; it now skips a `*` next to a `*`, and `**` (not in the console table) reaches wasic's emitExpr through the fallback resolver. Test `7b_ConsoleOperatorSplit` | console_log findTopLevelOp |
 | ~~sw23~~ | ✅ FIXED 2026-09-30 (LOUD since that morning): `console.log(n * -2)`: `-6` → `-2`. The split took the unary minus as the binary operator; a `-` / `+` is now unary when nothing, an operator or an opening bracket precedes it, or it signs an exponent (`1e-3`). Found and fixed with it, all LOUD before (invalid modules), so not counted: the unary-minus handler ran before the binary split, making `-n + m` into `-(n + m)`; a binary op returned its result at the OPERAND type (`1 << n` where f64 was expected); an identifier was returned at its own type whatever was asked. The last two now widen losslessly, and NEVER a boolean (`"ok: " + (a > b)`, ld06, stays loud: widened, it printed `ok: 1`). One golden entry changed correctly: `-Math.PI / 2` is `(-π) / 2` now, bit-identical. Test `7b_ConsoleOperatorSplit` | console_log |
-| sw36 | OPEN, NARROWED BY THE OWNER'S RULING (found fixing sw23, 2026-09-30): `const r: f64 = m / n` (5, 3) prints `1`, not `1.666…`. Ruled (design-decisions.md § "Wasm types in TypeScript"): `i32 / i32` IS `i32.div_s` (so `console.log(m / n)` printing `1` is by design), BUT an explicitly declared float destination (`const` / `let` / `var x: f64`) makes it a float division. The bug is that the declared f64 is applied after `i32.div_s`. Scoped in wasm-math-plan.md, Phase 2 | wasic `/` typing |
-| sw37 | OPEN (found scoping sw36, 2026-09-30): `Math.floor(a / b)` with −7, 2 prints `-3` (Deno `-4`). Ruled: a `Math` argument is an f64 context, so float division, then floor. `ceil` and `round` alike; `trunc` agrees only by coincidence. wasm-math-plan.md, Phase 2 | wasic Math dispatch |
+| sw36 | FIXED 2026-10-09 BY THE OWNER'S DECISION: a plain `/` between integers is now a compile error naming wasMath's `i32.div` / `f64.div` (design-decisions.md § "Wasm types in TypeScript"); the repro reads COMPILE-FAIL by design; `typed_decl_tests` asserts the reason. Was OPEN, NARROWED BY THE OWNER'S RULING (found fixing sw23, 2026-09-30): `const r: f64 = m / n` (5, 3) prints `1`, not `1.666…`. Ruled (design-decisions.md § "Wasm types in TypeScript"): `i32 / i32` IS `i32.div_s` (so `console.log(m / n)` printing `1` is by design), BUT an explicitly declared float destination (`const` / `let` / `var x: f64`) makes it a float division. The bug is that the declared f64 is applied after `i32.div_s`. Scoped in wasm-math-plan.md, Phase 2 | wasic `/` typing |
+| sw37 | FIXED 2026-10-09 with sw36 (the integer `/` inside `Math.floor(…)` is refused; `Math.floor(f64.div(a, b))` is the float division, `i32.div(a, b)` the truncated one). Was OPEN (found scoping sw36, 2026-09-30): `Math.floor(a / b)` with −7, 2 prints `-3` (Deno `-4`). Ruled: a `Math` argument is an f64 context, so float division, then floor. `ceil` and `round` alike; `trunc` agrees only by coincidence. wasm-math-plan.md, Phase 2 | wasic Math dispatch |
 | ~~sw38~~ | ✅ FIXED 2026-10-06 (wasm-math-plan.md Phase 1): `Math.sign(NaN)` was `1`, `Math.sign(-0)` was `+0`. Now `$__math_sign` (NaN → NaN, ±0 → itself, else ±1; the argument evaluated once). Test `38_MathExactSemantics` | wasic + console_log Math `sign` |
 | ~~sw39~~ | ✅ FIXED 2026-10-06 (Phase 1): `Math.hypot(1e200, 1e200)` was `Infinity`, `Math.hypot(3, 4, 12)` was `5`. Now `$__math_hypot<n>`, V8's algorithm (largest magnitude; Infinity before NaN; Kahan-compensated scaled sum), one helper per arity. Bit-identical to Deno on a 224-call battery (1–4 arguments, subnormals, ±Infinity, NaN, 1e±200). Test `38_MathExactSemantics` | wasic + console_log Math `hypot` |
 | ~~sw40~~ | ✅ FIXED 2026-10-06 (Phase 1): `Math.round(0.49999999999999994)` was `1`, `Math.round(-0.4)` was `+0`. Now `$__math_round`: `floor`, then +1 when `x - floor(x) >= 0.5` (exact for every double), then `copysign` with `x` (keeps −0, cannot flip a nonzero result). Identical to Deno on 84 awkward values. Test `38_MathExactSemantics` | wasic + console_log Math `round` |

@@ -329,13 +329,21 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
   `u32` or `f32`: `type i32 = number` is erased, and Deno runs it as an f64. wasic honours the
   declared type, so a Deno run is NOT the reference for those types, and a difference there is
   not a compiler bug by itself.
-  - **`/` follows its operand types:** `i32 / i32` is `i32.div_s` (truncating), in
-    `console.log(a / b)` and in `const x: i32 = a / b`.
-  - **An explicitly declared float destination makes it a float division:** `const r: f64 = m /
-    n` is 1.666…, and so are `let` and `var` (`var` not preferred). "The const case noted is very
-    explicit on the return value."
-  - **The `Math` functions are f64 by definition,** so their arguments are f64 contexts:
-    `Math.floor(a / b)` divides as floats, then floors (sw37, Phase 2: not yet implemented).
+  - **SUPERSEDED 2026-10-09 — `/` between integers is a COMPILE ERROR (owner decision).** "The
+    division decision was meant to be solved by our wasMath.ts standard math libraries[:] throw an
+    intentional error when being compiled to wasm. They remain unchanged if run in typescript."
+    Scope chosen by the owner: EVERY integer `/` (i32 operands, after the existing operand
+    typing), wherever it appears: `console.log(a / b)`, `const r: f64 = m / n` (was sw36),
+    `Math.floor(a / b)` (was sw37), a return, `a /= b`, and `(a / b) | 0` too (it differs from
+    wasm at `b = 0`: 0 in TypeScript, a trap in wasm). The diagnostic
+    (`intDivisionDiagnostic`, `src/wasmath_lower.ts`) names `i32.div(a, b)` (truncated, throws
+    where wasm traps) and `f64.div(a, b)` (the fraction). Raised in wasic's emitExpr (where the
+    `div_s` suffix is chosen) and its `/=` path, and in console_log's exprToWat. NOT refused:
+    f64 / f32 division, and bigint division (truncates in both; division by zero stops both).
+    This replaces the D1 question of wasm-math-plan.md Phase 2 (which destinations count as
+    explicit): no destination makes integer division mean anything; the program says it.
+    Was (2026-09-30): `i32 / i32` is `i32.div_s`; an explicitly declared float destination makes
+    it a float division; a `Math` argument is an f64 context.
   - **A `Math` result in an integer or f32 context is converted like any f64 there** (2026-10-06):
     `trunc_f64_s` into i32 / i64 (it traps out of range or on NaN), `demote` into f32. One
     convention for every site; changing it is decision D3 in wasm-math-plan.md.
@@ -353,8 +361,9 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     (`setMathHelperNeededCallback`; a console path that writes `call $__x` must REQUEST `$__x`).
   - Functions that TypeScript's `Math` lacks, for the wasm operations with no JS spelling, are
     being scoped. The plan, open questions and bugs: [wasm-math-plan.md](wasm-math-plan.md).
-  - Test corpus consequence: a test that prints an `i32 / i32` must write `(a / b) | 0` or carry
-    `// @allow-output-diff`. That is a genuine by-design divergence, the case that marker exists for.
+  - Test corpus consequence (2026-10-09): an integer quotient is written `i32.div(a, b)`, a
+    fraction `f64.div(a, b)` or f64 operands. The 10 corpus programs that divided i32s were
+    rewritten that way, printing what wasm printed before (golden: only those entries changed).
 
 - **Every variable declaration states its type (owner ruling, 2026-09-28). BREAKING.** "We should
   require the types in all variable declarations. When for loops syntax is involved the integer
