@@ -5,8 +5,7 @@
 // `Ns.member` → `Ns_member`, making a namespace member an ORDINARY top-level symbol that every
 // existing path handles. See design-decisions.md § "Namespace member references are rewritten".
 
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Box {
   NAME: string; // deliberately shares a name with the namespace member

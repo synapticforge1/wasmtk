@@ -2,8 +2,7 @@
 // boolean are all catchable, and the catch variable prints what native TS prints. Before the fix,
 // `throw new TypeError(..)` and `throw 42` compiled to proc_exit(0): no catch ran, nothing printed,
 // exit 0. `String(<bool>)` printed `1` instead of `true` (sw33, found fixing sw01).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function risky(k: i32): i32 {
   const code: i32 = 7;

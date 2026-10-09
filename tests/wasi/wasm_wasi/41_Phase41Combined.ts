@@ -1,7 +1,6 @@
 // Phase 41: combined — multiple exports + Phase 40 imports → complete WIT world.
 // deno-lint-ignore-file
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 type bool = boolean;
 
 declare interface Allocator {

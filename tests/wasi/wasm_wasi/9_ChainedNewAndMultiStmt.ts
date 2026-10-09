@@ -4,7 +4,7 @@
 //   #4 module-level multi-statement single physical line (`const a = 1; const b = 2;`) is split into
 //      separate _start statements (and i32 module-global arithmetic in console.log uses i32.add).
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 class Box {
   v: i32;

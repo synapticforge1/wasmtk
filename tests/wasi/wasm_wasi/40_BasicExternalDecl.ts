@@ -1,7 +1,7 @@
 // Phase 40: declare const with inline object type maps to WASM imports from "env".
 // External methods are used only in exported functions — top-level code avoids external calls.
 // deno-lint-ignore-file
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 declare const storage: {
   write(key: i32, value: i32): void;

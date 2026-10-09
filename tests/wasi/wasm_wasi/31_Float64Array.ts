@@ -1,5 +1,5 @@
 // Phase 31 — Float64Array basic tests
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 // ── Creation with literal length ────────────────────────────────────────────
 const a: Float64Array = new Float64Array(3);

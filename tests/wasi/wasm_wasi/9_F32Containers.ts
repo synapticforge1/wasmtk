@@ -6,9 +6,7 @@
 //   Also: an f32 in an f64 context (`const a: f64 = z + 1`) was never promoted.
 // Only values exact in f32 are used: `const z: f32 = 0.1` prints 0.10000000149011612 in wasm and
 // 0.1 in Deno BY DESIGN (the declared type decides; design-decisions.md).
-type i32 = number;
-type f32 = number;
-type f64 = number;
+import { i32, f32, f64 } from "../../../src/wasmath.ts";
 
 interface P {
   x: f32;

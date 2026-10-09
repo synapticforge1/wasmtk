@@ -1,6 +1,5 @@
 // Phase 34 — Combined: type predicates with DU types and interface inheritance
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // ── Discriminated union with type predicates ────────────────────────────────
 type Expr =

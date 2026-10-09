@@ -1,7 +1,6 @@
 // Phase 51.2 — Object spread { ...base, k: v }
 // Result is a new struct: fields copied from the base, then overrides applied.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Point {
   x: i32;

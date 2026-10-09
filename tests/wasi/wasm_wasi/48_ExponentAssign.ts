@@ -1,6 +1,5 @@
 // Phase 48: **= exponent compound assignment
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 let globalX: f64 = 3.0;
 

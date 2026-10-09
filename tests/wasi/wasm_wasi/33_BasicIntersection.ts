@@ -1,6 +1,5 @@
 // Phase 33 — Intersection types: basic two-interface merge
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Nameable { x: i32; y: i32; }
 interface Sizeable { width: f64; height: f64; }

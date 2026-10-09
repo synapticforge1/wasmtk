@@ -1,7 +1,7 @@
 // Phase 39 — jstyper number→f64 mapping output
 // Represents typed .ts produced by: wasmtk jstyper numbertypes.js
 // (numbertypes.d.ts uses `number` type which jstyper maps to f64)
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 export function area(w: f64, h: f64): f64 {
   return w * h;

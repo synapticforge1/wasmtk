@@ -5,8 +5,7 @@
 //   sw15: i32 + f64 was typed from the left (1 + 2.5 = 3)
 //   sw16: if (0.5) was false (the f64 condition was truncated)
 //   sw17: a >> 2 << 1 was a >> (2 << 1); every same-precedence group now splits rightmost
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const x: i32 = 3;
 const r10: i32 = -x + 5;

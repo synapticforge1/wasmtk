@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testLexicalCapture(multiplier: i32): i32 {
   // Capture 'multiplier' from the local scope

@@ -1,6 +1,5 @@
 // Phase 34 — Type predicates: basic syntax and bool return with discriminated union types
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 type Shape =
   | { kind: "circle"; radius: f64 }

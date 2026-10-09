@@ -1,5 +1,5 @@
 // @expect-exit: 1  (dies on an uncaught throw by design; exit 1 at parity with wasmtime)
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function safeDivide(a: i32, b: i32): i32 {
   if (b === 0) {

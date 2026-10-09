@@ -5,8 +5,7 @@
 //   sw19: x ?? 5 on an i32 0 gave 5          sw28: Math.max(a, b, c) ignored c
 //   sw50: a bigint in a template, concat or String() kept its "n" (b=12n)
 //   plus: a module array named bare inside a function compiled to a nonexistent local
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const g: i32[] = [7, 8];
 

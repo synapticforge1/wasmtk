@@ -1,5 +1,5 @@
 // Phase 52.7 — `"field" in obj`: closed-world compile-time membership test (struct/class fields).
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface Point {
   x: i32;

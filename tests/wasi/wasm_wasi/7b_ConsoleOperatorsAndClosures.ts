@@ -5,8 +5,7 @@
 //   sw24: a string literal's escapes were decoded twice: "C:\\tmp" printed C:<TAB>mp
 //   sw32: a closure that mutates its captured i32 lost the change after every call: a counter
 //         returned 1, 1, 1 (the captured value was copied, not boxed, unless two arrows shared it)
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const x: i32 = -7;
 const y: f64 = 7.5;

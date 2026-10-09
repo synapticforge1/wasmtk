@@ -2,7 +2,7 @@ export function isHello(a: string): boolean {
   return a == "hello";
 }
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function isFortyTwo(a: i32): boolean {
   return a === 42;
 }

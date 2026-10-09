@@ -7,8 +7,7 @@
 // Found with it and fixed: `console.log(v === null)` for a nullable local holding 0 printed
 // `true`; a nullable local printed `0` (not `null`) unless it was console.log's only argument,
 // and inside a template or concat; `f() ?? d` on a `T | null` function ignored d.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 type NT = [i32 | null, f64];
 interface Rec { a: i32 | null; b: i32; c: f64 | null }
 

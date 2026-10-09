@@ -1,6 +1,5 @@
 // Phase 32 — Discriminated union types: mixed i32/f64 fields
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 type Value =
   | { tag: "int"; n: i32 }

@@ -1,6 +1,6 @@
 // Phase 33 — Intersection types: an intersection value passed to a function whose
 // parameter is one of its CONSTITUENT interfaces (base-pointer/prefix-layout compatibility).
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 interface Transform {
   scaleX: f64;

@@ -1,5 +1,5 @@
 // Test Exported Const Enum
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export const enum Status {
   Pending,   // 0
   Active,    // 1

@@ -2,8 +2,7 @@
 // the change. The heap cell was i32-only, so an f64 was never boxed and each call changed a copy:
 // `add(1.25)` twice gave 1.75 1.75, not 1.75 3. The cell is 8 bytes now; a boxed f64 parameter
 // keeps its value and its cell goes in a shadow local.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function acc() {
   let s: f64 = 0.5;

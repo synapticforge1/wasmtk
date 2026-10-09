@@ -1,8 +1,7 @@
 // Phase 39 — jstyper basic output: i32 arithmetic
 // Represents typed .ts produced by: wasmtk jstyper basicmath.js
 // (basicmath.d.ts declares add/square as i32, multiply as f64)
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 export function add(a: i32, b: i32): i32 {
   return a + b;

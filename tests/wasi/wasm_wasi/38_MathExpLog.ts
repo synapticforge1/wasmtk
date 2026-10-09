@@ -1,5 +1,5 @@
 // Phase 38 — Exp/Log: exp, log, log2, log10, cbrt, expm1, log1p
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 // --- exp ---
 console.log(Math.exp(0));                                   // 1

@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface AddOp { type: "add"; value: i32; }
 interface MulOp { type: "mul"; value: i32; }

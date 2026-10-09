@@ -1,8 +1,7 @@
 // @allow-output-diff: wasic zero-sentinel destructuring defaults: default applies when field==0; native TS only when undefined
 // Phase 48: object destructuring with defaults
 // Note: defaults apply when the field value is zero (wasic semantics — see CLAUDE.md)
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Vec2 {
   x: f64;

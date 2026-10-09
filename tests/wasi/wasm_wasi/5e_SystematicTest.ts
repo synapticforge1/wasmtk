@@ -1,5 +1,5 @@
 // Phase_5e_Upward.ts
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 function createMultiplier(x: i32) {
   // Returning the closure - x must persist on the heap
   return (y: i32) => x * y;

@@ -1,6 +1,5 @@
 // Phase 38 — Math.random(): verify values land in [0, 1)
-type f64 = number;
-type i32 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 let allInRange: i32 = 1;
 

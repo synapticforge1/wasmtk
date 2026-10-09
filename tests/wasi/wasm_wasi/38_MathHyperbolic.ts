@@ -1,5 +1,5 @@
 // Phase 38 — Hyperbolic: sinh, cosh, tanh, asinh, acosh, atanh
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 // --- sinh ---
 console.log(Math.sinh(0));                                  // 0

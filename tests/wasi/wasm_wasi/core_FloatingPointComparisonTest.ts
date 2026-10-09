@@ -1,4 +1,4 @@
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 export function testEqF64(a: f64, b: f64): boolean {
   return a == b;
 }

@@ -1,5 +1,5 @@
 // Phase 47: virtual dispatch — base-typed variable with concrete constructor
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 class Animal {
   age: i32;

@@ -1,6 +1,5 @@
 // Phase 52.6 — chained assignment `a = b = c = 0`: the rightmost value propagates leftward.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 let a: i32 = 0;
 let b: i32 = 0;

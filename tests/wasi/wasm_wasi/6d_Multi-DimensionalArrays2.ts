@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testMatrix(): i32 {
   const matrix: i32[][] = [[1, 2], [3, 4]];

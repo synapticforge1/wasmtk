@@ -1,8 +1,7 @@
 // Regression (2026-09-28): a NUMBER or BOOLEAN operand in a string VALUE built with `+` was
 // silently dropped — `"code " + 7` built "code " — and a boolean in a template printed 1/0 instead
 // of true/false. console.log(...) was never affected (its own path); the guards below pin that too.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function label(x: i32): string {
   return "code " + x;

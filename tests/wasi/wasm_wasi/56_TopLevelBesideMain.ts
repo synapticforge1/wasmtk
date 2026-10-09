@@ -4,7 +4,7 @@
 // top-level array declared beside main was never initialised. The top level now runs as written.
 // main prints nothing AFTER its await: async bodies run eagerly through an await (a documented v1
 // limit, async-design.md §2.A), so that output would interleave differently from V8.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const total: i32[] = [1, 2, 3];
 console.log("before main", total.length);

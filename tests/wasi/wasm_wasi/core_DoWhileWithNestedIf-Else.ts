@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testDoWhileLogic(limit: i32): i32 {
   let result: i32 = 0;
   let i: i32 = 0;

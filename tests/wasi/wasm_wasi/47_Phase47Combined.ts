@@ -1,6 +1,5 @@
 // Phase 47: combined test with two independent class hierarchies
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Hierarchy 1: Vehicle → Car → ElectricCar
 class Vehicle {

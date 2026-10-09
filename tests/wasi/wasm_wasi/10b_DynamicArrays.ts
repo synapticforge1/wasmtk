@@ -2,8 +2,7 @@
 // Tests heap-allocated arrays with a [length, capacity] header.
 
 // --- push ---
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 const nums: i32[] = [10, 20, 30];
 nums.push(40);
 nums.push(50);

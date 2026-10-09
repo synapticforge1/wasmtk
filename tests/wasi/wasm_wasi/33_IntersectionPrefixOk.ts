@@ -1,8 +1,7 @@
 // Phase 33 regression guards (2026-07-30) — the shapes the base-prefix check must NOT reject.
 // Companion to 33_IntersectionBasePrefixGuard (which pins the rejected shape). If a future
 // "simplification" widens the guard, these four calls start failing to compile.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Base {
   bx: i32;

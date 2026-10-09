@@ -4,7 +4,7 @@
 // declared namespace constants but never read one from inside a namespace function, so this went
 // untested. See design-decisions.md § "Namespace member references are rewritten inside the body".
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface Holder {
   LIMIT: i32; // deliberately shares a name with the namespace member below

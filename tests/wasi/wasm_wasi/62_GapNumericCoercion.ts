@@ -3,8 +3,7 @@
 // Gap 2  — an f64-returning call truncated by `| 0` in an i32 context.
 // Gap 5.0 — an i32 global / TypedArray element passed to an f64 param (needs f64.convert).
 // Gap 5.2 — a Float64Array element compared (must use f64.eq, not a truncated i32.eq).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function getF(x: i32): f64 { return 3.7 + (x as f64); }
 let s: i32 = 0;

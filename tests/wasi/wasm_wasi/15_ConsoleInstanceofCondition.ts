@@ -1,7 +1,7 @@
 // H12 sw34 (2026-09-29): `x instanceof Y` inside a console expression (a ternary condition) was
 // stubbed to 0, so `e instanceof Error ? "is error" : "not error"` printed `not error` for a caught
 // Error. The console path now asks wasic for every `instanceof`, the Error family included.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 class Shape {
   size: i32;

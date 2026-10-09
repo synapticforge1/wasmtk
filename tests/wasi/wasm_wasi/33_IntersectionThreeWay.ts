@@ -1,6 +1,5 @@
 // Phase 33 — Intersection types: three-way A & B & C merge
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface HasA { a: i32; }
 interface HasB { b: i32; }

@@ -1,7 +1,7 @@
 // deno-fmt-ignore-file
 // Report issue 2 (HIGH): `str += someString[index]` aborted (`$__str_op_ptr cannot be resolved`) — the
 // `+=` char-subscript RHS needed the $__str_op temp pair, which the pre-scan trigger missed.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 const chars: string = "ABCD";
 let result: string = "";
 result += chars[2];

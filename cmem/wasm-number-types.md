@@ -1,9 +1,20 @@
 # Wasm number types in TypeScript: `Math` stays JavaScript's, a typed library carries wasm's (SCOPE, 2026-10-09)
 
-**Status: L1 DONE 2026-10-09** — `src/wasmath.ts` (export `./wasMath`): 151 functions with a
-wasm counterpart, each exact to the real instruction on 69,318 calls (`tests/wasmath_tests.ts`,
-inversion-checked); the f64 / f32 `Math`-style functions are defined (bodies) but have no
-instruction to compare until L2 / L3. **Next: L2** (wasic lowers the calls). Earlier: Direction set by the owner 2026-10-09: a complete
+**Status: L1 and L2 DONE 2026-10-09.** L1: `src/wasmath.ts` (export `./wasMath`), 151 functions
+exact to the real instructions (`tests/wasmath_tests.ts`). **L2:** `src/wasmath_lower.ts` is the
+one lowering table; the bundler rewrites `ns.member` (a raw-WAT helper `__wm_<ns>_<member>`,
+`Math.<x>` for the f64 Math members, an f32 TypeScript helper), and `WasicTranspiler` registers the
+helpers a program uses as ordinary typed functions (`FuncDef.wasmathWat`). `u32` is carried as an
+exact f64 (`$__wm_toint32` takes the bits); `u64` maps to i64. `tests/wasmath_lower_tests.ts`
+(every function from real compiled programs vs Deno; ~15 min): **199 functions, 34,626 calls,
+176 exact, 0 failed**, 23 known (the `Math`-style members: the Math bugs, ld33's hang, ld28's
+traps); 220 u64 ≥ 2⁶³ inputs skipped (printing gap). The corpus runs it on every gate:
+`39_WasMathAllFunctions` (all 151, identical to Deno) and `39_WasMathStopsTheSame` (a trap and a
+throw stop at the same line). The corpus itself now takes its types from wasMath (285 files: 278
+wasi programs + 7 bindgen fixtures; golden-WAT 0 changed). **Next: L3** (the `Math` bugs:
+sw57–sw61, sw63, ld27, ld28, ld33). Known gaps: u64 ≥ 2⁶³ prints signed; an f64 OUT of the
+int32 range passed to an `i32.*` function traps (wasic's f64 → i32 rule) where the body wraps.
+Earlier: Direction set by the owner 2026-10-09: a complete
 library, one namespace per wasm value type (f64, f32, i32, i64; u32 / u64 as views); see
 § "The library". DECIDED the same day: T1 = a wasmtk module named `wasMath` (source
 `src/wasmath.ts`); T6 = traps are throws, "so TypeScript and wasm stop the same".** Measured 2026-10-09 (`scripts/math/scan_math.ts`,

@@ -1,5 +1,5 @@
 // Phase 31 — Int32Array basic tests
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 // ── Creation with literal length ────────────────────────────────────────────
 const a: Int32Array = new Int32Array(5);

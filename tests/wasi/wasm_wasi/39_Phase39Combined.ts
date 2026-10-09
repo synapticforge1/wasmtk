@@ -1,7 +1,6 @@
 // Phase 39 — combined: realistic jstyper-converted utility functions
 // Covers i32, f64, bool, recursive functions, loops — all converted from JS-style bodies
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 type bool = boolean;
 
 function factorial(n: i32): i32 {

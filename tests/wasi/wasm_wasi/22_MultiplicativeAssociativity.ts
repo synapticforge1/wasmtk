@@ -6,8 +6,7 @@
 // Fahrenheit→Celsius conversion `(f - 32) * 5 / 9` silently produced 0.
 // See design-decisions.md § "Same-precedence operator groups split at the RIGHTMOST operator".
 
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function toCelsius(f: i32): i32 {
   return (f - 32) * 5 / 9;

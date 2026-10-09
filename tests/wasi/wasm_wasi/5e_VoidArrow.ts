@@ -2,7 +2,7 @@
 // Tests that void-return arrows (no return value) compile and run correctly.
 // Note: in the current WASM value-passing model, void arrows cannot mutate
 // captured outer variables — captures are passed by value, not by reference.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testVoidArrow(): i32 {
   // Void arrow with no params or captures

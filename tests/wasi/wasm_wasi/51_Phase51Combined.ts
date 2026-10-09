@@ -2,7 +2,7 @@
 // an if/else-if chain, instanceof in a boolean variable, instanceof inside a logical expression,
 // and instanceof of a base-typed array element.
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

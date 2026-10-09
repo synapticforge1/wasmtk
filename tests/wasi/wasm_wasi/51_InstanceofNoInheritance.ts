@@ -1,7 +1,7 @@
 // Phase 51: instanceof with no inheritance in the module — there is no runtime tag header, so the
 // test is resolved at compile time from the variable's statically-tracked class.
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

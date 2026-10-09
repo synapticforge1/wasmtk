@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testBigIntComparisons(val: bigint): void {
   const limit: bigint = 5000000000n; // Larger than i32 max
 

@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function testFunctionAssignment(op: i32): i32 {
   // Assigning arrow functions to a variable
   let mathOp: (a: i32, b: i32) => i32;
