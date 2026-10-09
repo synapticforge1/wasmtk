@@ -85,7 +85,12 @@ destination turns a `/` of integer operands into `f64.div` of converted operands
 - Measure first: a golden-WAT run shows every corpus program whose output the rule changes. Each
   one changes a printed value, so this is at least MINOR and may be MAJOR (D5).
 
-**Phase 3: the `Math` additions (after D2 and D4).** The wasm operations JavaScript has no
+**Phase 3 is superseded by wasm-number-types.md (2026-10-09):** the owner ruled out extending
+`Math`; the wasm operations become a TypeScript library (Track T, decisions T1–T5), and `Math`
+itself must match JavaScript exactly (Track M). The table below is kept as the first candidate
+list.
+
+**Phase 3 (as first scoped): the `Math` additions (after D2 and D4).** The wasm operations JavaScript has no
 spelling for. Each has a TypeScript body that does exactly what wasm does, so the Deno run shows
 the wasm result, and each compiles to one instruction:
 
