@@ -1,6 +1,11 @@
 # Wasm types in TypeScript: the declared-type rule and the `Math` additions (SCOPE, 2026-09-30)
 
-**Status (2026-10-06): Phase 1 DONE; Phases 2–4 wait on the owner's decisions D1–D6.** The
+**Status (2026-10-09): Phase 1 DONE; Phases 2–4 wait on the owner's decisions D1–D6.** sw36
+and sw37 are now the ONLY open silent-wrong compiler rows. The owner (2026-10-09): "the division
+question deserves more thought first". What has been measured is the two bugs (table below);
+what has NOT is how many corpus programs each D1 option would change. Offered (not started): a
+scratch-branch prototype per option, with golden-WAT and wasi per option, reporting the entries
+and printed values each changes and whether each moves toward or away from Deno. The
 ruling is recorded in design-decisions.md § "Wasm types in TypeScript". This file is the work it
 implies: what was broken, what to build, in what order, and what the owner still has to decide.
 
