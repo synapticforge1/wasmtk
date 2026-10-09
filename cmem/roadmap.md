@@ -152,6 +152,10 @@
     expression-bodied closure (`{ …, get: () => v }`) would not compile (sw52, ld21). Test
     `5h_ClosureResultTypes`. Split off, open: sw53 (a closure changing a captured f64 changes a
     copy).
+25. **A closure keeps its changes to a captured f64 (2026-10-09).** `let s: f64 = 0.5` changed by
+    `add: (x) => { s += x; return s; }` gave `1.75 1.75` for `1.75 3`; the same for an f64
+    parameter, and two closures sharing one f64 would not build (sw53). Test
+    `5h_CapturedFloatMutation`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

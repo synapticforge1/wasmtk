@@ -112,6 +112,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-09, night, boxed f64 captures (sw53), full gate green.** wasi **448/448**
+> (+`5h_CapturedFloatMutation`, which fails on main) · golden-WAT **505 / 0**: 2 entries changed
+> (the box helper's comment only), +1 new · engine 1152 on baseline · wast 64,506 / 0 / 16 · Go
+> 7/7/12 · every other suite as before; all 34 closure corpus tests identical to Deno. Round-1
+> repros: 3 DIFFER = open silent 3 (sw36, sw37, sw51, all waiting on the owner); 16 + 3 = open
+> loud 19.
+>
 > **2026-10-09, evening, closure result types (sw52, ld21), full gate green.** wasi **447/447**
 > (+`5h_ClosureResultTypes`, which fails on main) · golden-WAT **504 / 0**: 1 entry changed (the
 > sw48 prologue line's indentation), +1 new · engine 1152 on baseline · wast 64,506 / 0 / 16 · Go
