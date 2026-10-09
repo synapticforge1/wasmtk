@@ -15,8 +15,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > (boxed f64 captures: sw53), `cd61fb9` (nullable fields carry a flag word, owner's option A:
 > sw51, sw54–sw56, ld26). Suite 449/449. Nothing is pushed; nothing is half-done; `main` is
 > clean. Then the wasm number types were scoped (wasm-number-types.md); its `Math` scan found
-> sw57–sw60 and ld27–ld29. Open silent-wrong: sw36, sw37 (the owner's division decision) and the
-> four `Math` rows.
+> sw57–sw61 and ld27–ld29 (and sw62, a console bug). Open silent-wrong: sw36, sw37 (the owner's
+> division decision), the five `Math` rows and sw62.
 
 - ⏳ **H6 (workspace letter, owner chose it 2026-09-30).** Done: H6.1 SemVer `2465ad0`, H6.2 the ★
   block `159e0df`, H6.3 the compatibility gate `4d7d8da` + reviewed exceptions `17e2054`, H6.4 the
@@ -43,14 +43,15 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   owner, 2026-10-09: "the division question deserves more thought first". Offered, not started:
   measure each D1 option's effect on the corpus on a scratch branch before the decision.
   - **Scoped 2026-10-09: wasm-number-types.md.** The owner: `Math` cannot be made to follow the
-    wasm types, so `Math` stays JavaScript's (Track M: every member exact against Deno; 23 of 37
-    members + all constants identical today, 14 wrong: sw57–sw60, ld27–ld29, bugs, no decision)
+    wasm types, so `Math` stays JavaScript's (Track M: every member exact against Deno; of 39
+    functions, 23 identical today, 14 wrong: sw57–sw61, ld27–ld29, bugs, no decision; 2 unsupported:
+    `f16round`, `sumPrecise`)
     and the wasm types are a TypeScript library with exact bodies (Track T: decisions T1–T5).
 - ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **6 open silent-wrong, 22 open
   loud** (2026-10-09: sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 fixed; sw50, sw54–sw56, ld21,
   ld24–ld26 fixed with them; the Math scan found sw57–sw60, ld27–ld29).
-  - Open silent: sw36, sw37 wait on the owner (division); sw57–sw60 are `Math` bugs (Track M,
-    no decision needed).
+  - Open silent: sw36, sw37 wait on the owner (division); sw57–sw61 are `Math` bugs (Track M,
+    no decision needed); sw62 is a console buffer bug (a long f64 line corrupts a later line).
   - NEXT: the 19 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
     compiler bugs BEFORE the binaryang 1.10.0 items below.
   - Nullable gaps left by sw51's option A (no corpus use; design-decisions.md § "Nullable FIELDS
