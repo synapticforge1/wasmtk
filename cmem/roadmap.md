@@ -133,6 +133,13 @@
     JavaScript does; `"h=" + (n >> 1)` prints `h=4`; `i + f` with a float operand is a float;
     `if (0.5)` is true and `if (NaN)` false. In wasic and inside `console.log` (sw10–sw17). Test
     `4_OperatorSemantics`. Found: sw49 (`&&` / `||` give a boolean, not an operand), ld23.
+22. **Values converted to strings (2026-10-09).** An array in a template, concat or `String(...)`
+    printed its address (`v=260`); now its join (`v=1,2,3`). A bigint there kept its `n`;
+    `` `len=${s.length}` + "!" `` dropped the length; `s.includes(…)` printed `1`;
+    `s.indexOf(String(n))` searched for `""`; `Math.max(a, b, c)` ignored `c`; `x ?? 5` on an
+    i32 `0` gave `5`; a top-level array named bare in a function would not compile (sw06–sw09,
+    sw19, sw28, sw50, ld24, ld25). Test `11_StringConversions`. Found: sw51 (a `T | null` tuple
+    element's real `0` reads as null; needs a null flag in the tuple layout).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
