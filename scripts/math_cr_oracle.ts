@@ -345,10 +345,34 @@ export function cbrtOracle(x: number): number {
   return neg ? -r : r;
 }
 // sin/cos/tan oracle: reduce mod 2*pi in fixed-point, Taylor.
+// The reduction is EXACT for every double (2026-10-09, wasMath L3): x = m·2^q is scaled by
+// 2^(P+K) and reduced against a 2π of P+K+3 correct bits (Machin), K = 1200 guard bits. The
+// 100-digit PI above is ~330 bits: enough below |x| ≈ 2^60, garbage past it.
+const TRIG_K = 1200n;
+const PI_K = (() => {
+  const N = P + TRIG_K + 64n, ONE = 1n << N;
+  const atanInv = (x: bigint) => {
+    let sum = 0n, term = ONE / x, k = 0n;
+    while (term !== 0n) {
+      sum += (k % 2n === 0n ? term : -term) / (2n * k + 1n);
+      term /= x * x;
+      k++;
+    }
+    return sum;
+  };
+  return (16n * atanInv(5n) - 4n * atanInv(239n)) >> 64n; // π · 2^(P+K)
+})();
 function trigReduce(x: number): bigint {
-  let r = ((toBig(x) % TWO_PI) + TWO_PI) % TWO_PI;
-  if (r > PI) r -= TWO_PI;
-  return r;
+  dv.setFloat64(0, x);
+  const b = dv.getBigUint64(0);
+  const exp = Number((b >> 52n) & 0x7ffn);
+  const mant = b & 0xfffffffffffffn;
+  const [m, q] = exp === 0 ? [mant, -1074n] : [mant + (1n << 52n), BigInt(exp - 1075)];
+  let X = m << (q + P + TRIG_K); // |x| · 2^(P+K), exact (q + P + K ≥ 526)
+  if (b >> 63n) X = -X;
+  let r = ((X % (2n * PI_K)) + 2n * PI_K) % (2n * PI_K);
+  if (r > PI_K) r -= 2n * PI_K;
+  return r >> TRIG_K;
 }
 function scSin(r: bigint): bigint {
   const r2 = (r * r) >> P;

@@ -7,11 +7,12 @@
  * with a non-zero exit and nothing printed (owner decision T6: "TypeScript and wasm stop the
  * same"). Inputs are the L1 battery's edge values.
  *
- * Known, and reported separately rather than failed:
- *   - `f64` `Math` members are `Math.*` in wasm, so the Math bugs (sw57–sw61, ld27, ld28) show here
- *     until L3; they are listed under "known: Math (L3)".
- *   - a `u64` value ≥ 2⁶³ prints signed in wasm (no unsigned i64 printer yet): such inputs are
- *     skipped and counted.
+ * The `f64` / `f32` Math-style members (`sin` … `pow`) run wasmtk's correctly rounded math library
+ * in Deno as well as in wasm (L3, owner decision "CR, in both", 2026-10-09), so they too must match
+ * to the bit; until L3 they were "known" differences.
+ *
+ * Known, and reported separately rather than failed: a `u64` value ≥ 2⁶³ prints signed in wasm
+ * (no unsigned i64 printer yet): such inputs are skipped and counted.
  *
  * Usage: deno run -A tests/wasmath_lower_tests.ts [<function filter regex>]
  */
@@ -45,7 +46,7 @@ const lit = (v: unknown, t: T): string => {
 };
 
 // ── The functions: [namespace, member, wasm param types] ─────────────────────────────────────
-interface Fn { ns: string; member: string; params: T[]; known?: "math" }
+interface Fn { ns: string; member: string; params: T[] }
 const FNS: Fn[] = [];
 for (const [key, h] of Object.entries(WM_WAT)) {
   if (key === "toint32") continue;
@@ -55,11 +56,11 @@ for (const [key, h] of Object.entries(WM_WAT)) {
 for (const m of WM_F64_MATH) {
   if (/^[A-Z]/.test(m)) continue; // constants: covered by the Math table
   const arity = ["atan2", "pow", "hypot"].includes(m) ? 2 : 1;
-  FNS.push({ ns: "f64", member: m, params: Array(arity).fill("f64"), known: "math" });
+  FNS.push({ ns: "f64", member: m, params: Array(arity).fill("f64") });
 }
 for (const m of Object.keys(WM_F32_TS)) {
   const arity = ["atan2", "pow", "hypot"].includes(m) ? 2 : 1;
-  FNS.push({ ns: "f32", member: m, params: Array(arity).fill("f64"), known: "math" });
+  FNS.push({ ns: "f32", member: m, params: Array(arity).fill("f64") });
 }
 
 // ── Program generation ───────────────────────────────────────────────────────────────────────
@@ -119,7 +120,7 @@ const run = async (cmd: string, args: string[], ms = 30_000) => {
     clearTimeout(timer);
   }
 };
-interface Outcome { fn: string; known?: string; lines: number; bad: string[]; skipped: number }
+interface Outcome { fn: string; lines: number; bad: string[]; skipped: number }
 const runProgram = async (file: string, src: string) => {
   await Deno.writeTextFile(join(dir, file), src);
   const nat = await run("deno", ["run", "-A", file]);
@@ -169,7 +170,7 @@ const check = async (f: Fn, idx: number): Promise<Outcome> => {
       bad.push(`(${args.map(String).join(", ")}) should stop in both: deno exit ${r.nat.code}, wasm exit ${r.wasm!.code} "${r.wasm!.out.trim()}"`);
     }
   }
-  return { fn: name, known: f.known, lines: ok.length + traps.length, bad, skipped: wide.length };
+  return { fn: name, lines: ok.length + traps.length, bad, skipped: wide.length };
 };
 
 const todo = FNS.filter((f) => !filter || filter.test(`${f.ns}.${f.member}`));
@@ -179,17 +180,13 @@ for (let i = 0; i < todo.length; i += 6) {
 }
 
 const exact = results.filter((r) => r.bad.length === 0);
-const knownMath = results.filter((r) => r.bad.length > 0 && r.known === "math");
-const failed = results.filter((r) => r.bad.length > 0 && r.known !== "math");
+const failed = results.filter((r) => r.bad.length > 0);
 for (const r of failed) console.log(`✗ ${r.fn}\n  ${r.bad.slice(0, 3).join("\n  ")}`);
-if (knownMath.length) {
-  console.log(`\n  known: Math (L3): ${knownMath.map((r) => `${r.fn} (${r.bad.length})`).join(", ")}`);
-}
 const calls = results.reduce((s, r) => s + r.lines, 0);
 const skipped = results.reduce((s, r) => s + r.skipped, 0);
 console.log(
   `\n  wasMath L2: ${results.length} functions, ${calls} calls compiled and run; ${exact.length} exact, ` +
-    `${knownMath.length} known (Math, L3), ${failed.length} FAILED; ${skipped} u64 ≥ 2⁶³ inputs skipped (printing gap)`,
+    `${failed.length} FAILED; ${skipped} u64 ≥ 2⁶³ inputs skipped (printing gap)`,
 );
 await Deno.remove(dir, { recursive: true });
 if (failed.length > 0) Deno.exit(1);

@@ -4,6 +4,14 @@
 > correctly-rounded via double-double: `sin cos tan`, `exp`, `log log2 log10`, `cbrt`, `atan`,
 > `asin acos atan2`, `sinh cosh tanh expm1`, `asinh acosh atanh log1p`, and **`pow`**. Each was
 > validated bit-for-bit vs an independent BigInt oracle through the full pipeline. Suite 375/375.
+>
+> **2026-10-09, wasMath L3:** edge cases JavaScript defines, fixed in mathlib (sw57 `log` of a
+> negative → NaN, sw58 `sin` / `tan` keep −0, sw59 `pow`'s ECMAScript special cases, ld28 range
+> guards so nothing reaches an integer conversion, ld33 `atan2` with a subnormal no longer loops);
+> trig from |x| ≥ 2²⁸ reduces by Payne–Hanek (sw61; `scripts/math/gen_payne_hanek.ts`), CR over the
+> WHOLE double range now, not "to ~1e15". The oracle's `trigReduce` is exact for every double. And
+> the owner's **"CR, in both"**: wasMath's f64 Math-style members run this same mathlib in Deno
+> (design-decisions.md).
 
 **Goal (owner, 2026-07-01):** make every `mathlib` (`src/wasm/mathlib.wat`) elementary function
 return the **IEEE-754 correctly-rounded** result — the unique, platform/version/language-independent

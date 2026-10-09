@@ -1,6 +1,17 @@
 # Wasm number types in TypeScript: `Math` stays JavaScript's, a typed library carries wasm's (SCOPE, 2026-10-09)
 
-**Status: L1 and L2 DONE 2026-10-09.** L1: `src/wasmath.ts` (export `./wasMath`), 151 functions
+**Status: L1, L2 and L3 DONE 2026-10-09.** **L3** (owner decision **"CR, in both"**: compiled
+`Math` stays correctly rounded, and wasMath's Math-style members give that SAME value in Deno):
+`src/wasmath.ts`'s f64 `sin` … `pow`, `cbrt` call the embedded mathlib (`MATHLIB_BYTES`, compiled
+on first use), f32's are `fround(f64.op(fround(a)))` over them; plain `Math.*` in Deno is V8's and
+may differ by 1 ulp (sw60, documented). mathlib fixes: sw57, sw58, sw59, ld28 (range guards before
+any integer conversion), ld33, and sw61 by a Payne–Hanek reduction from |x| ≥ 2²⁸
+(`scripts/math/gen_payne_hanek.ts`). Both emitters: ld27 (ToInt32 for `clz32` / `imul`), sw63 (a
+bigint into `Math` is a diagnostic). Measured: `wasmath_lower_tests` **199 / 199 exact** (no
+"known" class any more); sin / cos / tan correctly rounded on 18,699 calls over the whole double
+range (`math_cr_oracle.ts`, its trig reduction made exact); corpus `38_MathEdgeCasesL3`, and
+`39_WasMathAllFunctions` now carries all 199. **Next: L4** (ld29, ld30, ld31, sw64; the u64 ≥ 2⁶³
+printer). Earlier, L1 and L2: L1: `src/wasmath.ts` (export `./wasMath`), 151 functions
 exact to the real instructions (`tests/wasmath_tests.ts`). **L2:** `src/wasmath_lower.ts` is the
 one lowering table; the bundler rewrites `ns.member` (a raw-WAT helper `__wm_<ns>_<member>`,
 `Math.<x>` for the f64 Math members, an f32 TypeScript helper), and `WasicTranspiler` registers the
@@ -161,7 +172,7 @@ body, with the same meaning: `RangeError("integer divide by zero")`, `("integer 
 | group | functions |
 | --- | --- |
 | instructions | `add` `sub` `mul` `div` `neg` `abs` `sqrt` `min` `max` `ceil` `floor` `trunc` `nearest` (ties-to-even; JavaScript has none, body supplied) `copysign` (body supplied) |
-| JavaScript `Math` | `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` `exp` `expm1` `log` `log1p` `log2` `log10` `pow` `cbrt` `hypot` `round` `sign` + the 8 constants. Wasm: software, bit-exact to V8 (Track M: fdlibm ports; the sw57–sw63 / ld27–ld28 fixes land HERE, and `Math.*` lowers to the same helpers) |
+| JavaScript `Math` | `sin` `cos` `tan` `asin` `acos` `atan` `atan2` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` `exp` `expm1` `log` `log1p` `log2` `log10` `pow` `cbrt` `hypot` `round` `sign` + the 8 constants. AS BUILT (L3, "CR, in both"): wasm runs the correctly rounded mathlib (not fdlibm ports, as first proposed), and the TypeScript bodies of `sin` … `pow`, `cbrt` run the SAME mathlib in Deno; `hypot` `round` `sign` are V8-exact helpers with JavaScript bodies |
 | conversions | `fromI32` `fromU32` `fromI64` `fromU64` (`convert_*`), `fromF32` (`promote`), `toI32` / `toI64` (`trunc_*_s`, throws where wasm traps), `toI32Sat` / `toI64Sat` (`trunc_sat`), `toI32Wrap` (JavaScript's ToInt32, `x \| 0`), `bits` / `fromBits` (`reinterpret` ↔ i64, via `DataView`) |
 | optional | `random(seed)`: a seeded PRNG with the SAME body in both (e.g. xorshift), so values agree; `Math.random` never can |
 
@@ -197,9 +208,11 @@ body, with the same meaning: `RangeError("integer divide by zero")`, `("integer 
    (`scripts/math/` style: edge values, both signs, overflow, NaN, ±0).
 2. **L2. wasic recognises the library.** Each call lowers to its instruction or helper; the
    battery then compares Deno and wasm per call, as `math_table.ts` does for `Math`.
-3. **L3. f64 parity (Track M).** The V8-exact helpers (fdlibm ports, non-trapping range
-   reduction, JavaScript's special cases); `Math.*` and `f64.*` share them. Closes
-   sw57–sw61, sw63, ld27, ld28.
+3. **L3. f64 parity (Track M). DONE 2026-10-09**, as "CR, in both" rather than V8-exact (the
+   owner's choice after the measurement: on every sw60 input ours was correctly rounded and V8
+   1 ulp off). Non-trapping range reduction (Payne–Hanek), JavaScript's special cases; `Math.*`
+   and `f64.*` share the mathlib, and wasMath runs it in Deno too. Closed sw57–sw59, sw61, sw63,
+   ld27, ld28, ld33; sw60 by decision.
 4. **L4. The operator bugs on the way** (ld29 `x | 0`, ld30 / ld31 bigint `**` / bitwise /
    shifts, sw64), since the i32 / i64 namespaces lower to the same instructions.
 

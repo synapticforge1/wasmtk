@@ -15,8 +15,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > (boxed f64 captures: sw53), `cd61fb9` (nullable fields carry a flag word, owner's option A:
 > sw51, sw54–sw56, ld26). Suite 449/449. Nothing is pushed; nothing is half-done; `main` is
 > clean. Then the wasm number types were scoped (wasm-number-types.md); its `Math` scan found
-> sw57–sw61 and ld27–ld29 (and sw62, a console bug). Open silent-wrong: sw36, sw37 (the owner's
-> division decision), the five `Math` rows and sw62.
+> sw57–sw61 and ld27–ld29 (and sw62, a console bug). wasMath L1, L2, L3 followed (L3 closed the
+> `Math` rows). Open silent-wrong: sw36, sw37 (the owner's division decision), sw62, sw64.
 
 - ⏳ **H6 (workspace letter, owner chose it 2026-09-30).** Done: H6.1 SemVer `2465ad0`, H6.2 the ★
   block `159e0df`, H6.3 the compatibility gate `4d7d8da` + reviewed exceptions `17e2054`, H6.4 the
@@ -55,15 +55,18 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     `./wasMath`, 151 functions exact to the real instructions, `tests/wasmath_tests.ts`).
     **L2 DONE 2026-10-09** (wasic / modc lower the calls; 176 of 199 exact from compiled programs,
     0 failed, 23 = the Math bugs; corpus programs `39_WasMath*`; the whole corpus takes its types
-    from wasMath; README section "The same values in TypeScript and in WebAssembly"). **NEXT: L3**
-    (bit-exact `Math`: sw57–sw61, sw63, ld27, ld28, ld33), then L4 (ld29–ld31, sw64).
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **6 open silent-wrong, 22 open
-  loud** (2026-10-09: sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 fixed; sw50, sw54–sw56, ld21,
-  ld24–ld26 fixed with them; the Math scan found sw57–sw60, ld27–ld29).
-  - Open silent: sw36, sw37 wait on the owner (division); sw57–sw61 and sw63 are `Math` bugs
-    (Track M, no decision needed); sw62 is a console buffer bug (a long f64 line corrupts a later
-    line); sw64 a bigint print (`-a` without `n`).
-  - NEXT: the 19 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
+    from wasMath; README section "The same values in TypeScript and in WebAssembly"). **L3 DONE
+    2026-10-09** under the owner's **"CR, in both"** (compiled `Math` stays correctly rounded;
+    wasMath's Math-style members run the same mathlib in Deno; plain `Math` in Deno may be 1 ulp
+    off, documented): sw57–sw59, sw61, sw63, ld27, ld28, ld33 fixed, sw60 closed by decision;
+    Payne–Hanek trig reduction; 199 / 199 exact from compiled programs. **NEXT: L4** (ld29 `x | 0`,
+    ld30 / ld31 bigint `**` / bitwise / shifts, sw64 `-a` printing; the u64 ≥ 2⁶³ printer).
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **4 open silent-wrong, 22 open
+  loud** (2026-10-09, wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33
+  closed; earlier the same day sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 and friends).
+  - Open silent: sw36, sw37 wait on the owner (division); sw62 is a console buffer bug (a long f64
+    line corrupts a later line); sw64 a bigint print (`-a` without `n`, L4).
+  - NEXT: L4, the 22 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
     compiler bugs BEFORE the binaryang 1.10.0 items below.
   - Nullable gaps left by sw51's option A (no corpus use; design-decisions.md § "Nullable FIELDS
     carry a flag word"): class-embedded tuple destructuring, union-variant / `Record` fields,
