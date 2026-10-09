@@ -112,6 +112,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-09, evening, closure result types (sw52, ld21), full gate green.** wasi **447/447**
+> (+`5h_ClosureResultTypes`, which fails on main) · golden-WAT **504 / 0**: 1 entry changed (the
+> sw48 prologue line's indentation), +1 new · engine 1152 on baseline · wast 64,506 / 0 / 16 · Go
+> 7/7/12 · every other suite as before; all 34 closure corpus tests identical to Deno. Round-1
+> repros: 4 DIFFER = open silent 4 (sw36, sw37, sw51, sw53); 16 + 3 = open loud 19.
+>
 > **2026-10-09, later, `&&` / `||` operands and boxed parameters (sw48, sw49), full gate green.**
 > wasi **446/446** (+`4_LogicalOperands`, +`5h_CapturedParamMutation`; both fail on main) ·
 > golden-WAT **503 / 0**: 0 entries changed, +2 new. A FIRST cut split `a || b || c` at the first

@@ -2287,10 +2287,12 @@ class WasicTranspiler {
     } else {
       depth = 0;
       arrowEnd = bodyStart;
+      // An unmatched `}` ends it too: the arrow is the last value of an object literal,
+      // `{ get: () => v }` (it took the `}`, and the object, with it: ld21's root, 2026-10-09).
       while (arrowEnd < line.length) {
         const ch = line[arrowEnd];
-        if (ch === "(" || ch === "[") depth++;
-        else if (ch === ")" || ch === "]") {
+        if (ch === "(" || ch === "[" || ch === "{") depth++;
+        else if (ch === ")" || ch === "]" || ch === "}") {
           if (depth === 0) break;
           depth--;
         } else if ((ch === "," || ch === ";") && depth === 0) break;
@@ -3127,14 +3129,54 @@ class WasicTranspiler {
               let mResult: WatType | null = !rawFResult || rawFResult === "void"
                 ? null
                 : mapType(rawFResult) as WatType;
-              // If no explicit result annotation, check body for non-empty return statement
+              // No result annotation: type what the arrow returns, in the factory's scope (its
+              // params and typed locals) plus the arrow's own params. Every such arrow was typed
+              // i32, so a boolean printed 1 / 0 and an f64 truncated (sw52, 2026-10-09).
               if (mResult === null) {
                 const afterArrow = objContent.slice((afm.index ?? 0) + afm[0].length).trimStart();
+                let retExpr: string | null = null;
+                let ownBody = "";
                 if (afterArrow.startsWith("{")) {
-                  if (/return\s+\w/.test(afterArrow)) mResult = "i32" as WatType;
+                  // The arrow's OWN body (to its matching `}`), not the fields after it.
+                  let d = 0, end = afterArrow.length;
+                  for (let k = 0; k < afterArrow.length; k++) {
+                    if (afterArrow[k] === "{") d++;
+                    else if (afterArrow[k] === "}" && --d === 0) {
+                      end = k;
+                      break;
+                    }
+                  }
+                  ownBody = afterArrow.slice(1, end);
+                  retExpr = ownBody.match(/\breturn\s+([^;}]+)/)?.[1]?.trim() ?? null;
                 } else {
-                  // Expression body always returns a value
-                  mResult = "i32" as WatType;
+                  let d = 0, end = afterArrow.length;
+                  for (let k = 0; k < afterArrow.length; k++) {
+                    const ch = afterArrow[k];
+                    if (ch === "(" || ch === "[" || ch === "{") d++;
+                    else if (ch === ")" || ch === "]" || ch === "}") d--;
+                    else if (ch === "," && d === 0) {
+                      end = k;
+                      break;
+                    }
+                  }
+                  retExpr = afterArrow.slice(0, end).trim();
+                }
+                if (retExpr !== null) {
+                  const scope = new Map<string, WatType>();
+                  for (const p of factoryParams) scope.set(p.name, p.type);
+                  for (const bl of bodyLines) {
+                    const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*:\s*(\w+)\s*=/);
+                    if (vm) scope.set(vm[1], mapType(vm[2]) as WatType);
+                  }
+                  rawFParams.split(",").forEach((p, pi) => {
+                    const pn = p.split(":")[0].trim().replace(/\?$/, "");
+                    if (pn && mParams[pi]) scope.set(pn, mParams[pi]);
+                  });
+                  // The arrow body's own typed locals (`const r: f64 = …; return r;`).
+                  for (const [, vn, vt] of ownBody.matchAll(/\b(?:var|let|const)\s+(\w+)\s*:\s*(\w+)\s*=/g)) {
+                    scope.set(vn, mapType(vt) as WatType);
+                  }
+                  mResult = this.closureResultType(retExpr, scope);
                 }
               }
               autoFields.push({
@@ -11155,6 +11197,24 @@ ${prefixed}
     return {
       rewrite: op === "&&" ? `(${L}) ? ${str(R)} : ${str(L)}` : `(${L}) ? ${str(L)} : ${str(R)}`,
     };
+  }
+
+  /** The result type of an unannotated closure returning `expr` (sw52). `bool` and `i64` are
+   *  taken as inferred. `f64` only when a float is visible (a float literal, or a name the scope
+   *  types f64 / f32): inferInitType's fallback for anything unknown is f64, and an unknown shape
+   *  keeps the i32 it always had. */
+  private closureResultType(expr: string, scope: Map<string, WatType>): WatType {
+    const t = inferInitType(expr, scope, this.enumValues, this.functions);
+    if (t === "bool" || t === "i64") return t;
+    if (t === "f64" || t === "f32") {
+      const floatSeen = /(?:^|[^\w.])\d+\.\d/.test(expr) ||
+        [...expr.matchAll(/\b([A-Za-z_]\w*)\b/g)].some(([, id]) => {
+          const st = scope.get(id);
+          return st === "f64" || st === "f32";
+        });
+      if (floatSeen) return "f64";
+    }
+    return "i32";
   }
 
   /** True when an operand is a bare `any` variable: those go through dynrt's own `&&` / `||`. */
@@ -19572,7 +19632,7 @@ ${sum}
     const boxedParams = fn.params.filter((p) => this.currentSharedMutableCaptures.has(p.name));
     if (boxedParams.length > 0) this.needsBoxHelper = true;
     const body = boxedParams
-      .map((p) => `(local.set $${p.name} (call $__box_i32 (local.get $${p.name})))\n    `)
+      .map((p) => `    (local.set $${p.name} (call $__box_i32 (local.get $${p.name})))\n`)
       .join("") + this.emitBlock(fn.bodyLines, locals, blockResult);
     // Declare the number/bool → text temps if the body used them and the pre-scan didn't already.
     const scalarTempDecls = this.scalarStrTempsUsed && !seenLocals.has("__tmpl_num_ptr")
