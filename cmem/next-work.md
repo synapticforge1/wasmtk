@@ -35,12 +35,15 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
   (the `Math` additions) and Phase 4 (the user page) wait on the owner's decisions D1–D6.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **3 open silent-wrong, 19 open
-  loud** (2026-10-09: sw06–sw09, sw19, sw28, sw48, sw49, sw52, sw53 fixed; sw50, ld24, ld25,
-  ld21 fixed; sw51 found).
-  - Open silent, all waiting on the owner: sw36, sw37 (wasm-math D1); sw51 (a `T | null` tuple
-    element has no null flag: the tuple layout).
-  - NEXT: the loud rows, then Phase 0b audit round 2. The owner's order
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **2 open silent-wrong, 19 open
+  loud** (2026-10-09: sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 fixed; sw50, sw54–sw56, ld21,
+  ld24–ld26 fixed with them).
+  - Open silent, both waiting on the owner: sw36, sw37 (wasm-math D1; the owner wants more
+    thought on division first, 2026-10-09).
+  - NEXT: the loud rows, then Phase 0b audit round 2.
+  - Nullable gaps left by sw51's option A (no corpus use; design-decisions.md § "Nullable FIELDS
+    carry a flag word"): class-embedded tuple destructuring, union-variant / `Record` fields,
+    nullable PARAMETERS (no flag), `p.x ??= v`. The owner's order
     (2026-10-09): these compiler bugs BEFORE the binaryang 1.10.0 items below.
 - ⏳ **wast: 7 `(module definition …)`s V8 refuses for its own size caps** (`memory64` 1, `table`
   1, `table64` 1, `memory_max_i64` 4). A definition asserts only validity, so binaryang's
@@ -75,7 +78,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   - `a && b` / `a || b` give an operand, not a boolean (`x || 7` is 7), and a closure keeps its
     changes to a captured parameter (sw48, sw49);
   - a closure in a returned object returns its real type: a boolean prints `true`, an f64 keeps
-    its fraction (sw52), and a closure keeps its changes to a captured f64 (sw53).
+    its fraction (sw52), and a closure keeps its changes to a captured f64 (sw53);
+  - a `number | null` field or tuple element holding 0 is no longer null, a null one prints
+    `null`, and nullable records are 4 bytes larger per such field (sw51, sw54–sw56).
 
   Whether any of these makes the release MAJOR is the owner's call.
 

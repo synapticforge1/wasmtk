@@ -247,6 +247,41 @@ high-value subset.
   the leading `?` of `??` and otherwise swallows it. (Same singleton pattern as
   `_instanceofResolver`; set and cleared around each `parseConsoleLogArgs` call at BOTH sites.)
 
+## Nullable FIELDS carry a flag word, like nullable locals (owner, 2026-10-09, sw51 option A)
+
+**Ruling.** One model of null for every nullable value that is not a pointer: a flag beside the
+value, 1 = null. A local has `$x__null`; a `number | null` / `boolean | null` element of a tuple,
+or field of an interface or class, has a 4-byte flag word in the record. Considered and not taken:
+a rarer sentinel (still inexact, and a second null model), a boxed value behind a pointer (a heap
+allocation per value), refusing the type (left as the fallback), keeping "0 is null" (silent).
+
+- **Layout.** `placeNullFlags` puts the flag words AFTER the last field (`StructField.nullFlagOffset`),
+  so no user field moves and `fields[]` keeps only user fields (about 20 sites index it by position
+  or detect tuples by `_N` names). `totalSize` includes them. A string / struct / array / embedded
+  tuple field gets none: 0 is already its null. A nullable element changes a tuple's NAME
+  (`__Tuple_i32N_f64`), or `[i32 | null, f64]` and `[i32, f64]` share one cached def. The class
+  tag shift moves `nullFlagOffset` with `offset`.
+- **One read path.** `nullFlagLoad` derives the flag's load from the field's own emitted value
+  load, moved by `nullFlagOffset − offset`, so every access form (`x.f`, `this.f`, `arr[i].f`,
+  `t[N]`, `a.b.f`) and every offset already folded in (class tag, embedded tuple) works without
+  re-deriving addresses. `nullTestWat` is the one is-null test (nullable local / global, flagged
+  field, literal); `??`, `=== null`, nullable `let` / assignment, `return` from a `T | null`
+  function and the printers all use it.
+- **Every write writes the flag.** A store into a flagged field (`emitStatement`'s intercept,
+  which the desugared `+=` / `++` also pass through) writes 1 for null (value 0), the source's own
+  flag for a nullable source, else 0. Every constructor writes every flag: `__malloc` reuses freed
+  blocks WITHOUT zeroing them, so a constructor that writes only the given fields starts all flags
+  at 1 (`nullFlagDefaults`; an omitted field is undefined). Static data is zero-filled, so
+  `allocStructData` sets only the null ones.
+- **Destructuring makes a nullable local.** A flagged element binds `$v` and `$v__null` (declared
+  by `collectDestructureLocals`), and `v` is then an ordinary nullable local.
+- **Printing.** A null value prints `null` everywhere it is converted to text (console arguments
+  through `setNullPrintResolver`, templates, concat, `String(x)`). A null-valued `-0` is not
+  distinguished: such a value prints `0` there, as `${x}` does.
+- **Not covered (no corpus use):** a class-embedded tuple destructured with its own handler
+  (`[a, b] = obj.f`), a discriminated-union variant field, `Record<K, V | null>`, nullable
+  function PARAMETERS (no flag at all yet), `p.x ??= v`.
+
 ## Scanners / parsing correctness
 
 - **Bracket/paren/operator scanners MUST skip string & template literals.** `findBinaryOp` and the
