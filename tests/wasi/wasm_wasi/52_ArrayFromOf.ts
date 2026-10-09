@@ -1,6 +1,5 @@
 // Phase 52.8 — Array.from([…]) / Array.of(…) (array-literal sugar) + Array.isArray (closed-world).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const a: i32[] = Array.from([1, 2, 3]);
 console.log("a.length:", a.length); // 3

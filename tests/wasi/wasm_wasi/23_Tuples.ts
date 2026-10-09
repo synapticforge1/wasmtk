@@ -15,8 +15,7 @@
  *   - Tuple-typed parameters:     function swap(t: [i32, i32]): [i32, i32]
  */
 
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // ── Named tuple alias ────────────────────────────────────────────────────────
 

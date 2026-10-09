@@ -1,6 +1,5 @@
 // Phase 35 — Combined: typeof and keyof T together
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Rect {
   width: f64;

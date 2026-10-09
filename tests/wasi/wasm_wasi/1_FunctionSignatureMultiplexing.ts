@@ -1,6 +1,5 @@
 // Core_TypeMultiplex.ts
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Signature A: (i32, i32) -> i32
 function add(a: i32, b: i32): i32 { return a + b; }

@@ -1,6 +1,6 @@
 // Phase 34 — Type predicates: two sibling guards in an if/else-if chain inside a helper, each
 // narrowing the same base-typed parameter to a different derived interface.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface Item {
   typeTag: i32;

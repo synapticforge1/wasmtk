@@ -1,6 +1,6 @@
 // Phase 34 — Type predicates over a discriminated union, with an INLINE object-type target
 // (`g is { type: "sphere"; r: f64 }`) rather than a named type.
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 type Geometry =
   | { type: "sphere"; r: f64 }

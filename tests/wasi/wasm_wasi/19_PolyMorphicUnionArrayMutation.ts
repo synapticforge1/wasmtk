@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface LeafNode { type: "leaf"; weight: i32; }
 interface InternalNode { type: "internal"; branchCount: i32; active: i32; }

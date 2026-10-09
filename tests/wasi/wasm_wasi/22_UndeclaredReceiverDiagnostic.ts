@@ -3,7 +3,7 @@
 // through a DIAGNOSTIC, not by the transpiler calling rt.exit(1) from inside itself (which killed
 // the host process, including hybrid/dync probe compiles). The abort is still loud: exit non-zero.
 // run-ts fails too, correctly: natively this is a ReferenceError (exit 1).
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function main(): i32 {
   const n: i32 = 4;

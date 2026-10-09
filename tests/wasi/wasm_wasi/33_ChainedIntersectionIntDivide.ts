@@ -1,6 +1,6 @@
 // Phase 33 — Intersection types: three-way chain (A & B & C) passed as a function
 // parameter, with an integer divide over two merged fields.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface HasName {
   code: i32;

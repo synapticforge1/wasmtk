@@ -5,8 +5,7 @@
 // of 5. The inline shape is now resolved structurally to `Circle` and narrowing uses its offsets.
 // The DU form of the same construct is pinned by 34_DiscUnionPredicateInlineTarget; the
 // unresolvable form by 34_InlinePredicateUnresolvable.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Shape {
   kind: i32;

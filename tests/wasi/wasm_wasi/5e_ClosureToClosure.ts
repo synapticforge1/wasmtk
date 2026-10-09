@@ -1,5 +1,5 @@
 // ClosureToClosure.ts
-type i32 = number; // For clarity in this example
+import { i32 } from "../../../src/wasmath.ts"; // For clarity in this example
 type Scaler = (val: i32) => i32;
 
 export function testClosurePassing(initialMultiplier: i32): i32 {

@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 function compose(initial: i32) {
   const inner = (x: i32): i32 => x + initial;
   return (y: i32) => inner(y) * 2; // Captures a closure pointer

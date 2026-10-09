@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 // A function that accepts a callback
 function applyLogic(val: i32, callback: (n: i32) => i32): i32 {
   return callback(val);

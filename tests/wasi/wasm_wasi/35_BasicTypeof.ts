@@ -1,6 +1,5 @@
 // Phase 35 — typeof: basic comparisons, assignment, and console.log
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function main(): void {
   const n: i32 = 42;

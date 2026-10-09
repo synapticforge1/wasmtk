@@ -55,6 +55,7 @@
 import { basename, dirname, join } from "@std/path";
 import { rt } from "./rt.ts";
 import { CAPABILITIES } from "./wasm/caps_bytes.ts";
+import { isWasMathSpecifier, WM_F32_TS, WM_NAMESPACES, wasMathRewrites } from "./wasmath_lower.ts";
 
 // ---------------------------------------------------------------------------
 // Phase 18 — WASM import types
@@ -192,16 +193,77 @@ function parseClauseNames(clause: string): Map<string, string> {
  * @param renames - Map of oldName → newName.
  */
 function applyRenames(src: string, renames: Map<string, string>): string {
-  // Sort by descending key length so longer names are replaced first
-  const entries = [...renames.entries()].sort((a, b) => b[0].length - a[0].length);
-  for (const [from, to] of entries) {
-    // Escape all regex metacharacters (including `.` in namespace keys)
-    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Use (?<![\w.]) so a plain identifier rename (e.g. "log" → "LoggerProvider_log")
-    // does not match the same identifier used as a method name (e.g. console.log).
-    src = src.replace(new RegExp(`(?<![\\w.])${escaped}(?!\\w)`, "g"), to);
+  if (renames.size === 0) return src;
+  // ONE pass: an alternation of every key, longest first (so "add" never splits "addExt"), regex
+  // metacharacters escaped (the `.` in namespace keys). `(?<![\w.])` keeps a plain identifier
+  // rename (e.g. "log" → "LoggerProvider_log") off the same name used as a method (console.log).
+  const keys = [...renames.keys()].sort((a, b) => b.length - a.length)
+    .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(?<![\\w.])(?:${keys.join("|")})(?!\\w)`, "g");
+  // Only CODE is renamed: a name inside a string literal, template text or a comment is data
+  // (`console.log("add")` printed the module-prefixed name; a wasMath label "i32.add" printed
+  // `__wm_i32_add`, 2026-10-09). Code inside a template's `${…}` is code.
+  const code = codeMask(src);
+  return src.replace(re, (match, offset: number) => (code[offset] ? renames.get(match) ?? match : match));
+}
+
+/** 1 for each character of `s` that is CODE: not inside a comment, a string literal or a template
+ *  literal's text (the code inside `${…}` IS code, nested templates included). */
+function codeMask(s: string): Uint8Array {
+  const mask = new Uint8Array(s.length);
+  const modes: ("code" | "tmpl")[] = ["code"];
+  const depths: number[] = [0]; // `{` depth inside each code frame (a `}` at 0 closes a `${`)
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i], d = s[i + 1];
+    if (modes[modes.length - 1] === "tmpl") {
+      if (c === "\\") i += 2;
+      else if (c === "`") {
+        modes.pop();
+        depths.pop();
+        i++;
+      } else if (c === "$" && d === "{") {
+        modes.push("code");
+        depths.push(0);
+        i += 2;
+      } else i++;
+      continue;
+    }
+    if (c === "/" && d === "/") {
+      while (i < s.length && s[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && d === "*") {
+      const end = s.indexOf("*/", i + 2);
+      i = end < 0 ? s.length : end + 2;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      i++;
+      while (i < s.length && s[i] !== c && s[i] !== "\n") i += s[i] === "\\" ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (c === "`") {
+      modes.push("tmpl");
+      depths.push(0);
+      i++;
+      continue;
+    }
+    if (c === "{") depths[depths.length - 1]++;
+    else if (c === "}") {
+      if (depths[depths.length - 1] === 0 && modes.length > 1) {
+        modes.pop(); // the `}` closing a template's `${`
+        depths.pop();
+        i++;
+        continue;
+      }
+      depths[depths.length - 1]--;
+    }
+    mask[i] = 1;
+    i++;
   }
-  return src;
+  return mask;
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +516,21 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
         continue;
       }
 
+      // ── wasMath (`@jrmarcum/wasmtk/wasMath`, or a path to src/wasmath.ts): NOT inlined. Each
+      // imported namespace's `ns.member` is rewritten to its lowering (wasmath_lower.ts): a wasm
+      // helper `__wm_<ns>_<member>`, `Math.<x>` for the f64 Math members, or an f32 TypeScript
+      // helper appended below. Only named imports of the namespaces are recognised.
+      if (isWasMathSpecifier(specifier)) {
+        const namedMatch = binding.match(/\{([^}]*)\}/);
+        if (namedMatch) {
+          for (const [local, original] of parseClauseNames(namedMatch[1])) {
+            if (!WM_NAMESPACES.includes(original)) continue;
+            for (const [from, to] of wasMathRewrites(local, original)) localRewrites.set(from, to);
+          }
+        }
+        continue;
+      }
+
       if (!specifier.startsWith(".")) continue; // skip non-relative specifiers
 
       // ── .wasm imports — record for WAT-level merge, don't inline as TS ───
@@ -620,7 +697,13 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
   }
 
   const result = await load(entryPath, true);
-  return { source: result.source, wasmImports };
+  // wasMath's f32 `Math`-style members are small TypeScript helpers (exactly their wasMath
+  // bodies); append the ones the program calls, once.
+  const f32Used = new Set(
+    [...result.source.matchAll(/\b__wm_f32_(\w+)\b/g)].map((m) => m[1]).filter((m) => m in WM_F32_TS),
+  );
+  const helpers = [...f32Used].map((m) => WM_F32_TS[m]).join("\n");
+  return { source: helpers ? `${result.source}\n${helpers}\n` : result.source, wasmImports };
 }
 
 /**

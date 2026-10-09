@@ -1,5 +1,5 @@
 // Core_WASI_Strings.ts
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function _start(): void {
   // Test 1: Empty string
   console.log(""); 

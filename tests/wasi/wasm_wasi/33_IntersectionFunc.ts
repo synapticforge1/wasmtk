@@ -1,6 +1,5 @@
 // Phase 33 — Intersection types: function parameter and return access
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Position { px: i32; py: i32; }
 interface Velocity { vx: f64; vy: f64; }

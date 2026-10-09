@@ -2,7 +2,7 @@
 // Report issue 4 (HIGH): an array-typed interface field accessed via a function PARAMETER —
 // `p.origin.length` / `p.origin[i]` — was "Unsupported expression". Root cause also included struct
 // literals not allocating array fields at all. Both fixed.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 interface P { origin: string[]; }
 interface Nums { vals: i32[]; }
 function build(p: P): string { let s: string = ""; for (let i: i32 = 0; i < p.origin.length; i++) { s = s + p.origin[i]; } return s; }

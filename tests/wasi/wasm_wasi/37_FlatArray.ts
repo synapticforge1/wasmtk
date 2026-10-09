@@ -1,6 +1,6 @@
 // Phase 37 — flat()
 // Tests: flat() on i32[][] flattens one level into i32[]
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 // Basic 3-row flatten
 const matrix: i32[][] = [[1, 2, 3], [4, 5], [6]];

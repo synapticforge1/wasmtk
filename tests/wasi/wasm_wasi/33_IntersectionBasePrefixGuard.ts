@@ -5,7 +5,7 @@
 // so `Transform`'s scaleX/scaleY (bytes 0/8) land on Sprite's alpha/scaleX — this used to compile
 // and silently print `1.6` instead of `6`. It must now abort with a layout-mismatch diagnostic.
 // The compatible ordering is pinned by 33_IntersectionBasePointerParam and 33_IntersectionPrefixOk.
-type f64 = number;
+import { f64 } from "../../../src/wasmath.ts";
 
 interface Transform {
   scaleX: f64;

@@ -1,5 +1,4 @@
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function addOptional(a: i32, b?: i32): i32 {
   if (b === undefined) {

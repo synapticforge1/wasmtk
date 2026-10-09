@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testForOfLoops(): void {
   console.log("--- Test 1: for...of Loop Iteration ---");

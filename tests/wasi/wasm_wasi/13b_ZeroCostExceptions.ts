@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 /**
  * A function that returns a Result-like structure

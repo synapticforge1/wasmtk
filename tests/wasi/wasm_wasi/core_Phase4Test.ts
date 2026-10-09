@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 export function _start(): void {
   // for loop
   let sum: i32 = 0;

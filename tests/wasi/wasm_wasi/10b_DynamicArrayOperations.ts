@@ -1,5 +1,5 @@
 // Phase_10b_DynamicOps.ts
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testDynamicOps(): i32 {
   const nums: i32[] = [10, 20];

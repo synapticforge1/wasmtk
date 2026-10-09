@@ -1,6 +1,5 @@
 // Phase 51.3 — Nested destructuring: const { a: { b } } = obj and nested in params.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Inner {
   b: i32;

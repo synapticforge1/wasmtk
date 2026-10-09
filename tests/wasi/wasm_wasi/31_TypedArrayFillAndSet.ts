@@ -1,6 +1,6 @@
 // Phase 31 — TypedArray .fill(value, start, end) with an exclusive end bound, and
 // .set(src, offset) copying one TypedArray into another at an offset.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testTypedArrayFillAndSet(): void {
   console.log("--- Test 3: TypedArray .fill() and .set() ---");

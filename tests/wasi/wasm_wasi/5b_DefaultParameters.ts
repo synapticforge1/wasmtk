@@ -1,5 +1,4 @@
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 // Default i32 parameter
 function add(a: i32, b: i32 = 10): i32 {

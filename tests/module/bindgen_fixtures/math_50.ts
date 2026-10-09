@@ -1,7 +1,6 @@
 // bindgen_math_50: numeric math functions — compiled to WASM library for bindgen test
 // deno-lint-ignore-file
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 export function add(a: i32, b: i32): i32 {
   return a + b;

@@ -1,8 +1,7 @@
 // Phase 10c — Dynamic Array Growth (realloc via bump allocator)
 // Initial capacity = max(initLen*2, 8) = 8 for a 3-element array.
 // Push 6 more elements (total 9) to force a grow from cap=8 to cap=16.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 const nums: i32[] = [1, 2, 3];
 nums.push(4);

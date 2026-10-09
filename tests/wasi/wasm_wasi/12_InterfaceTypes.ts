@@ -1,5 +1,5 @@
 // Phase_12_InterfaceTypes.ts
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 /**
  * Testing how a dynamic array (Complex Type) 

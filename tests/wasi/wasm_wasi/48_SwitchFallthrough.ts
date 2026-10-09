@@ -1,5 +1,5 @@
 // Phase 48: switch fallthrough
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 function test(x: i32): void {
   switch (x) {

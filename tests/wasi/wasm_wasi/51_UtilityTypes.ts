@@ -1,6 +1,5 @@
 // Phase 51.4 — Utility types (compile-time type resolution).
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Point {
   x: f64;

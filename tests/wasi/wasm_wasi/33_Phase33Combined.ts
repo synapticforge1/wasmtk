@@ -1,6 +1,5 @@
 // Phase 33 — Intersection types: combined test with chained intersection
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Physical { mass: f64; energy: f64; }
 interface Spatial { sx: i32; sy: i32; }

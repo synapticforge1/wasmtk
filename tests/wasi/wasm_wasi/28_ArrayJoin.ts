@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testArrayJoin(): void {
   console.log("--- Test 3: Array join() ---");

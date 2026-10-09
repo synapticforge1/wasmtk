@@ -1,5 +1,5 @@
 // @expect-exit: 1  (dies on an uncaught throw by design; exit 1 at parity with wasmtime)
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 interface SecureMatrix {
   addValue: (row: i32, val: i32) => void;

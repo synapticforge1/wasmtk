@@ -1,6 +1,5 @@
 // Phase 34 — Type predicates: standalone if/else-if chains with narrowing
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 interface Vehicle {
   kind: i32;

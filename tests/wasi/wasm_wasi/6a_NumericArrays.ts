@@ -1,5 +1,4 @@
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 function sumArray(arr: i32[], len: i32): i32 {
   let total: i32 = 0;

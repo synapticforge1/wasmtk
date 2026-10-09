@@ -1,6 +1,5 @@
 // Phase 47: basic class inheritance — field layout and method dispatch
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 class Animal {
   age: i32;

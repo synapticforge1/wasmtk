@@ -1,6 +1,6 @@
 // Phase 31 — TypedArray sub-word access: Uint8Array/Int16Array element width,
 // .length vs .byteLength, and sign-extension on a negative Int16 element.
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testTypedArrayAccess(): void {
   console.log("--- Test 1: TypedArray Sub-Word Access ---");

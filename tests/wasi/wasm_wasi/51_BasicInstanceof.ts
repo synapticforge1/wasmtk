@@ -5,7 +5,7 @@
 // (A wasic uncaught `throw` exits 0 by design, so it cannot be used to fail a pipeline.)
 // Class instances are created inside a function (module-level class instances are not supported).
 
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 

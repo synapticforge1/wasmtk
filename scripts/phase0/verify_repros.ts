@@ -18,23 +18,42 @@ const files = [...Deno.readDirSync(dir)].filter((e) => e.name.endsWith(".ts")).m
   .sort();
 const dec = new TextDecoder();
 
+// `wasmtk` as `deno run … main.ts` (what the installed shim runs), not the shim itself: on Windows
+// the shim is a `.cmd`, and a time limit would kill only `cmd.exe` while a HANGING program kept
+// running (ld33, 2026-10-09: `Math.atan2(0.5, 1e-310)` loops forever).
+const repo = new URL("../../", import.meta.url);
+const WASMTK = ["run", "-A", "--config", new URL("deno.json", repo).pathname.replace(/^\/(\w:)/, "$1"),
+  new URL("main.ts", repo).pathname.replace(/^\/(\w:)/, "$1")];
+
 async function run(
   cmd: string,
   args: string[],
+  ms = 30_000,
 ): Promise<{ code: number; out: string; err: string }> {
-  const o = await new Deno.Command(cmd, { args, cwd: dir, stdout: "piped", stderr: "piped" })
-    .output();
-  return {
-    code: o.code,
-    out: dec.decode(o.stdout).replace(/\r\n/g, "\n"),
-    err: dec.decode(o.stderr),
-  };
+  if (cmd === "wasmtk") [cmd, args] = [Deno.execPath(), [...WASMTK, ...args]];
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    const o = await new Deno.Command(cmd, { args, cwd: dir, stdout: "piped", stderr: "piped", signal: ctl.signal })
+      .output();
+    // A killed child can RESOLVE (exit 1 on Windows) instead of throwing: ask the signal.
+    if (ctl.signal.aborted) return { code: -1, out: "", err: `HANG: did not finish in ${ms / 1000} s` };
+    return {
+      code: o.code,
+      out: dec.decode(o.stdout).replace(/\r\n/g, "\n"),
+      err: dec.decode(o.stderr),
+    };
+  } catch {
+    return { code: -1, out: "", err: `HANG: did not finish in ${ms / 1000} s` };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 for (const f of files) {
   const base = f.replace(/\.ts$/, "");
   const native = await run(Deno.execPath(), ["run", "-A", f]);
-  const comp = await run("wasmtk", ["wasic", f]);
+  const comp = await run("wasmtk", ["wasic", f], 120_000);
   if (comp.code !== 0) {
     const diag = (comp.out + comp.err).split("\n").find((l) =>
       /⚠️|❌/.test(l)

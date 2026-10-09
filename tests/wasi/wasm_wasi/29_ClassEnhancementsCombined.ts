@@ -1,7 +1,6 @@
 // Phase 29: Combined — static fields + getters/setters + string enums together
 // Tests interaction of all three Phase 29 features in a single class hierarchy.
-type i32 = number;
-type f64 = number;
+import { i32, f64 } from "../../../src/wasmath.ts";
 
 enum Shape {
   Circle = "circle",

@@ -1,4 +1,4 @@
-type i32 = number;
+import { i32 } from "../../../src/wasmath.ts";
 
 export function testStringSplitAndForOf(): void {
   console.log("--- Test 1: String Split & String Array for...of ---");
