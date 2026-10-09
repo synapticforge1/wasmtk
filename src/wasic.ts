@@ -843,6 +843,8 @@ interface FuncDef {
   sharedMutableCaptures?: Set<string>;
   /** Phase 5h: captured params that are heap cell pointers (boxed) rather than plain values. */
   boxedCaptures?: Set<string>;
+  /** sw53: each boxed capture's VALUE type (its param is the i32 cell pointer). */
+  boxedCaptureTypes?: Map<string, WatType>;
   /** For inner functions with mutable captures: maps capture name → {type, offset} in the closure struct.
    *  When set, the inner function takes $__closure_ptr (i32) as its first param and accesses
    *  mutable captures via f64.load/f64.store (or i32.load/i32.store) through the closure pointer. */
@@ -1744,8 +1746,8 @@ class WasicTranspiler {
   private strOfHelpers: Set<string> = new Set();
   /** sw49: the `$__lor_<t>` scratch globals the operand form of `&&` / `||` used. */
   private logicalScratch: Set<string> = new Set();
-  /** sw48: a closure factory boxes a mutated captured parameter through `$__box_i32`. */
-  private needsBoxHelper = false;
+  /** sw48 / sw53: a closure factory boxes a mutated captured parameter through `$__box_<t>`. */
+  private boxHelpers: Set<"i32" | "f64"> = new Set();
   /** sw08: unsupported string forms met INSIDE a quietEmit probe (their diagnostic suppressed). */
   private quietStringFailures = 0;
   /** sw44: `$__exn_str` (String() of a catch variable, by thrown kind) is needed. Its seven
@@ -1893,6 +1895,10 @@ class WasicTranspiler {
   private interfaceVars: Map<string, string> = new Map();
   // Phase 5h: boxed captures for the arrow function currently being emitted (pointers, not values).
   private currentBoxedCaptures: Set<string> = new Set();
+  // sw53: the VALUE type each boxed name's cell holds (absent = i32), and the boxed f64
+  // PARAMETERS, whose cell lives in a shadow local `$<name>__box` (the f64 param cannot hold it).
+  private currentBoxTypes: Map<string, "i32" | "f64"> = new Map();
+  private currentBoxShadow: Set<string> = new Set();
   // Phase 5h: shared mutable captures for the enclosing factory function currently being emitted.
   private currentSharedMutableCaptures: Set<string> = new Set();
   // Mutable closure captures for the inner function currently being emitted: name → {type, offset}.
@@ -2485,14 +2491,26 @@ class WasicTranspiler {
         // Phase 5h: if any capture is a shared mutable capture in the enclosing fn, mark it as boxed
         if (enclosingFn?.sharedMutableCaptures) {
           const boxed = new Set(captures.filter((c) => enclosingFn.sharedMutableCaptures!.has(c)));
-          if (boxed.size > 0) anonDef.boxedCaptures = boxed;
+          if (boxed.size > 0) {
+            anonDef.boxedCaptures = boxed;
+            // A boxed capture travels as its CELL (an i32 pointer) whatever its value type; the
+            // value type is kept for the arrow's own typing and its loads / stores (sw53).
+            anonDef.boxedCaptureTypes = new Map();
+            for (const p of anonDef.params) {
+              if (!boxed.has(p.name)) continue;
+              anonDef.boxedCaptureTypes.set(p.name, p.type);
+              p.type = "i32";
+            }
+          }
         }
+        const capType = (cap: string): WatType =>
+          anonDef.boxedCaptures?.has(cap) ? "i32" : outerScope.get(cap)!;
 
         // Create a factory FuncDef that allocates the closure struct and returns a ptr
         const factoryName = `${anonName}__factory`;
         const factoryDef: FuncDef = {
           name: factoryName,
-          params: captures.map((cap) => ({ name: cap, type: outerScope.get(cap)! })),
+          params: captures.map((cap) => ({ name: cap, type: capType(cap) })),
           result: "i32" as WatType,
           exported: false,
           bodyLines: [],
@@ -3209,19 +3227,19 @@ class WasicTranspiler {
         if (retObjLine) {
           // Build outer scope (params + top-level declarations before the return)
           const outerVarNames = new Set<string>(factoryParams.map((p) => p.name));
-          // Declared i32 / bool locals: what a box (a 4-byte i32 cell, initialised at the
-          // declaration) can hold. sw32 boxes these even for ONE mutating arrow; an f64 (the cell
-          // would truncate it) is not boxed alone. An i32 / bool PARAMETER is boxed too: the
-          // function's prologue rebinds it to `$__box_i32(value)` (sw48, 2026-10-09).
+          // What a box (a heap cell, initialised at the declaration) can hold: an i32 / bool or an
+          // f64 (an 8-byte cell, sw53). sw32 boxes a declared local even for ONE mutating arrow; a
+          // PARAMETER is boxed too, by the function's prologue (sw48, 2026-10-09).
+          const boxable = (t: string | undefined) => t === "i32" || t === "bool" || t === "f64";
           const boxableLocals = new Set<string>(
-            factoryParams.filter((p) => p.type === "i32" || p.type === "bool").map((p) => p.name),
+            factoryParams.filter((p) => boxable(p.type)).map((p) => p.name),
           );
           for (const bl of bodyLines) {
             const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+))?\s*=/);
             if (vm) {
               outerVarNames.add(vm[1]);
               const vt = vm[2] ? mapType(vm[2]) : undefined;
-              if (vt === "i32" || vt === "bool") boxableLocals.add(vm[1]);
+              if (boxable(vt)) boxableLocals.add(vm[1]);
             }
           }
           // Extract object literal content
@@ -8528,7 +8546,7 @@ ${prefixed}
     // sw48: a boxed capture handed to its closure's factory is the cell itself, not its value.
     {
       const boxRef = expr.match(/^__boxref\((\w+)\)$/);
-      if (boxRef) return `(local.get $${boxRef[1]})`;
+      if (boxRef) return `(local.get $${this.boxSlot(boxRef[1])})`;
     }
 
     // Phase 22: strip TypeScript non-null assertion postfix `expr!` → `expr`
@@ -10078,7 +10096,9 @@ ${prefixed}
       }
       if (localType) {
         // Phase 5h: boxed capture — load through heap pointer
-        if (this.currentBoxedCaptures.has(expr)) return `(i32.load (local.get $${expr}))`;
+        if (this.currentBoxedCaptures.has(expr)) {
+          return this.convertWat(this.boxLoad(expr), this.boxType(expr), defaultType);
+        }
         const rawGet = `(local.get $${expr})`;
         // Type coercion for context mismatch (e.g. f64 variable used in i32 context or vice versa)
         if (localType === "f64" && defaultType === "i32") return `(i32.trunc_f64_s ${rawGet})`;
@@ -11215,6 +11235,23 @@ ${prefixed}
       if (floatSeen) return "f64";
     }
     return "i32";
+  }
+
+  /** The local holding boxed `n`'s cell (sw53). */
+  private boxSlot(n: string): string {
+    return this.currentBoxShadow.has(n) ? `${n}__box` : n;
+  }
+  /** The value type in boxed `n`'s cell. */
+  private boxType(n: string): "i32" | "f64" {
+    return this.currentBoxTypes.get(n) ?? "i32";
+  }
+  /** Boxed `n`'s value. */
+  private boxLoad(n: string): string {
+    return `(${this.boxType(n)}.load (local.get $${this.boxSlot(n)}))`;
+  }
+  /** Stores `v` (already of the cell's type) into boxed `n`'s cell. */
+  private boxStore(n: string, v: string): string {
+    return `(${this.boxType(n)}.store (local.get $${this.boxSlot(n)}) ${v})`;
   }
 
   /** True when an operand is a bare `any` variable: those go through dynrt's own `&&` / `||`. */
@@ -12553,8 +12590,11 @@ ${prefixed}
       }
       // Phase 5h: shared mutable capture — allocate heap cell, store initial value into it
       if (this.currentSharedMutableCaptures.has(varName)) {
-        const initWat = this.emitExpr(initExpr, locals, "i32");
-        return `(local.set $${varName} (call $__malloc (i32.const 4)))\n      (i32.store (local.get $${varName}) ${initWat})`;
+        const bt = this.boxType(varName);
+        const initWat = this.emitExpr(initExpr, locals, bt);
+        return `(local.set $${varName} (call $__malloc (i32.const ${bt === "f64" ? 8 : 4})))\n      ${
+          this.boxStore(varName, initWat)
+        }`;
       }
       return `(local.set $${varName} ${this.emitExpr(initExpr, locals, varType)})`;
     }
@@ -12656,12 +12696,22 @@ ${prefixed}
       }
       // Phase 5h: boxed capture — update through heap pointer
       if (this.currentBoxedCaptures.has(varName)) {
-        const boxedGet = `(i32.load (local.get $${varName}))`;
+        const boxedGet = this.convertWat(
+          this.boxLoad(varName),
+          this.boxType(varName),
+          opType as WatType,
+        );
         const boxedRhs = this.emitExpr(rhs, locals, opType);
         const boxedArith = (op === "%=" && isFloat)
           ? `(${opType}.sub ${boxedGet} (${opType}.mul (${opType}.trunc (${opType}.div ${boxedGet} ${boxedRhs})) ${boxedRhs}))`
           : `(${opType}.${suffix} ${boxedGet} ${boxedRhs})`;
-        return `(i32.store (local.get $${varName}) ${boxedArith})`;
+        const opBase = watBaseType(opType as WatType);
+        return this.boxStore(
+          varName,
+          opBase === "i32" || opBase === "f64" || opBase === "i64"
+            ? this.convertWat(boxedArith, opBase, this.boxType(varName))
+            : boxedArith,
+        );
       }
       // Mutable closure capture — update through $__closure_ptr
       {
@@ -13259,9 +13309,10 @@ ${prefixed}
       const varType = locals.get(varName)!;
       // Phase 5h: boxed capture — store through heap pointer
       if (this.currentBoxedCaptures.has(varName)) {
-        return `(i32.store (local.get $${varName}) ${
-          this.emitExpr(assignMatch[2].trim(), locals, "i32")
-        })`;
+        return this.boxStore(
+          varName,
+          this.emitExpr(assignMatch[2].trim(), locals, this.boxType(varName)),
+        );
       }
       // Mutable closure capture — store through $__closure_ptr
       {
@@ -14482,7 +14533,8 @@ ${prefixed}
       const v = line.replace(/[+;]/g, "").trim();
       // Phase 5h: boxed capture — update through heap pointer
       if (this.currentBoxedCaptures.has(v)) {
-        return `(i32.store (local.get $${v}) (i32.add (i32.load (local.get $${v})) (i32.const 1)))`;
+        const bt = this.boxType(v);
+        return this.boxStore(v, `(${bt}.add ${this.boxLoad(v)} (${bt}.const 1))`);
       }
       // Mutable closure capture — update through $__closure_ptr
       {
@@ -14510,7 +14562,8 @@ ${prefixed}
       const v = line.replace(/[-;]/g, "").trim();
       // Phase 5h: boxed capture — update through heap pointer
       if (this.currentBoxedCaptures.has(v)) {
-        return `(i32.store (local.get $${v}) (i32.sub (i32.load (local.get $${v})) (i32.const 1)))`;
+        const bt = this.boxType(v);
+        return this.boxStore(v, `(${bt}.sub ${this.boxLoad(v)} (${bt}.const 1))`);
       }
       // Mutable closure capture — update through $__closure_ptr
       {
@@ -16022,12 +16075,12 @@ ${prefixed}
     }
     if (this.needsExnStr) parts.push(this.getExnStrWat());
     if (this.strOfHelpers.size > 0) parts.push(this.getStrOfWat());
-    if (this.needsBoxHelper) {
-      parts.push(`  ;; A heap cell holding $v, for a captured parameter a closure mutates (sw48).
-  (func $__box_i32 (param $v i32) (result i32)
+    for (const t of this.boxHelpers) {
+      parts.push(`  ;; A heap cell holding $v, for a captured parameter a closure mutates (sw48, sw53).
+  (func $__box_${t} (param $v ${t}) (result i32)
     (local $p i32)
-    (local.set $p (call $__malloc (i32.const 4)))
-    (i32.store (local.get $p) (local.get $v))
+    (local.set $p (call $__malloc (i32.const ${t === "f64" ? 8 : 4})))
+    (${t}.store (local.get $p) (local.get $v))
     (local.get $p)
   )`);
     }
@@ -19596,6 +19649,26 @@ ${sum}
     // A repeat at the SAME type is pure redundancy — drop it. A repeat at a DIFFERENT type is not
     // redundancy, it is two distinct variables collapsing onto one slot, so it aborts rather than
     // silently picking whichever came first.
+    // sw53: boxed names and the value type in each cell. In a lifted arrow the capture's param is
+    // the cell (i32) and `locals` gets the value type back, for typing. In the function that owns
+    // a boxed f64, a declared local holds the cell (declared i32 below) and a PARAMETER keeps its
+    // f64 value, its cell going in a shadow local `$<name>__box`.
+    this.currentBoxTypes = new Map();
+    this.currentBoxShadow = new Set();
+    for (const [n, t] of fn.boxedCaptureTypes ?? []) {
+      if (watBaseType(t) === "f64") this.currentBoxTypes.set(n, "f64");
+      locals.set(n, t);
+    }
+    for (const n of fn.sharedMutableCaptures ?? []) {
+      if (watBaseType(locals.get(n) ?? "i32") !== "f64") continue;
+      this.currentBoxTypes.set(n, "f64");
+      if (fn.params.some((p) => p.name === n)) {
+        this.currentBoxShadow.add(n);
+        declaredLocals.push([`${n}__box`, "i32"]);
+      } else {
+        for (const d of declaredLocals) if (d[0] === n) d[1] = "i32";
+      }
+    }
     const seenLocals = new Map<string, WatType>();
     const uniqueLocals: Array<[string, WatType]> = [];
     for (const [n, t] of declaredLocals) {
@@ -19630,9 +19703,11 @@ ${sum}
     this.scalarStrTempsUsed = false;
     // sw48: a boxed parameter is rebound to a heap cell holding its value, before the body runs.
     const boxedParams = fn.params.filter((p) => this.currentSharedMutableCaptures.has(p.name));
-    if (boxedParams.length > 0) this.needsBoxHelper = true;
+    for (const p of boxedParams) this.boxHelpers.add(this.boxType(p.name));
     const body = boxedParams
-      .map((p) => `    (local.set $${p.name} (call $__box_i32 (local.get $${p.name})))\n`)
+      .map((p) =>
+        `    (local.set $${this.boxSlot(p.name)} (call $__box_${this.boxType(p.name)} (local.get $${p.name})))\n`
+      )
       .join("") + this.emitBlock(fn.bodyLines, locals, blockResult);
     // Declare the number/bool → text temps if the body used them and the pre-scan didn't already.
     const scalarTempDecls = this.scalarStrTempsUsed && !seenLocals.has("__tmpl_num_ptr")
@@ -19645,6 +19720,8 @@ ${sum}
     this.scalarStrTempsUsed = savedScalarTemps;
     this.currentBoxedCaptures = new Set();
     this.currentSharedMutableCaptures = new Set();
+    this.currentBoxTypes = new Map();
+    this.currentBoxShadow = new Set();
     this.currentClosureCaptureLayout = new Map();
     // Phase 21: append (unreachable) for never-typed functions — signals to the WASM validator
     // that control never reaches the end of this function.

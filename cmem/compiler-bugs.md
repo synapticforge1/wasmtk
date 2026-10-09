@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 4 | 77 | 0 | 17 |
+| SILENT-WRONG | 3 | 78 | 0 | 17 |
 | LOUD | 19 | 26 | 1 | 8 |
 | n/a | — | 3 | — | 3 |
 
@@ -16,7 +16,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 4** (2026-10-09, evening: sw52 fixed, sw53 split from it
+**Open silent-wrong in the compiler: 3** (2026-10-09, night: sw53 fixed: 4 → 3; the three
+left wait on the owner: sw36 and sw37 on wasm-math D1, sw51 on the tuple layout). Before that,
+**4** (2026-10-09, evening: sw52 fixed, sw53 split from it
 and open: still 4; loud ld21 fixed with it: 20 → 19). Before that, **4** (2026-10-09, later: sw48
 and sw49 fixed; sw52 found: 5 → 4, still 20 loud). Before that, **5** (2026-10-09: string conversions and two value-typing
 slips, sw06–sw09, sw19, sw28, fixed; sw50 found and fixed with them; sw51 found, open; loud ld24 and
@@ -119,7 +121,7 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~sw32~~ | ✅ FIXED 2026-10-06: `k.inc(), k.inc()` → `1 2` → `1 1`. NOT a console bug: the closure's mutation of its captured `n` was lost after EVERY call (`1 1 1` on separate lines too). A captured variable was boxed only when two or more arrows referenced it, so a lone mutating closure incremented a copy; and the mutation scan read only the first of its three regex groups (`++n` missed). A declared i32 / bool local mutated by one arrow is now boxed too. Test `7b_ConsoleOperatorsAndClosures` | wasic closure capture |
 | ~~sw48~~ | ✅ FIXED 2026-10-09: a closure mutating a captured i32 / bool PARAMETER copied it: `adder(100).add(1), .add(2)` → `101 103` → `101 102`. A mutated captured parameter is boxed like a declared local: the factory's prologue rebinds it to `$__box_i32(value)`. With it, the factory's OWN reads and writes of any boxed name go through the cell (a read before the closure was made printed the cell's address: `twice 520`), and only the closure-creation call passes the cell (`__boxref(x)`). An f64 capture is not boxed (a 4-byte cell); that, and f64 closures generally, are sw52. Test `5h_CapturedParamMutation` | wasic closure capture |
 | ~~sw52~~ | ✅ FIXED 2026-10-09 (found fixing sw48; the same on main): an arrow in a returned object literal with no return annotation was typed i32 whatever it returned (the factory's auto-struct, `mResult = "i32"`, which the lifted arrow then took as its own result): a boolean printed `1` / `0`, an f64 was truncated. Its result is now typed from its `return` (block body, the arrow's OWN body only) or its expression, in the factory's params and typed locals plus the arrow's params and body locals (`closureResultType`; f64 only when a float is visible, so an unknown shape keeps i32). Found with it, LOUD and fixed: an expression-bodied arrow that is an object's LAST value took the closing `}` (ld21's root). Split off, open: sw53. Test `5h_ClosureResultTypes` | wasic closure result typing |
-| sw53 | OPEN (split from sw52, 2026-10-09; the same on main): a closure mutating a captured f64 (local or parameter) changes a COPY: `s += x; return s` gives `1.75 1.75` for `1.75 3`. The box is a 4-byte i32 cell; boxing an f64 needs its cell pointer (i32) apart from its value type (f64) through the parameter declarations, `emitClosureFactory`'s capture layout, the trampoline, and every boxed read / write site. Repro `sw53_closure_mutated_f64_capture.ts` | wasic closure capture |
+| ~~sw53~~ | ✅ FIXED 2026-10-09 (split from sw52; the same on main): a closure mutating a captured f64 (local or parameter) changed a COPY: `s += x; return s` gave `1.75 1.75` for `1.75 3`. The box was a 4-byte i32 cell and an f64 was never boxed (two arrows sharing one would have built an invalid module). Now the cell's POINTER and its VALUE type are kept apart: a boxed capture is an i32 parameter of the lifted arrow and its factory (so the closure layout and trampoline carry the pointer), `boxedCaptureTypes` / `currentBoxTypes` give the value type back for typing and for every load / store (`boxLoad` / `boxStore` at the read, declaration, assignment, compound and `++` / `--` sites); in the owning function a boxed f64 local is declared i32 (its cell, 8 bytes) and a boxed f64 PARAMETER keeps its value with its cell in a shadow local `$<name>__box` (`$__box_f64`). A boxed read now also converts to the type asked. Golden-WAT: only a helper's comment changed. Test `5h_CapturedFloatMutation` | wasic closure capture |
 | ld01 | function-typed var from a ternary: undefined func | wasic |
 | ~~ld02~~ | ✅ FIXED 2026-10-06: console `x % 2` on f64: `f64.rem` does not exist. Now `x - trunc(x / y) * y`, the formula wasic's emitExpr uses (both paths share its limits: inexact for a large quotient, and each operand is evaluated twice). Test `7b_ConsoleOperatorsAndClosures` | console_log |
 | ld03 | console string `<`: unresolved local | console_log |
