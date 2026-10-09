@@ -19,7 +19,8 @@
     "./wast": "./src/wast.ts",
     "./gowasic": "./src/gowasic.ts",
     "./zigwasic": "./src/zigwasic.ts",
-    "./rustwasic": "./src/rustwasic.ts"
+    "./rustwasic": "./src/rustwasic.ts",
+    "./wasMath": "./src/wasmath.ts"
   },
   "bin": {
     "wasmtk": "./main.ts"
