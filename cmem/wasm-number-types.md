@@ -11,7 +11,9 @@ bigint into `Math` is a diagnostic). Measured: `wasmath_lower_tests` **199 / 199
 "known" class any more); sin / cos / tan correctly rounded on 18,699 calls over the whole double
 range (`math_cr_oracle.ts`, its trig reduction made exact); corpus `38_MathEdgeCasesL3`, and
 `39_WasMathAllFunctions` now carries all 199. **Next: L4** (ld29, ld30, ld31, sw64; the u64 ≥ 2⁶³
-printer). Earlier, L1 and L2: L1: `src/wasmath.ts` (export `./wasMath`), 151 functions
+printer). **Also 2026-10-09 (owner):** a plain `/` between integers is a compile error that
+names `i32.div` / `f64.div`: the first operator wasMath REPLACES rather than mirrors
+(design-decisions.md § "Wasm types in TypeScript"). Earlier, L1 and L2: L1: `src/wasmath.ts` (export `./wasMath`), 151 functions
 exact to the real instructions (`tests/wasmath_tests.ts`). **L2:** `src/wasmath_lower.ts` is the
 one lowering table; the bundler rewrites `ns.member` (a raw-WAT helper `__wm_<ns>_<member>`,
 `Math.<x>` for the f64 Math members, an f32 TypeScript helper), and `WasicTranspiler` registers the
