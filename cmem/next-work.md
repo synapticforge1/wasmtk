@@ -14,8 +14,23 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > shifts), sw64 (`-a` on a bigint prints without `n`), the u64 ≥ 2⁶³ printer. Then sw62 (console
 > line corruption), the 22 loud rows, and the binaryang 1.10.0 items below. Decided later the
 > same day (owner): `(a / b) | 0` STAYS refused, pointing at wasMath; **D6: a compile-stopping
-> issue is REPORTED with its location** (below). Open: D3 (proposed: refuse an implicit f64 → i32
-> and name `f64.toI32` / `toI32Sat` / `toI32Wrap`; awaiting the owner).
+> issue is REPORTED with its location** (below); **D3: an implicit f64 → i32 conversion is
+> REFUSED**, naming `f64.toI32` (traps) / `f64.toI32Sat` (clamps) / `f64.toI32Wrap` (wraps).
+>
+> **D3 refusal (owner 2026-10-09; designed, not built).** Today wasic silently inserts
+> `i32.trunc_f64_s` wherever an f64 meets an i32 destination: `const x: i32 = f`, an f64 argument
+> to an i32 parameter, an f64 returned from an `: i32` function, an f64 stored into an i32 field
+> or array element, `Math.floor(y)` into an i32 (the ld15 convention, design-decisions.md), the
+> `asDefault` / `asExpected` paths of both emitters, and `x as i32` (decide whether an explicit
+> `as` counts as the program saying so; it does not say WHICH conversion, so likely refuse too).
+> Plan: (1) list every site that emits `i32.trunc_f64_s` / `trunc_f32_s` / `i64.trunc_*` from a
+> value the program did not convert (grep both emitters; L1's ld27 trunc check is one), (2) raise
+> one diagnostic from a shared message like `intDivisionDiagnostic`, (3) MEASURE the corpus on a
+> branch first (golden-WAT status changes), expect many more programs than division's 10, (4)
+> migrate them to the wasMath call that prints what wasm printed (`toI32`), (5) the wasMath i32
+> namespace's own known gap (an out-of-range f64 into an `i32.*` argument traps where the body
+> wraps) closes with it. Also i64 destinations (`trunc_f64_s` to i64) by the same rule. Pairs
+> naturally with the D6 report.
 >
 > **Compile-error report (D6, owner 2026-10-09; designed, not built).** Today a refusal prints
 > `⚠️ <text>` lines, then "Compilation aborted: N unsupported feature(s)" and a `wasmtk dync`
