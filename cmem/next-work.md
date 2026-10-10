@@ -7,6 +7,15 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **PAUSED 2026-10-09, end of day (owner).** `main` is clean at the integer-division commit
+> (`7bda25f`), every suite green; nothing pushed, tagged or published; the next release is MAJOR
+> (3.0.0) and waits on the owner's word. **Resume with wasMath L4** (wasm-number-types.md): ld29
+> (`x | 0` traps out of range; touches open decision D3), ld30 / ld31 (bigint `**`, bitwise,
+> shifts), sw64 (`-a` on a bigint prints without `n`), the u64 ≥ 2⁶³ printer. Then sw62 (console
+> line corruption), the 22 loud rows, and the binaryang 1.10.0 items below. Open owner decisions:
+> D3 and D6 (wasm-math-plan.md); whether `(a / b) | 0` should stay refused (it is, today, because
+> it differs at `b = 0`).
+
 > **2026-10-09, state.** binaryang shipped 1.9.0 (`./definitions`) and 1.10.0 (`wasm-bundle`,
 > `(@reloc data)`); the owner ordered the open compiler bugs FIRST, then those items (§ "binaryang
 > caught up" below). Five H12 batches merged locally today, each through the full gate:
