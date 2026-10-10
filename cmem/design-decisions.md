@@ -346,7 +346,11 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     it a float division; a `Math` argument is an f64 context.
   - **A `Math` result in an integer or f32 context is converted like any f64 there** (2026-10-06):
     `trunc_f64_s` into i32 / i64 (it traps out of range or on NaN), `demote` into f32. One
-    convention for every site; changing it is decision D3 in wasm-math-plan.md.
+    convention for every site; changing it is decision D3 in wasm-math-plan.md. **D3 DECIDED
+    2026-10-09 (owner): this silent conversion is to be REFUSED** — an f64 meeting an i32 (or
+    i64) destination becomes a compile error naming wasMath's `f64.toI32` / `toI32Sat` /
+    `toI32Wrap`, as integer `/` is refused. Not built yet (plan in next-work.md); until it lands,
+    the trunc convention above is what the compiler does.
   - **An f32 is converted at every f32 boundary, by ONE rule** (2026-10-06, ld18 / sw43):
     `emitExpr` wraps the emitter, reads the emitted WAT's result type from its outermost form
     (`watResultType`) and converts when exactly one side is f32. A new leaf path need not know
