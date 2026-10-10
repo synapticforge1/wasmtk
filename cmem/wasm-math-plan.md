@@ -7,7 +7,14 @@ in TypeScript"). So **D1 is moot** (no destination makes integer division float)
 decided** (wasMath, wasm-number-types.md T1), **D4** became that library, **D5** is MAJOR (3.0.0,
 owner's call), Phase 4's user page is the README section "The same values in TypeScript and in
 WebAssembly". Still open: **D3** (f64 into an i32 destination: trap, saturate or wrap; L4's ld29
-touches it) and **D6** (compile-time notes). The rest of this file is the 2026-09-30 scope, kept
+touches it) and **D6** (compile-time notes). **2026-10-09, later (owner): D6 DECIDED** — "We
+should show compile time notes when issues that stop the compile are thrown": a report naming the
+issue and WHERE (file:line:col, the source line, a marker, what TypeScript vs wasm do, the fix);
+proposed format in next-work.md. **`(a / b) | 0` stays refused** and refers the user to wasMath.
+**D3:** the owner confirmed that wasm never stores an f64 into an i32 (the validator requires an
+explicit conversion: trunc traps, trunc_sat clamps, ToInt32 wraps); proposed, NOT yet decided:
+refuse the implicit conversion as division is refused, and name `f64.toI32` / `toI32Sat` /
+`toI32Wrap`. The rest of this file is the 2026-09-30 scope, kept
 as the record. Earlier status: Phases 2–4 waited on D1–D6; the owner: "the division
 question deserves more thought first". What has been measured is the two bugs (table below);
 what has NOT is how many corpus programs each D1 option would change. Offered (not started): a

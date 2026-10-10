@@ -12,9 +12,23 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > (3.0.0) and waits on the owner's word. **Resume with wasMath L4** (wasm-number-types.md): ld29
 > (`x | 0` traps out of range; touches open decision D3), ld30 / ld31 (bigint `**`, bitwise,
 > shifts), sw64 (`-a` on a bigint prints without `n`), the u64 ≥ 2⁶³ printer. Then sw62 (console
-> line corruption), the 22 loud rows, and the binaryang 1.10.0 items below. Open owner decisions:
-> D3 and D6 (wasm-math-plan.md); whether `(a / b) | 0` should stay refused (it is, today, because
-> it differs at `b = 0`).
+> line corruption), the 22 loud rows, and the binaryang 1.10.0 items below. Decided later the
+> same day (owner): `(a / b) | 0` STAYS refused, pointing at wasMath; **D6: a compile-stopping
+> issue is REPORTED with its location** (below). Open: D3 (proposed: refuse an implicit f64 → i32
+> and name `f64.toI32` / `toI32Sat` / `toI32Wrap`; awaiting the owner).
+>
+> **Compile-error report (D6, owner 2026-10-09; designed, not built).** Today a refusal prints
+> `⚠️ <text>` lines, then "Compilation aborted: N unsupported feature(s)" and a `wasmtk dync`
+> hint: no location for most errors, "unsupported" for deliberate refusals, and dync advice that
+> does not apply. Proposed, per error: `error[<code>]: <what>`, `--> file:line:col`, the source
+> line with a `^^^` marker, `= TypeScript: …` / `= wasm: …` where that is the reason, `= help:`
+> the fix in the user's own names; then `wasic: N errors in <file>; no .wasm was written.`, exit
+> 1, the dync hint only for genuinely dynamic code. Same report from `wasic` and `modc`. Work:
+> diagnostics become structured (code, message, position, help) instead of strings, and positions
+> map back through the bundler's rewrite to the user's file. **Found doing this: the
+> typed-declaration diagnostic's line is OFF BY ONE in a program that imports wasMath** (`let n`
+> on line 9 reported as line 8; the import line seems to be dropped before counting).
+> Not yet a compiler-bugs.md row; reproduce and file it first.
 
 > **2026-10-09, state.** binaryang shipped 1.9.0 (`./definitions`) and 1.10.0 (`wasm-bundle`,
 > `(@reloc data)`); the owner ordered the open compiler bugs FIRST, then those items (§ "binaryang
