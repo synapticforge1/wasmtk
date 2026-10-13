@@ -11,8 +11,8 @@
  * in Deno as well as in wasm (L3, owner decision "CR, in both", 2026-10-09), so they too must match
  * to the bit; until L3 they were "known" differences.
  *
- * Known, and reported separately rather than failed: a `u64` value ≥ 2⁶³ prints signed in wasm
- * (no unsigned i64 printer yet): such inputs are skipped and counted.
+ * A `u64` result of 2⁶³ or more prints unsigned in wasm too since L4 (2026-10-13); until then such
+ * inputs were skipped (220 of them).
  *
  * Usage: deno run -A tests/wasmath_lower_tests.ts [<function filter regex>]
  */
@@ -74,16 +74,6 @@ const throws = (f: Fn, args: unknown[]) => {
     return true;
   }
 };
-/** A u64 result the wasm side cannot print unsigned yet. */
-const unsignedWide = (f: Fn, args: unknown[]) => {
-  if (!(f.ns === "u64" || /toU64/.test(f.member))) return false;
-  try {
-    const r = call(f, args);
-    return typeof r === "bigint" && r >= 2n ** 63n;
-  } catch {
-    return false;
-  }
-};
 const program = (f: Fn, inputs: unknown[][]) => {
   const lines = [`import { ${f.ns} } from "${wmUrl}";`, "type f64 = number;", "type f32 = number;",
     "type i32 = number;", "type i64 = bigint;"];
@@ -120,7 +110,7 @@ const run = async (cmd: string, args: string[], ms = 30_000) => {
     clearTimeout(timer);
   }
 };
-interface Outcome { fn: string; lines: number; bad: string[]; skipped: number }
+interface Outcome { fn: string; lines: number; bad: string[] }
 const runProgram = async (file: string, src: string) => {
   await Deno.writeTextFile(join(dir, file), src);
   const nat = await run("deno", ["run", "-A", file]);
@@ -141,10 +131,8 @@ const check = async (f: Fn, idx: number): Promise<Outcome> => {
   const inputs = (f.member === "pow" && (f.ns === "i32" || f.ns === "i64"))
     ? VALS[f.params[0]].flatMap((a) => [0, 1, 2, 3, 31, 63].map((e) => [a, f.ns === "i64" ? BigInt(e) : e]))
     : all;
-  const wide = inputs.filter((a) => unsignedWide(f, a));
-  const usable = inputs.filter((a) => !unsignedWide(f, a));
-  const ok = usable.filter((a) => !throws(f, a));
-  const traps = usable.filter((a) => throws(f, a)).slice(0, 2);
+  const ok = inputs.filter((a) => !throws(f, a));
+  const traps = inputs.filter((a) => throws(f, a)).slice(0, 2);
   const bad: string[] = [];
   // the non-throwing inputs, one program
   if (ok.length) {
@@ -170,7 +158,7 @@ const check = async (f: Fn, idx: number): Promise<Outcome> => {
       bad.push(`(${args.map(String).join(", ")}) should stop in both: deno exit ${r.nat.code}, wasm exit ${r.wasm!.code} "${r.wasm!.out.trim()}"`);
     }
   }
-  return { fn: name, lines: ok.length + traps.length, bad, skipped: wide.length };
+  return { fn: name, lines: ok.length + traps.length, bad };
 };
 
 const todo = FNS.filter((f) => !filter || filter.test(`${f.ns}.${f.member}`));
@@ -183,10 +171,9 @@ const exact = results.filter((r) => r.bad.length === 0);
 const failed = results.filter((r) => r.bad.length > 0);
 for (const r of failed) console.log(`✗ ${r.fn}\n  ${r.bad.slice(0, 3).join("\n  ")}`);
 const calls = results.reduce((s, r) => s + r.lines, 0);
-const skipped = results.reduce((s, r) => s + r.skipped, 0);
 console.log(
   `\n  wasMath L2: ${results.length} functions, ${calls} calls compiled and run; ${exact.length} exact, ` +
-    `${failed.length} FAILED; ${skipped} u64 ≥ 2⁶³ inputs skipped (printing gap)`,
+    `${failed.length} FAILED`,
 );
 await Deno.remove(dir, { recursive: true });
 if (failed.length > 0) Deno.exit(1);

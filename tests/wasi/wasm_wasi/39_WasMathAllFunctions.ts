@@ -88,7 +88,7 @@ console.log("i64.fromF32", i64.fromF32(2.5), i64.fromF32(-0), i64.fromF32(0.1000
 console.log("i64.fromF32Sat", i64.fromF32Sat(2.5), i64.fromF32Sat(-0), i64.fromF32Sat(0.10000000149011612));
 
 // ── u64 ──
-console.log("u64.from", u64.from(9223372036854775807n), u64.from(12345678901234567n), u64.from(0n));
+console.log("u64.from", u64.from(9223372036854775807n), u64.from(-7n), u64.from(12345678901234567n));
 console.log("u64.div", u64.div(9223372036854775807n, 1n), u64.div(-7n, 2n), u64.div(12345678901234567n, 3n));
 console.log("u64.rem", u64.rem(9223372036854775807n, 1n), u64.rem(-7n, 2n), u64.rem(12345678901234567n, 3n));
 console.log("u64.shr", u64.shr(9223372036854775807n, 1n), u64.shr(-7n, 2n), u64.shr(12345678901234567n, 3n));
@@ -97,7 +97,7 @@ console.log("u64.gt", u64.gt(9223372036854775807n, 1n), u64.gt(-7n, 2n), u64.gt(
 console.log("u64.le", u64.le(9223372036854775807n, 1n), u64.le(-7n, 2n), u64.le(12345678901234567n, 3n));
 console.log("u64.ge", u64.ge(9223372036854775807n, 1n), u64.ge(-7n, 2n), u64.ge(12345678901234567n, 3n));
 console.log("u64.min", u64.min(9223372036854775807n, 1n), u64.min(-7n, 2n), u64.min(12345678901234567n, 3n));
-console.log("u64.max", u64.max(9223372036854775807n, 1n), u64.max(12345678901234567n, 3n), u64.max(5n, 0n));
+console.log("u64.max", u64.max(9223372036854775807n, 1n), u64.max(-7n, 2n), u64.max(12345678901234567n, 3n));
 console.log("u64.toF64", u64.toF64(9223372036854775807n), u64.toF64(-7n), u64.toF64(12345678901234567n));
 console.log("u64.toF32", u64.toF32(9223372036854775807n), u64.toF32(-7n), u64.toF32(12345678901234567n));
 console.log("u64.fromF64", u64.fromF64(2.5), u64.fromF64(-0), u64.fromF64(0.1));

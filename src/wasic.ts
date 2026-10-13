@@ -156,6 +156,7 @@ import {
   setStringExprResolver,
   setStructArgLayoutChecker,
   setStructLiteralAllocator,
+  setU64Resolver,
   type StructFieldLookup,
   unescapeString,
 } from "./console_log.ts";
@@ -759,6 +760,7 @@ interface FuncParam {
   funcTypeInfo?: { params: WatType[]; result: WatType | null }; // set when param is a function type
   isRest?: boolean; // set when param is a rest parameter (...name: T[])
   isAny?: boolean; // #14 follow-up: param's declared type is `any` (a boxed dynrt handle); for WIT/bindgen marshalling
+  isU64?: boolean; // wasMath L4: declared `u64` (an i64 whose bits print unsigned)
 }
 
 interface StructField {
@@ -841,6 +843,8 @@ interface FuncDef {
   resultTsName?: string;
   /** #14 follow-up: return type is `any` (a boxed dynrt handle); for WIT/bindgen marshalling. */
   isAnyResult?: boolean;
+  /** wasMath L4: the declared result type is `u64` (an i64 printed unsigned). */
+  isU64Result?: boolean;
   /** Phase 18: true for functions pre-registered from external .wasm imports. The real body is
    *  spliced in by mergeOneWasmImport; emitFunction must not emit any stub for these. */
   isPhase18Import?: boolean;
@@ -1926,6 +1930,10 @@ class WasicTranspiler {
   // #14.3.1: names of locals/params whose declared type is `any` (a boxed dynrt handle, lowered to
   // i32). Consulted only by the box/unbox/operator paths; existing code keeps treating them as i32.
   private anyVars: Set<string> = new Set();
+  // wasMath L4 (2026-10-13): names declared `u64` in the current scope (locals, params) and at the
+  // top level. `u64` lowers to i64 like `bigint`; only printing reads the difference (unsigned).
+  private u64Vars: Set<string> = new Set();
+  private u64Globals: Set<string> = new Set();
   // Tracks variable names declared with a function type (e.g. let f: (a: i32) => i32)
   // Stored as Map<name, signature> — the i32 local holds the funcref table index.
   private funcTypeVars: Map<string, { params: WatType[]; result: WatType | null }> = new Map();
@@ -2105,6 +2113,10 @@ class WasicTranspiler {
       for (const dep of WM_WAT[key].uses ?? []) addWm(dep);
     };
     for (const m of this.src.matchAll(/\b__wm_(\w+)\b/g)) addWm(m[1]);
+    // wasMath L4: top-level `u64` declarations (printed unsigned; see u64Vars).
+    for (const m of this.src.matchAll(/^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*:\s*u64\b/gm)) {
+      this.u64Globals.add(m[1]);
+    }
     for (const key of wmUsed) {
       const h = WM_WAT[key];
       this.functions.push({
@@ -2900,6 +2912,7 @@ class WasicTranspiler {
         : undefined;
       const resolvedType: WatType = structType ? "i32" : paramType;
       const isAny = typeAnnotation === "any"; // #14: boxed dynrt handle — marked for WIT/bindgen
+      const isU64 = typeAnnotation === "u64" ? true : undefined; // wasMath L4: prints unsigned
       // Split "type = defaultExpr" if an explicit default value is present
       const eqIdx = afterColon.indexOf("=");
       if (eqIdx !== -1) {
@@ -2911,6 +2924,7 @@ class WasicTranspiler {
           arrayStructElemType,
           structType,
           isAny,
+          isU64,
         };
       }
       if (isOptional) {
@@ -2922,9 +2936,10 @@ class WasicTranspiler {
           arrayStructElemType,
           structType,
           isAny,
+          isU64,
         };
       }
-      return { name, type: resolvedType, arrayElemType, arrayStructElemType, structType, isAny };
+      return { name, type: resolvedType, arrayElemType, arrayStructElemType, structType, isAny, isU64 };
     });
   }
 
@@ -3360,6 +3375,7 @@ class WasicTranspiler {
         returnedArrow: returnedArrow ?? undefined,
         resultTsName,
         isAnyResult: rawResult === "any",
+        isU64Result: rawResult === "u64" ? true : undefined,
         sharedMutableCaptures,
         isAsync,
         asyncInner,
@@ -7968,6 +7984,14 @@ class WasicTranspiler {
       if (globalInfo) return globalInfo.type;
       if (this.moduleStringConsts.has(e)) return "string";
     }
+    // A bigint expression (ld30 / ld31, 2026-10-13): led by a bigint global (`a ** 3n`, `a << 2n`;
+    // inferInitType sees only locals), or arithmetic with a bigint literal (`2n ** b`). Not across
+    // a comparison or logical operator, and not with a string in it.
+    if (!hasTopLevelBoolOp(e) && !/["'`]/.test(e)) {
+      const lead = e.match(/^(\w+)(?![\w.([])/)?.[1];
+      if (lead && !locals.has(lead) && this.moduleGlobals.get(lead)?.type === "i64") return "i64";
+      if (/(^|[^\w.])\d+n\b/.test(e) && /^[\w\s()+\-*/%&|^<>~n]+$/.test(e)) return "i64";
+    }
     // Use module-level inferInitType
     return inferInitType(e, locals, this.enumValues, this.functions);
   }
@@ -8713,6 +8737,52 @@ ${prefixed}
     };
     const op = CONV[`${have}>${want}`];
     return op ? `(${op} ${wat})` : wat;
+  }
+
+  /**
+   * An operand as JavaScript's ToInt32 sees it (wrap mod 2³², NaN and ±Infinity → 0), for the
+   * operations that apply it: `Math.clz32` / `Math.imul` (ld27) and the bitwise operators
+   * `|` `&` `^` `<<` `>>` `>>>` (ld29, 2026-10-13). A literal folds; an i32 value is untouched; an
+   * f64 / f32 value, or one wasic would have wrapped in a TRAPPING `trunc_f64_s`, goes through
+   * `$__i32_toint32`. A bigint is left as is (its operator or Math call handles it).
+   */
+  private emitToInt32(a: string, locals: Map<string, WatType>): string {
+    const lit = a.trim();
+    if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+    const w = this.emitExpr(a, locals, "i32");
+    const have = this.watResultType(w, locals);
+    if (have === "i64") return w;
+    const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
+    if (have !== "f64" && have !== "f32" && !truncated) return w;
+    this.mathHelpers.add("i32_toint32");
+    return `(call $__i32_toint32 ${this.emitExpr(a, locals, "f64")})`;
+  }
+
+  /**
+   * True when `expr` is a `u64` value (wasMath L4, 2026-10-13): a name declared `u64` in scope (or
+   * at the top level, not shadowed), a call to a function declared `: u64`, or a wasMath helper
+   * whose result is the u64 view (`u64.*` returning bits, `*.toU64`, `*.toU64Sat`). It prints
+   * unsigned; a value of 2⁶³ or more printed as a negative number before.
+   */
+  private isU64Expr(expr: string, locals: Map<string, WatType>): boolean {
+    let e = expr.trim();
+    while (e.startsWith("(") && e.endsWith(")") && parenDepthNeverNegative(e.slice(1, -1))) {
+      e = e.slice(1, -1).trim();
+    }
+    if (/^\w+$/.test(e)) {
+      return this.u64Vars.has(e) || (!locals.has(e) && this.u64Globals.has(e));
+    }
+    const call = e.match(/^(\w+)\s*\(/);
+    // one call whose argument list runs to the end (`f(a)(b)` and `f(a) + g(b)` are not)
+    if (!call || !e.endsWith(")") || !parenDepthNeverNegative(e.slice(call[0].length, -1))) {
+      return false;
+    }
+    const wm = call[1].match(/^__wm_(\w+)$/);
+    if (wm) {
+      const h = WM_WAT[wm[1]];
+      return !!h && h.result === "i64" && (/^u64_/.test(wm[1]) || /_toU64(Sat)?$/.test(wm[1]));
+    }
+    return this.functions.find((f) => f.name === call[1])?.isU64Result === true;
   }
 
   /** The numeric result type of an emitted WAT expression, read from its outermost form, or
@@ -10104,21 +10174,8 @@ ${prefixed}
             ? `(f32.demote_f64 ${w})`
             : w;
 
-        // Always-i32 ops. JavaScript applies ToInt32 to each argument (wrap mod 2³², NaN and
-        // ±Infinity → 0); an f64 argument reached `i32.clz` / `i32.mul` raw, an invalid module
-        // (ld27, 2026-10-09). A literal folds; an f64 / f32 value goes through `$__i32_toint32`.
-        const toInt32 = (a: string): string => {
-          const lit = a.trim();
-          if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
-          const w = this.emitExpr(a, locals, "i32");
-          const have = this.watResultType(w, locals);
-          if (have === "i64") return w; // the bigint diagnostic above (sw63)
-          // a float read at i32 can come back as a TRAPPING `trunc_f64_s`; ToInt32 wraps instead
-          const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
-          if (have !== "f64" && have !== "f32" && !truncated) return w;
-          this.mathHelpers.add("i32_toint32");
-          return `(call $__i32_toint32 ${this.emitExpr(a, locals, "f64")})`;
-        };
+        // Always-i32 ops: JavaScript applies ToInt32 to each argument (ld27, emitToInt32).
+        const toInt32 = (a: string): string => this.emitToInt32(a, locals);
         if (mathFn === "clz32") {
           return `(i32.clz ${toInt32(args[0] ?? "0")})`;
         }
@@ -10796,8 +10853,17 @@ ${prefixed}
     }
 
     // Unary ~ — bitwise not → i32.xor with -1
+    // (2026-10-13: a bigint operand is `i64.xor`; a float operand is ToInt32'd, as for `|`, ld29.)
     if (unaryOk && expr.startsWith("~")) {
-      return `(i32.xor ${this.emitExpr(expr.slice(1).trim(), locals, "i32")} (i32.const -1))`;
+      const inner = expr.slice(1).trim();
+      if (watBaseType(this.inferExprType(inner, locals)) === "i64") {
+        return this.convertWat(
+          `(i64.xor ${this.emitExpr(inner, locals, "i64")} (i64.const -1))`,
+          "i64",
+          defaultType,
+        );
+      }
+      return this.convertWat(`(i32.xor ${this.emitToInt32(inner, locals)} (i32.const -1))`, "i32", defaultType);
     }
 
     // Unary - on a non-literal (e.g. -x, -(a+b))
@@ -10806,6 +10872,14 @@ ${prefixed}
       const innerType = /^\w+$/.test(inner) && locals.has(inner) ? locals.get(inner)! : defaultType;
       if (innerType === "f64" || innerType === "f32") {
         return `(${innerType}.neg ${this.emitExpr(inner, locals, innerType)})`;
+      }
+      // a bigint: `i64.sub` (2026-10-13; `-x` of a bigint parameter was `i32.sub` of an i64)
+      if (innerType === "i64" || watBaseType(this.inferExprType(inner, locals)) === "i64") {
+        return this.convertWat(
+          `(i64.sub (i64.const 0) ${this.emitExpr(inner, locals, "i64")})`,
+          "i64",
+          defaultType,
+        );
       }
       return `(i32.sub (i32.const 0) ${this.emitExpr(inner, locals, "i32")})`;
     }
@@ -10817,9 +10891,19 @@ ${prefixed}
     if (unaryOk) {
       const powIdx = this.findDepth0LTR(expr, "**");
       if (powIdx !== -1) {
-        this.needsMathLib38 = true;
         const lhs = expr.slice(0, powIdx).trim();
         const rhs = expr.slice(powIdx + 2).trim();
+        // bigint `**` (ld30, 2026-10-13): wasMath's i64 power by squaring, wrapped to 64 bits like
+        // every bigint here; a negative exponent traps where JavaScript throws a RangeError.
+        if (
+          watBaseType(this.inferExprType(lhs, locals)) === "i64" ||
+          watBaseType(this.inferExprType(rhs, locals)) === "i64"
+        ) {
+          this.mathHelpers.add("i64_pow");
+          const w = `(call $__i64_pow ${this.emitExpr(lhs, locals, "i64")} ${this.emitExpr(rhs, locals, "i64")})`;
+          return this.convertWat(w, "i64", defaultType);
+        }
+        this.needsMathLib38 = true;
         return `(call $mathlib_pow ${this.emitExpr(lhs, locals, "f64")} ${
           this.emitExpr(rhs, locals, "f64")
         })`;
@@ -11133,6 +11217,29 @@ ${prefixed}
             return null;
           })()
           : null;
+        // bigint `&` `|` `^` `<<` `>>` (ld31, 2026-10-13): i64 operations, not i32 ones handed an
+        // i64 (an invalid module). A bigint is an i64 here, so a result is JavaScript's wrapped to
+        // 64 bits, as `+` / `*` already are; the shifts go through helpers because `i64.shl` takes
+        // its count mod 64 and JavaScript's count is unbounded (and negative shifts the other way).
+        // `>>>` on a bigint is a TypeError in JavaScript.
+        if (alwaysI32) {
+          const big = (s: string) => watBaseType(this.inferExprType(s, locals)) === "i64";
+          if (big(lhs) || big(rhs)) {
+            if (op === ">>>") {
+              this.diagnostics.push(
+                `'${expr.trim().slice(0, 60)}': '>>>' on a bigint is a TypeError in JavaScript; use '>>', or wasMath's i64.shrU`,
+              );
+            }
+            const L = this.emitExpr(lhs, locals, "i64"), R = this.emitExpr(rhs, locals, "i64");
+            let w: string;
+            if (op === "<<" || op === ">>") {
+              const h = op === "<<" ? "i64_shl" : "i64_shr";
+              this.mathHelpers.add(h);
+              w = `(call $__${h} ${L} ${R})`;
+            } else w = `(i64.${i32suf} ${L} ${R})`;
+            return this.convertWat(w, "i64", defaultType);
+          }
+        }
         const lhsType: WatType = alwaysI32 ? "i32" : (_lhsIsStrSlice ? "string" : (_dotFieldType ??
           (/^\w+$/.test(lhs) && locals.has(lhs)
             ? locals.get(lhs)!
@@ -11246,9 +11353,11 @@ ${prefixed}
           return innerWat;
         }
         const watOp = `${baseType}.${suffix}`;
-        const innerWat = `(${watOp} ${this.emitExpr(lhs, locals, numType)} ${
-          this.emitExpr(rhs, locals, numType)
-        })`;
+        // The bitwise / shift operators apply ToInt32 to each operand (ld29, 2026-10-13): an f64
+        // out of the i32 range used to TRAP in a `trunc_f64_s` (`4294967298.7 | 0` is 2).
+        const operand = (s: string) =>
+          alwaysI32 ? this.emitToInt32(s, locals) : this.emitExpr(s, locals, numType);
+        const innerWat = `(${watOp} ${operand(lhs)} ${operand(rhs)})`;
         // Mixed-type promotion: if context needs f64/i64 but arithmetic ran in i32, convert.
         // Also applies to alwaysI32 ops (|, ^, &, >>>, etc.) when stored in a f64 variable.
         if (baseType === "i32") {
@@ -14360,6 +14469,7 @@ ${prefixed}
       // `T | null` local), else ordinary inference.
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
+      setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -14397,6 +14507,7 @@ ${prefixed}
       setNullishResolver(undefined);
       setLogicalResolver(undefined);
       setNullPrintResolver(undefined);
+      setU64Resolver(undefined);
       setEnumStrVarResolver(undefined);
       const { statements, needsHelpers, needsStrGather, needsArrPrintHelper, needsJoinHelper } =
         emitConsoleLog(segments, allocator, "    ", 1, this.iovBase, this.scratchBase);
@@ -14827,6 +14938,7 @@ ${prefixed}
       // `T | null` local), else ordinary inference.
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
+      setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -14864,6 +14976,7 @@ ${prefixed}
       setNullishResolver(undefined);
       setLogicalResolver(undefined);
       setNullPrintResolver(undefined);
+      setU64Resolver(undefined);
       setEnumStrVarResolver(undefined);
       const {
         statements,
@@ -16862,9 +16975,62 @@ ${prefixed}
       f64Helpers.push(this.emitHypotHelper(Number(h.slice("f64_hypot".length))));
     }
     if (this.mathHelpers.has("i32_toint32")) {
-      f64Helpers.push(`  ;; JavaScript's ToInt32 on an f64 (Math.clz32 / Math.imul arguments, ld27)
+      f64Helpers.push(`  ;; JavaScript's ToInt32 on an f64 (Math.clz32 / Math.imul arguments, ld27; bitwise operands, ld29)
   (func $__i32_toint32 (param f64) (result i32)
     ${WM_WAT.toint32.body})`);
+    }
+    // bigint operators (ld30, ld31): JavaScript's result wrapped to 64 bits. A shift count is
+    // unbounded and may be negative (it shifts the other way), where `i64.shl` / `shr_s` take it
+    // mod 64; `**` is wasMath's i64 power (a negative exponent traps: JavaScript throws).
+    if (this.mathHelpers.has("i64_shl")) {
+      f64Helpers.push(`  ;; bigint a << c, wrapped to 64 bits (ld31)
+  (func $__i64_shl (param $a i64) (param $c i64) (result i64)
+    (if (i64.ge_s (local.get $c) (i64.const 64)) (then (return (i64.const 0))))
+    (if (i64.le_s (local.get $c) (i64.const -64)) (then (return (i64.shr_s (local.get $a) (i64.const 63)))))
+    (if (i64.lt_s (local.get $c) (i64.const 0))
+      (then (return (i64.shr_s (local.get $a) (i64.sub (i64.const 0) (local.get $c))))))
+    (i64.shl (local.get $a) (local.get $c)))`);
+    }
+    if (this.mathHelpers.has("i64_shr")) {
+      f64Helpers.push(`  ;; bigint a >> c, wrapped to 64 bits (ld31)
+  (func $__i64_shr (param $a i64) (param $c i64) (result i64)
+    (if (i64.ge_s (local.get $c) (i64.const 64)) (then (return (i64.shr_s (local.get $a) (i64.const 63)))))
+    (if (i64.le_s (local.get $c) (i64.const -64)) (then (return (i64.const 0))))
+    (if (i64.lt_s (local.get $c) (i64.const 0))
+      (then (return (i64.shl (local.get $a) (i64.sub (i64.const 0) (local.get $c))))))
+    (i64.shr_s (local.get $a) (local.get $c)))`);
+    }
+    if (this.mathHelpers.has("u64_to_str")) {
+      // $__i64_to_str's digit loop (rem_u / div_u) with no sign: a wasMath u64 (L4, 2026-10-13).
+      f64Helpers.push(`  ;; u64 → decimal string + 'n': the i64 bits read UNSIGNED (wasMath L4)
+  (func $__u64_to_str (param $val i64) (param $buf i32) (result i32)
+    (local $end i32) (local $tmp i32) (local $ch i32) (local $t i32)
+    (local.set $end (local.get $buf))
+    (loop $digit
+      (i32.store8 (local.get $end)
+        (i32.add (i32.const 48) (i32.wrap_i64 (i64.rem_u (local.get $val) (i64.const 10)))))
+      (local.set $end (i32.add (local.get $end) (i32.const 1)))
+      (local.set $val (i64.div_u (local.get $val) (i64.const 10)))
+      (br_if $digit (i64.ne (local.get $val) (i64.const 0))))
+    (local.set $tmp (local.get $buf))
+    (local.set $ch (i32.sub (local.get $end) (i32.const 1)))
+    (block $rdone
+      (loop $rloop
+        (br_if $rdone (i32.ge_u (local.get $tmp) (local.get $ch)))
+        (local.set $t (i32.load8_u (local.get $tmp)))
+        (i32.store8 (local.get $tmp) (i32.load8_u (local.get $ch)))
+        (i32.store8 (local.get $ch) (local.get $t))
+        (local.set $tmp (i32.add (local.get $tmp) (i32.const 1)))
+        (local.set $ch (i32.sub (local.get $ch) (i32.const 1)))
+        (br $rloop)))
+    (i32.store8 (local.get $end) (i32.const 110))
+    (i32.sub (i32.add (local.get $end) (i32.const 1)) (local.get $buf)))`);
+    }
+    if (this.mathHelpers.has("i64_pow")) {
+      const h = WM_WAT.i64_pow;
+      f64Helpers.push(`  ;; bigint a ** b, wrapped to 64 bits (ld30; wasMath's i64.pow)
+  (func $__i64_pow (param i64) (param i64) (result i64) ${h.locals ?? ""}
+    ${h.body})`);
     }
     const i32Helpers = ["i32_abs", "i32_min", "i32_max"].some((h) => this.mathHelpers.has(h));
     if (!i32Helpers) return f64Helpers.join("\n\n");
@@ -18918,10 +19084,14 @@ ${sum}
     // FuncParam struct doesn't retain the raw `any` annotation; any params still work via the
     // foundation's explicit dynrt calls.)
     this.anyVars = new Set();
+    this.u64Vars = new Set();
     for (const line of fn.bodyLines) {
       const m = line.match(/(?:const|let|var)\s+(\w+)\s*:\s*any\b/);
       if (m) this.anyVars.add(m[1]);
+      const u = line.match(/(?:const|let|var)\s+(\w+)\s*:\s*u64\b/);
+      if (u) this.u64Vars.add(u[1]);
     }
+    for (const p of fn.params) if (p.isU64) this.u64Vars.add(p.name);
     // #14 follow-up: `any` PARAMS are now tracked too (FuncParam.isAny) — so `x as i32`, operators on
     // `x`, and member/index/call on `x` work for an any-typed parameter (needed by host marshalling).
     for (const p of fn.params) {
@@ -21096,6 +21266,7 @@ ${sum}
       this.catchVarShadows = new Set();
       // #14.3.1: module-level `any` locals (top-level `: any` declarations) for the as-unbox path.
       this.anyVars = new Set();
+      this.u64Vars = new Set(this.u64Globals);
       for (const line of this.startBodyLines) {
         const m = line.match(/(?:const|let|var)\s+(\w+)\s*:\s*any\b/);
         if (m) this.anyVars.add(m[1]);
