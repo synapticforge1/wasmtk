@@ -7,12 +7,21 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
-> **PAUSED 2026-10-09, end of day (owner).** `main` is clean at the integer-division commit
-> (`7bda25f`), every suite green; nothing pushed, tagged or published; the next release is MAJOR
-> (3.0.0) and waits on the owner's word. **Resume with wasMath L4** (wasm-number-types.md): ld29
-> (`x | 0` traps out of range; touches open decision D3), ld30 / ld31 (bigint `**`, bitwise,
-> shifts), sw64 (`-a` on a bigint prints without `n`), the u64 ≥ 2⁶³ printer. Then sw62 (console
-> line corruption), the 22 loud rows, and the binaryang 1.10.0 items below. Decided later the
+> **2026-10-13: Go asyncify broken by a toolchain update (OPEN, loud).** The machine now has Go
+> 1.27.2 + TinyGo 0.43.0 (testing.md records Go 1.26.7 + TinyGo 0.41.1 green, and that TinyGo 0.42
+> was the first to support Go 1.27). `go_asyncify_tests` 9 / 12: WaitGroup+Mutex, pipeline and
+> nested fail in the in-house asyncify step, `Flatten: unresolved call target
+> "$asyncify_stop_unwind"`; identical on `main`. To do: find what TinyGo 0.43 emits differently
+> around `asyncify_*` (an import now, a renamed / removed export?), fix the in-house path, re-run
+> all three Go suites; update the recorded toolchain pair.
+>
+> **2026-10-13: wasMath L4 DONE** (ld29, ld30, ld31, sw64, the u64 printer; wasm-number-types.md).
+> **Next, in order:** the D3 refusal and the D6 report (both below), sw62 (console line
+> corruption), the 19 loud rows, then the binaryang 1.10.0 items. The next release is MAJOR
+> (3.0.0) and waits on the owner's word.
+>
+> **PAUSED 2026-10-09, end of day (owner).** `main` was clean at the integer-division commit
+> (`7bda25f`). Decided later the
 > same day (owner): `(a / b) | 0` STAYS refused, pointing at wasMath; **D6: a compile-stopping
 > issue is REPORTED with its location** (below); **D3: an implicit f64 → i32 conversion is
 > REFUSED**, naming `f64.toI32` (traps) / `f64.toI32Sat` (clamps) / `f64.toI32Wrap` (wraps).
@@ -75,9 +84,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     Bootstrap (INDEX + CLAUDE.md) is 14.5 KB against a ~10 KB guideline; the rest is the INDEX's
     policy section, which is the owner's to trim.
   - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
-- ⏳ **Wasm types in TypeScript** (wasm-math-plan.md). **2026-10-09, night: the division question
-  is DECIDED** (owner): a plain `/` between integers is a compile error naming wasMath's
-  `i32.div` / `f64.div`; sw36, sw37 closed; open decisions left: D3, D6. Before that: the owner
+- ⏳ **Wasm types in TypeScript** (wasm-math-plan.md). **All decisions D1–D6 settled 2026-10-09**
+  (owner): integer `/` is a compile error (built); D3, refuse an implicit f64 → i32 (NOT built);
+  D6, a located compile-error report (NOT built); both planned in the note at the top. Before that: the owner
   ruled (2026-09-30): the declared
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
@@ -101,15 +110,15 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     2026-10-09** under the owner's **"CR, in both"** (compiled `Math` stays correctly rounded;
     wasMath's Math-style members run the same mathlib in Deno; plain `Math` in Deno may be 1 ulp
     off, documented): sw57–sw59, sw61, sw63, ld27, ld28, ld33 fixed, sw60 closed by decision;
-    Payne–Hanek trig reduction; 199 / 199 exact from compiled programs. **NEXT: L4** (ld29 `x | 0`,
-    ld30 / ld31 bigint `**` / bitwise / shifts, sw64 `-a` printing; the u64 ≥ 2⁶³ printer).
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **2 open silent-wrong, 22 open
-  loud** (2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
+    Payne–Hanek trig reduction; 199 / 199 exact from compiled programs. **L4 DONE 2026-10-13**
+    (ld29, ld30, ld31, sw64, u64 printed unsigned). The library's track is complete; its one known
+    gap (an out-of-range f64 into an `i32.*` argument traps) closes with D3.
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **1 open silent-wrong (sw62), 19
+  open loud** (2026-10-13: L4 closed sw64, ld29–ld31; 2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
   wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33; earlier the same day
   sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 and friends).
-  - Open silent: sw62 is a console buffer bug (a long f64 line corrupts a later line); sw64 a
-    bigint print (`-a` without `n`, L4).
-  - NEXT: L4, the 22 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
+  - Open silent: sw62 is a console buffer bug (a long f64 line corrupts a later line).
+  - NEXT: D3, D6, sw62, the 19 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
     compiler bugs BEFORE the binaryang 1.10.0 items below.
   - Nullable gaps left by sw51's option A (no corpus use; design-decisions.md § "Nullable FIELDS
     carry a flag word"): class-embedded tuple destructuring, union-variant / `Record` fields,
@@ -126,6 +135,11 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   re-verified open 2026-09-30): a non-WASI import in a bundled module is dropped. No test covers it.
 
 ## Planned
+
+- **Leaving Deno for Bun + Node, JSR stays** (deno-exit-plan.md, scoped 2026-10-13; owner's
+  direction 2026-10-12). Phases P0–P8. All owner decisions M1–M7 settled 2026-10-13 (Bun is the
+  TypeScript reference; Bun + Deno + Node LTS + web supported; run-time `.wasm` loading through
+  universal-wasm-loader, which lands first). Not started; P0 waits on the owner's word.
 
 - **`wasic` modularization, Phases 1–3** (wasic-modularization-plan.md; letter H12): output-
   preserving, gated by golden-WAT and `wasic_seam_tests`.

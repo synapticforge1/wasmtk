@@ -18,9 +18,10 @@
  * carrying it as an exact f64 prints and computes as Deno does; the helpers take the bits with
  * ToInt32 and give back an f64). Comparisons return `bool` (printed `true` / `false`).
  *
- * Known gaps (wasm-number-types.md): a `u64` value ≥ 2⁶³ prints signed (no unsigned i64 printer
- * yet); an `i32`-namespace argument that is an f64 OUT of the int32 range traps (wasic's f64 → i32
- * rule) where the TypeScript wraps (`| 0`).
+ * A `u64` prints unsigned (L4, 2026-10-13: wasic tracks the names, parameters and results declared
+ * `u64`, and these helpers' u64 results). Known gap (wasm-number-types.md): an `i32`-namespace
+ * argument that is an f64 OUT of the int32 range traps (wasic's f64 → i32 rule) where the
+ * TypeScript wraps (`| 0`); the owner's D3 (refuse the implicit f64 → i32) closes it.
  *
  * @module
  */
@@ -199,7 +200,7 @@ export const WM_WAT: Record<string, WmHelper> = {
   i64_fromF32: { params: ["f32"], result: "i64", body: un("i64.trunc_f32_s") },
   i64_fromF32Sat: { params: ["f32"], result: "i64", body: un("i64.trunc_sat_f32_s") },
 
-  // ── u64 (the same i64 bits; values ≥ 2⁶³ print signed: a known gap) ───────────────────────
+  // ── u64 (the same i64 bits; printed unsigned since L4) ───────────────────────────────────────
   u64_from: { params: ["i64"], result: "i64", body: L0 },
   u64_div: { params: ["i64", "i64"], result: "i64", body: bin("i64.div_u") },
   u64_rem: { params: ["i64", "i64"], result: "i64", body: bin("i64.rem_u") },
