@@ -349,6 +349,23 @@ let _nullPrintResolver:
   | ((token: string, locals: Map<string, string>) => string | undefined)
   | undefined = undefined;
 let _inNullPrint = false;
+/** True when an expression is a wasMath `u64` (an i64 whose bits print unsigned); wasic owns the
+ *  declared types (wasMath L4, 2026-10-13). */
+let _u64Resolver: ((expr: string, locals: Map<string, string>) => boolean) | undefined = undefined;
+/** Inject the `u64` resolver. Pass `undefined` to clear it. */
+export function setU64Resolver(fn: typeof _u64Resolver): void {
+  _u64Resolver = fn;
+}
+/** Marks the i64 segment of a `u64` expression `unsigned` (printed by `$__u64_to_str`). */
+function markU64(segs: LogSegment[], token: string, locals: Map<string, string>): LogSegment[] {
+  const only = segs.length === 1 ? segs[0] : undefined;
+  if (only && (only.kind === "i64var" || only.kind === "i64expr") && _u64Resolver?.(token, locals)) {
+    only.unsigned = true;
+    _mathHelperNeeded?.("u64_to_str");
+  }
+  return segs;
+}
+
 /** Inject the null-printing resolver (sw51). Pass `undefined` to clear it. */
 export function setNullPrintResolver(fn: typeof _nullPrintResolver): void {
   _nullPrintResolver = fn;
@@ -566,12 +583,12 @@ export type LogSegment =
   | { kind: "i32var"; name: string } // local i32 variable
   // `strConv`: the i64 is inside a template or concatenation, string conversion, so `12` not
   // console.log's `12n` (sw50, 2026-10-09). Set by parseConsoleLogArgs.
-  | { kind: "i64var"; name: string; strConv?: boolean } // local i64 variable
+  | { kind: "i64var"; name: string; strConv?: boolean; unsigned?: boolean } // local i64 variable
   // `console`: a WHOLE console argument, printed with console.log's formatting (−0 as `-0`), not
   // string conversion (`${-0}` is `0`). Set by parseConsoleLogArgs only (sw41, 2026-10-06).
   | { kind: "f64var"; name: string; console?: boolean } // local f64 variable
   | { kind: "i32expr"; wat: string } // arbitrary WAT expression yielding i32
-  | { kind: "i64expr"; wat: string; strConv?: boolean } // arbitrary WAT expression yielding i64
+  | { kind: "i64expr"; wat: string; strConv?: boolean; unsigned?: boolean } // arbitrary WAT expression yielding i64 (`unsigned`: a wasMath u64, printed unsigned)
   | { kind: "f64expr"; wat: string; console?: boolean } // arbitrary WAT expression yielding f64
   | { kind: "strvar"; ptrLocal: string; lenLocal: string } // string variable (ptr + len i32 locals)
   | { kind: "boolvar"; name: string } // bool-typed local (i32, 0=false 1=true)
@@ -891,31 +908,39 @@ function parseSingleArg(
       // An array operand of a string concat is string conversion, `.join(",")` (sw09).
       const asJoined = (p: string) => /^\w+$/.test(p) && arrayLookup?.(p) ? `${p}.join(",")` : p;
       return [
-        ...parseSingleArg(
-          asJoined(lhs),
+        ...markU64(
+          parseSingleArg(
+            asJoined(lhs),
+            locals,
+            funcLookup,
+            allocString,
+            enumLookup,
+            arrayLookup,
+            structLookup,
+            dotCallLookup,
+            globals,
+            enumStringLookup,
+            closureVarLookup,
+          ),
+          lhs,
           locals,
-          funcLookup,
-          allocString,
-          enumLookup,
-          arrayLookup,
-          structLookup,
-          dotCallLookup,
-          globals,
-          enumStringLookup,
-          closureVarLookup,
         ),
-        ...parseSingleArg(
-          asJoined(rhs),
+        ...markU64(
+          parseSingleArg(
+            asJoined(rhs),
+            locals,
+            funcLookup,
+            allocString,
+            enumLookup,
+            arrayLookup,
+            structLookup,
+            dotCallLookup,
+            globals,
+            enumStringLookup,
+            closureVarLookup,
+          ),
+          rhs,
           locals,
-          funcLookup,
-          allocString,
-          enumLookup,
-          arrayLookup,
-          structLookup,
-          dotCallLookup,
-          globals,
-          enumStringLookup,
-          closureVarLookup,
         ),
       ];
     }
@@ -1856,6 +1881,15 @@ function parseSingleArg(
       }
     }
   }
+  // A bigint led by a unary minus or a parenthesis (`-a`, sw64), or by a bigint LITERAL
+  // (`3n ** 20n`, ld30), had no typed lead atom: it printed through the f64 printer, without its
+  // `n` (2026-10-13).
+  if (leadType === undefined) {
+    const lead2 = token.replace(/^[-~(\s]+/, "").match(/^(\w+)/)?.[1];
+    if (lead2 && (/^\d+n$/.test(lead2) || (locals.get(lead2) ?? globals?.get(lead2)) === "i64")) {
+      leadType = "i64";
+    }
+  }
   if (leadType === "i64") {
     return [{
       kind: "i64expr",
@@ -1944,18 +1978,22 @@ function parseTemplateLiteral(
         ? `${rawExpr}.join(",")`
         : rawExpr;
       segments.push(
-        ...parseSingleArg(
+        ...markU64(
+          parseSingleArg(
+            expr,
+            locals,
+            funcLookup,
+            allocString,
+            enumLookup,
+            arrayLookup,
+            structLookup,
+            dotCallLookup,
+            globals,
+            enumStringLookup,
+            closureVarLookup,
+          ),
           expr,
           locals,
-          funcLookup,
-          allocString,
-          enumLookup,
-          arrayLookup,
-          structLookup,
-          dotCallLookup,
-          globals,
-          enumStringLookup,
-          closureVarLookup,
         ),
       );
       i = j;
@@ -1976,6 +2014,42 @@ function parseTemplateLiteral(
  * The `expectedType` is used to emit the correct const instruction for literals
  * and to choose the right conversion when calling a function.
  */
+/**
+ * An operand as JavaScript's ToInt32 sees it, the twin of wasic's `emitToInt32`: for `Math.clz32` /
+ * `Math.imul` (ld27) and the bitwise operators (ld29, 2026-10-13). A literal folds; an i32 value is
+ * untouched; an f64 / f32 value (read from the emitted WAT's outermost form), or a float wrapped in
+ * a TRAPPING `trunc_f64_s`, goes through `$__i32_toint32`. A bigint is left as is.
+ */
+function toInt32Wat(
+  e: string,
+  locals: Map<string, string>,
+  funcLookup?: FuncLookup,
+  allocString?: DataAllocator,
+  arrayLookup?: ArrayLookup,
+  structLookup?: StructFieldLookup,
+  globals?: Map<string, string>,
+): string {
+  const lit = e.trim();
+  if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+  const w = exprToWat(e, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals);
+  const m = w.trimStart().match(/^\(([\w.]+)(?:\s+\$([\w.$]+))?/);
+  const typed = m?.[1].match(/^(i32|i64|f32|f64)\.(\w+)/);
+  const have = typed
+    ? (/^(eqz?|ne|lt|gt|le|ge)(_[su])?$/.test(typed[2]) ? "i32" : typed[1])
+    : m?.[1] === "local.get" && m[2]
+    ? locals.get(m[2])
+    : m?.[1] === "global.get" && m[2]
+    ? globals?.get(m[2])
+    : undefined;
+  if (have === "i64") return w;
+  const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
+  if (have !== "f64" && have !== "f32" && !truncated) return w;
+  _mathHelperNeeded?.("i32_toint32");
+  return `(call $__i32_toint32 ${
+    exprToWat(e, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals)
+  })`;
+}
+
 function exprToWat(
   expr: string,
   locals: Map<string, string>,
@@ -2373,28 +2447,8 @@ function exprToWat(
       // clz32 / imul: ToInt32 on each argument, as wasic's emitExpr does (ld27, 2026-10-09): a
       // literal folds; an f64 / f32 value (read from the emitted WAT's outermost form) goes
       // through `$__i32_toint32`; a bigint is a TypeError in JavaScript, so a diagnostic.
-      const toInt32 = (e: string): string => {
-        const lit = e.trim();
-        if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
-        const w = exprToWat(e, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals);
-        const m = w.trimStart().match(/^\(([\w.]+)(?:\s+\$([\w.$]+))?/);
-        const typed = m?.[1].match(/^(i32|i64|f32|f64)\.(\w+)/);
-        const have = typed
-          ? (/^(eqz?|ne|lt|gt|le|ge)(_[su])?$/.test(typed[2]) ? "i32" : typed[1])
-          : m?.[1] === "local.get" && m[2]
-          ? locals.get(m[2])
-          : m?.[1] === "global.get" && m[2]
-          ? globals?.get(m[2])
-          : undefined;
-        if (have === "i64") return w; // the bigint diagnostic above (sw63)
-        // a float read at i32 can come back as a TRAPPING `trunc_f64_s`; ToInt32 wraps instead
-        const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
-        if (have !== "f64" && have !== "f32" && !truncated) return w;
-        _mathHelperNeeded?.("i32_toint32");
-        return `(call $__i32_toint32 ${
-          exprToWat(e, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals)
-        })`;
-      };
+      const toInt32 = (e: string): string =>
+        toInt32Wat(e, locals, funcLookup, allocString, arrayLookup, structLookup, globals);
       if (fn === "clz32") {
         return `(i32.clz ${toInt32(a[0] ?? "0")})`;
       }
@@ -2685,19 +2739,19 @@ function exprToWat(
   }
 
   // Unary ~ — bitwise not → i32.xor with -1
+  // (2026-10-13: at i64 a bigint `i64.xor`; otherwise the operand is ToInt32'd, as for `|`.)
   if (expr.startsWith("~")) {
-    return `(i32.xor ${
-      exprToWat(
-        expr.slice(1).trim(),
-        locals,
-        "i32",
-        funcLookup,
-        allocString,
-        arrayLookup,
-        structLookup,
-        globals,
-      )
+    const inner = expr.slice(1).trim();
+    if (expectedType === "i64") {
+      return `(i64.xor ${
+        exprToWat(inner, locals, "i64", funcLookup, allocString, arrayLookup, structLookup, globals)
+      } (i64.const -1))`;
+    }
+    const xw = `(i32.xor ${
+      toInt32Wat(inner, locals, funcLookup, allocString, arrayLookup, structLookup, globals)
     } (i32.const -1))`;
+    // an i32 result where a float is expected (`console.log(~f)` of an f64 f) is widened
+    return isFloat ? `(${expectedType}.convert_i32_s ${xw})` : xw;
   }
 
   // Unary - on a non-literal (e.g. -x, -(a+b)). Unary minus binds tighter than every binary
@@ -2717,6 +2771,12 @@ function exprToWat(
           structLookup,
           globals,
         )
+      })`;
+    }
+    // a bigint (the i64 segment of `console.log(-a)`, sw64, 2026-10-13)
+    if (expectedType === "i64") {
+      return `(i64.sub (i64.const 0) ${
+        exprToWat(inner, locals, "i64", funcLookup, allocString, arrayLookup, structLookup, globals)
       })`;
     }
     return `(i32.sub (i32.const 0) ${
@@ -3000,6 +3060,21 @@ function exprToWat(
     }
     // An i32 left operand meeting a KNOWN float right one computes in f64 (sw15's console twin,
     // 2026-10-06): `i + f` was `i32.add` over an f64 global, an invalid module.
+    // bigint `&` `|` `^` `<<` `>>` (ld31, 2026-10-13): wasic's emitExpr owns the i64 forms (and the
+    // shift helpers); handing i32.and an i64 was an invalid module.
+    if (alwaysI32 && _exprFallbackResolver) {
+      const isBig = (s: string) => {
+        const t = s.trim();
+        if (/^-?\d+n$/.test(t)) return true;
+        const lead = t.match(/^(\w+)(?![\w.([])/)?.[1];
+        return lead !== undefined && (locals.get(lead) ?? globals?.get(lead)) === "i64";
+      };
+      if (isBig(lhs) || isBig(rhs)) {
+        const r = _exprFallbackResolver(expr, locals);
+        const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
+        if (widened !== null) return widened;
+      }
+    }
     const opType = alwaysI32
       ? "i32"
       : effLhsType === "i64"
@@ -3016,26 +3091,13 @@ function exprToWat(
       : i32op;
     // `/` between integers: refused, as in wasic's emitExpr (owner, 2026-10-09).
     if (watOp === "i32.div_s") _diagnosticSink?.(intDivisionDiagnostic(expr));
-    const lW = exprToWat(
-      lhs,
-      locals,
-      opType,
-      funcLookup,
-      allocString,
-      arrayLookup,
-      structLookup,
-      globals,
-    );
-    const rW = exprToWat(
-      rhs,
-      locals,
-      opType,
-      funcLookup,
-      allocString,
-      arrayLookup,
-      structLookup,
-      globals,
-    );
+    // The bitwise / shift operators apply ToInt32 to each operand (ld29, 2026-10-13).
+    const operand = (s: string) =>
+      alwaysI32
+        ? toInt32Wat(s, locals, funcLookup, allocString, arrayLookup, structLookup, globals)
+        : exprToWat(s, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals);
+    const lW = operand(lhs);
+    const rW = operand(rhs);
     // A float `%`: WebAssembly has no `f64.rem` (an invalid module, ld02). The same formula as
     // wasic's emitExpr, x - trunc(x / y) * y, so the two paths agree.
     const opWat = op === "%" && (opType === "f64" || opType === "f32")
@@ -3119,6 +3181,14 @@ function isWholeStringLiteral(token: string, q: string): boolean {
  *  emitMathHelpers) for a whole console argument, else `$__f64_to_str` (string conversion). */
 function f64Printer(seg: LogSegment): string {
   return "console" in seg && seg.console ? "$__f64_to_str_console" : "$__f64_to_str";
+}
+
+/** The i64 printer for a numeric segment: `$__u64_to_str` for a wasMath `u64` (its bits read
+ *  unsigned, wasMath L4), else `$__i64_to_str`. Both end in `n`. */
+function i64Printer(seg: LogSegment): string {
+  if (!("unsigned" in seg && seg.unsigned)) return "$__i64_to_str";
+  _mathHelperNeeded?.("u64_to_str");
+  return "$__u64_to_str";
 }
 
 /** True if `s` has a string or template literal at top level (outside brackets): `"x" + n` does,
@@ -3333,6 +3403,7 @@ export function parseConsoleLogArgs(
       enumStringLookup,
       closureVarLookup,
     );
+    markU64(argSegs, args[i], locals);
     // A whole numeric argument prints with console.log's formatting: −0 as `-0` (sw41). A
     // template or a top-level string concatenation is string conversion, where −0 is `0`.
     const only = argSegs.length === 1 ? argSegs[0] : undefined;
@@ -3645,13 +3716,13 @@ export function emitConsoleLog(
         if (seg.kind === "i32var") {
           callExpr = `(call $__i32_to_str (local.get $${seg.name}) ${destExpr})`;
         } else if (seg.kind === "i64var") {
-          callExpr = `(call $__i64_to_str (local.get $${seg.name}) ${destExpr})`;
+          callExpr = `(call ${i64Printer(seg)} (local.get $${seg.name}) ${destExpr})`;
         } else if (seg.kind === "f64var") {
           callExpr = `(call ${f64Printer(seg)} (local.get $${seg.name}) ${destExpr})`;
         } else if (seg.kind === "i32expr") {
           callExpr = `(call $__i32_to_str ${seg.wat} ${destExpr})`;
         } else if (seg.kind === "i64expr") {
-          callExpr = `(call $__i64_to_str ${seg.wat} ${destExpr})`;
+          callExpr = `(call ${i64Printer(seg)} ${seg.wat} ${destExpr})`;
         } else {
           callExpr = `(call ${f64Printer(seg)} ${seg.wat} ${destExpr})`;
         }
@@ -3805,13 +3876,13 @@ export function emitConsoleLog(
         if (seg.kind === "i32var") {
           callExpr = `(call $__i32_to_str (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "i64var") {
-          callExpr = `(call $__i64_to_str (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
+          callExpr = `(call ${i64Printer(seg)} (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "f64var") {
           callExpr = `(call ${f64Printer(seg)} (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "i32expr") {
           callExpr = `(call $__i32_to_str ${seg.wat} (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "i64expr") {
-          callExpr = `(call $__i64_to_str ${seg.wat} (i32.const ${scratchPtr}))`;
+          callExpr = `(call ${i64Printer(seg)} ${seg.wat} (i32.const ${scratchPtr}))`;
         } else {
           callExpr = `(call ${f64Printer(seg)} ${seg.wat} (i32.const ${scratchPtr}))`;
         }

@@ -4,8 +4,8 @@
  * compares with Deno on every gate run.
  *
  * Inputs are chosen per parameter type and FILTERED through the TypeScript bodies: an input that
- * throws is left out (a throw ends a program; `39_WasMathStopsTheSame.ts` covers that), and so is a
- * u64 result ≥ 2⁶³ (wasm prints it signed: a known gap). Every `Math`-style member is included:
+ * throws is left out (a throw ends a program; `39_WasMathStopsTheSame.ts` covers that). A u64
+ * result ≥ 2⁶³ is included since L4 (2026-10-13), which prints it unsigned. Every `Math`-style member is included:
  * since L3 (2026-10-09) they run the same correctly rounded math library in Deno as in wasm.
  *
  * Usage: deno run -A scripts/math/gen_wasmath_corpus.ts
@@ -42,8 +42,8 @@ const call = (ns: string, m: string, args: unknown[]) =>
   (WM as unknown as Record<string, Record<string, (...a: unknown[]) => unknown>>)[ns][m](...args);
 const usable = (ns: string, m: string, args: unknown[]) => {
   try {
-    const r = call(ns, m, args);
-    return !((ns === "u64" || /toU64/.test(m)) && typeof r === "bigint" && r >= 2n ** 63n);
+    call(ns, m, args);
+    return true;
   } catch {
     return false;
   }

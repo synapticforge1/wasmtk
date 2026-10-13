@@ -1,6 +1,16 @@
 # Wasm number types in TypeScript: `Math` stays JavaScript's, a typed library carries wasm's (SCOPE, 2026-10-09)
 
-**Status: L1, L2 and L3 DONE 2026-10-09.** **L3** (owner decision **"CR, in both"**: compiled
+**Status: L1–L4 DONE (L4 2026-10-13).** **L4**, the operator bugs, both emitters: ld29 (every
+bitwise / shift operand and `~` is ToInt32'd, never a trapping trunc), ld31 (bigint `&` `|` `^`
+are i64 ops; `<<` / `>>` follow JavaScript's unbounded count wrapped to 64 bits via
+`$__i64_shl` / `$__i64_shr`; bigint `>>>` is a compile error), ld30 (bigint `**` is
+`$__i64_pow`), sw64 (a negated bigint keeps its `n`; with it, unary `-` of a bigint parameter
+and `~` of a bigint or float), and **a `u64` prints unsigned**: wasic records names, parameters
+and results declared `u64` (`u64Vars`, `u64Globals`, `FuncParam.isU64`, `FuncDef.isU64Result`,
+plus the wasMath helpers returning u64 bits; `isU64Expr`) and the console prints them with
+`$__u64_to_str` (requested only when used). Not covered: a u64 struct field or array element
+(prints signed). Corpus `39_WasMathL4Operators`; the L2 battery and the corpus generator no
+longer skip u64 ≥ 2⁶³. Earlier, **L1, L2 and L3 DONE 2026-10-09.** **L3** (owner decision **"CR, in both"**: compiled
 `Math` stays correctly rounded, and wasMath's Math-style members give that SAME value in Deno):
 `src/wasmath.ts`'s f64 `sin` … `pow`, `cbrt` call the embedded mathlib (`MATHLIB_BYTES`, compiled
 on first use), f32's are `fround(f64.op(fround(a)))` over them; plain `Math.*` in Deno is V8's and

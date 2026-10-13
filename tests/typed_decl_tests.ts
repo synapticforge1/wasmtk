@@ -121,6 +121,8 @@ const REFUSED: [string, string, string][] = [
   ["i32 division, the | 0 idiom", `const a: i32 = 7;\nconst b: i32 = 2;\nconst q: i32 = (a / b) | 0;\nconsole.log(q);`, "integer division 'a / b'"],
   ["i32 /= ", `let a: i32 = 7;\na /= 2;\nconsole.log(a);`, "integer division 'a /= 2'"],
   ["i32 division in console.log", `const a: i32 = 7;\nconst b: i32 = 2;\nconsole.log(a / b);`, "integer division 'a / b'"],
+  // `>>>` on a bigint is a TypeError in JavaScript (wasMath L4, 2026-10-13).
+  ["bigint >>>", `const a: bigint = 7n;\nconst s: bigint = a >>> 1n;\nconsole.log(s);`, "'>>>' on a bigint is a TypeError"],
   [
     "line number counts a block comment",
     `/**\n * four\n * lines\n */\nconst ok: i32 = 1;\nlet n = 5; // the fault\nconsole.log(ok + n);`,
