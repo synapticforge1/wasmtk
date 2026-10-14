@@ -16,7 +16,12 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > a new panic-catch wrapper (`…asyncifysuspendcatch.0.paniccatch`). binaryang's `Asyncify` fails on
 > it in 1.8.1 AND 1.10.0; upstream binaryen.js 123 succeeds and the result runs (`wg-counter: 45`).
 > Report SENT 2026-10-13 (owner; `scripts/binaryang-report.md`), reproducer
-> `scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm`; waiting on binaryang's fix. **Owner, 2026-10-13:
+> `scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm`. **binaryang replied the same day: fixed
+> on their main (their analysis did not stop propagation at the bottom-most runtime, as
+> upstream's does), UNRELEASED; it ships in 1.11.0, their owner's timing.** Our reply with
+> upstream's `asyncify-verbose` set (25 functions; `…paniccatch` not instrumented) is DRAFTED in
+> `scripts/binaryang-report.md` for the owner to send. On 1.11.0: bump the pin (a binaryang bump
+> is a full gate; the optimizer moves too), re-run `go_asyncify_tests`, send binaryang the count. **Owner, 2026-10-13:
 > wait for binaryang** (no workaround in wasmtk): `go_asyncify_tests` 9 / 12 is EXPECTED on this
 > machine until binaryang's fix and a pin bump; the gate treats those 3 as known, any other change
 > as a failure.

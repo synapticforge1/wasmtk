@@ -8,6 +8,44 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## DRAFT (not yet sent) — 2026-10-13: Re: your Asyncify fix — upstream's instrumented set on the reproducer
+
+> **Your reply (2026-10-13):** reproduced and fixed on your main (unreleased; next release 1.11.0,
+> your owner's call). Cause: upstream's backward propagation stops at the bottom-most runtime (a
+> function calling `asyncify.stop_unwind` / `start_rewind`, Asyncify.cpp 722-726); yours stopped
+> only at the remove-list, so `…asyncifysuspendcatch.0.paniccatch` was instrumented and Flatten
+> met the control call before the function existed. Fixed three ways (the barrier, control calls
+> judged by name, Flatten given the control functions' types); checked on our bytes in V8,
+> wasmtime 49 and wasmer (`wg-counter: 45`). You asked for upstream's `asyncify-verbose` run.
+
+**Here it is.** Upstream binaryen.js 123 (npm `binaryen@123.0.0`), `setPassArgument("asyncify-verbose",
+"1")`, `readBinary` + `Features.All` + `runPasses(["asyncify"])` on
+`scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm`. The full trace (43 lines) is
+`scripts/repros/tinygo043_waitgroup_upstream_asyncify_verbose.txt` in wasmtk.
+
+- **5 imports** that can change the state: `asyncify_stop_unwind`, `asyncify_start_rewind`,
+  `runtime.fd_write`, `runtime.proc_exit`, `__imported_wasi_snapshot_preview1_random_get`.
+- **25 functions** that can change the state (instrumented), sorted:
+  `(*internal/task.Mutex).Lock`, `__getentropy`, `__wasi_random_get`, `_start`, `arc4random`,
+  `arc4random_buf`, `calloc`, `free`, `internal/task.Exit`, `internal/task.Pause`, `main.main$1`,
+  `main.main$1$gowrapper`, `main.main$1.asyncifysuspendcatch.0.target`, `malloc`, `realloc`,
+  `runtime.exitGoroutine`, `runtime.hashmapBinaryDelete`, `runtime.hashmapBinaryGet`,
+  `runtime.hashmapBinarySet`, `runtime.hashmapGet`, `runtime.hashmapSet`, `runtime.putchar`,
+  `runtime.run$1`, `runtime.run$1$gowrapper`, `tinygo_unwind`.
+- **Not instrumented**, which matches your rule: `main.main$1.asyncifysuspendcatch.0.paniccatch`
+  (it calls `stop_unwind`), and `tinygo_launch` / `tinygo_rewind` (they call `stop_unwind` /
+  `start_rewind`). Note `…asyncifysuspendcatch.0.target` IS instrumented: it reaches a suspend
+  without calling a control function itself.
+
+If your verbose output (or an instrumented-function dump) lists the same 25, the sets agree on this
+module. We have not compared it ourselves: your fix is not released, and we run only released
+versions.
+
+**On timing:** our owner chose to wait for your release (no workaround in wasmtk; the gate carries
+`go_asyncify_tests` at 9 / 12 as known). We have not asked for an early patch; that would be our
+owner's call. On 1.11.0 we bump the pin, re-run the full gate including `go_asyncify_tests`, and
+send you the count.
+
 ## SENT 2026-10-13 — 2026-10-13: `Asyncify` fails on TinyGo 0.43 output, upstream Binaryen does not (measured)
 
 **Short version:** binaryang's `Asyncify` pass throws `Flatten: unresolved call target
