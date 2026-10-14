@@ -1023,6 +1023,54 @@ function encodeF32LE(val: number): string {
   );
 }
 
+/** Encodes a 64-bit integer as 8 little-endian WAT escape bytes. */
+function encodeI64LE(val: bigint): string {
+  const buf = new ArrayBuffer(8);
+  new DataView(buf).setBigInt64(0, BigInt.asIntN(64, val), true);
+  return Array.from(new Uint8Array(buf)).map((b) => `\\${b.toString(16).padStart(2, "0")}`).join(
+    "",
+  );
+}
+
+/**
+ * The exact value of an array-literal element that is a PLAIN literal of element type `t`, or
+ * undefined for anything else. Only an array whose every element passes is laid out in the data
+ * section at compile time; any other element is evaluated at run time with emitExpr, under the
+ * usual type rules (sw69, 2026-10-13: `parseFloat(e) || 0` / `parseInt(e, 10) || 0` turned `NaN`,
+ * `-0`, `Math.PI`, `0x10`, a variable or an expression into 0 or a wrong number; `1.5` in an
+ * `i32[]` became 1 and `true` in a `boolean[]` became 0, both silently).
+ */
+function plainArrayLiteral(e: string, t: WatType): number | bigint | undefined {
+  const s = e.trim();
+  // 0x / 0b / 0o integer literals (Number() refuses a sign in front of them)
+  const radix = s.match(/^(-?)(0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+)$/);
+  if (radix && t !== "i64" && t !== "bool") {
+    const v = (radix[1] ? -1 : 1) * Number(radix[2]);
+    if (t === "i32") return v >= -(2 ** 31) && v < 2 ** 31 ? v : undefined;
+    return t === "f64" || t === "f32" ? v : undefined;
+  }
+  if (t === "f64" || t === "f32") {
+    return /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(s) ? Number(s) : undefined;
+  }
+  if (t === "i64") {
+    if (!/^-?\d+n$/.test(s)) return undefined;
+    const v = BigInt(s.slice(0, -1));
+    return v >= -(2n ** 63n) && v < 2n ** 63n ? v : undefined;
+  }
+  if (t === "bool") return s === "true" ? 1 : s === "false" ? 0 : undefined;
+  if (t === "i32") {
+    if (!/^-?\d+$/.test(s)) return undefined;
+    const v = Number(s);
+    return v >= -(2 ** 31) && v < 2 ** 31 ? v : undefined;
+  }
+  return undefined;
+}
+
+/** True when every element of a numeric array literal can be laid out at compile time (sw69). */
+function allPlainArrayLiterals(elements: string[], t: WatType): boolean {
+  return elements.every((e) => plainArrayLiteral(e, t) !== undefined);
+}
+
 /** True if `e` has a comparison (`=== !== == != < > <= >=`) or logical (`&& ||`) operator at TOP
  *  level, skipping literals, bracketed sub-expressions and shifts (`<<` `>>` `>>>`) and `=>`. A
  *  fully parenthesised expression is unwrapped first: `(a > b)` is a comparison. (sw14) */
@@ -2068,6 +2116,9 @@ class WasicTranspiler {
   // Phase 30: runtime field initializers for struct literals with non-constant values
   // varName → { fieldName: exprString } — emitted as store instructions after local.set $p
   private structVarRuntimeInits: Map<string, Record<string, string>> = new Map();
+  /** sw69: a static array of struct literals' non-literal field values, stored at its declaration. */
+  private structArrayFieldInits: Map<string, Array<{ ptr: number; field: string; expr: string }>> =
+    new Map();
   // Phase 51.2: object spread — varName → spread-source var name for `const r: T = { ...src, k: v }`.
   // Marks struct-let vars whose value is built at runtime by copying a base struct then applying
   // overrides; the pre-scan sets ptr=-3 (heap) and the emit path routes to emitRuntimeStructLiteral.
@@ -5715,6 +5766,57 @@ class WasicTranspiler {
   }
 
   /** Allocates `totalSize` zero-filled bytes in the data section. Returns base pointer. */
+  /**
+   * Whether a struct-literal field value can be laid out in the data section (sw69's struct twin,
+   * 2026-10-13): a plain literal of the field's type, a string literal, null / undefined, a nested
+   * object, tuple or array literal (allocStructData handles those), or a discriminated union's
+   * tag. Anything else (a name, an expression, `NaN`, `-0` in an integer…) is stored at run time
+   * at the declaration: a module-level literal and an array of struct literals stored
+   * `parseFloat(raw) || 0`, so `{ x: k }` held 0 and `{ ok: k > 3 }` held false.
+   */
+  /**
+   * A static array of struct literals: lays each element out (its plain fields) and returns the
+   * pointers; every other field value is recorded for a run-time store at the array's declaration
+   * (structArrayFieldInits). sw69: `[{ x: k + 1, y: NaN }]` held `{ x: 0, y: 0 }`; a call with a
+   * comma in a field value was cut at the comma by the old `([^,}]+)` field regex.
+   */
+  private allocStructArrayElems(def: StructDef, elements: string[], varName: string): string[] {
+    const du = this.discUnionDefs.get(def.name);
+    const pending: Array<{ ptr: number; field: string; expr: string }> = [];
+    const ptrs = elements.map((elem) => {
+      const open = elem.indexOf("{");
+      const body = open !== -1 ? extractOuterObjectBody(elem, open) : null;
+      const raw = body !== null ? parseDepth0Fields(body) : {};
+      const statics: Record<string, string> = {};
+      const later: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (this.isStaticFieldValue(def, k, v)) statics[k] = v;
+        else later[k] = v;
+      }
+      if (du && statics[du.discriminant] !== undefined) {
+        const tag = statics[du.discriminant].replace(/^["']|["']$/g, "");
+        const variant = du.variants.find((v) => v.tag === tag);
+        if (variant) statics[du.discriminant] = String(variant.tagIndex);
+      }
+      const ptr = this.allocStructData(def, statics);
+      for (const [k, v] of Object.entries(later)) pending.push({ ptr, field: k, expr: v });
+      return String(ptr);
+    });
+    if (pending.length > 0) this.structArrayFieldInits.set(varName, pending);
+    return ptrs;
+  }
+
+  private isStaticFieldValue(def: StructDef, key: string, val: string): boolean {
+    const v = val.trim();
+    if (v === "null" || v === "undefined" || v.startsWith("{") || v.startsWith("[")) return true;
+    const du = this.discUnionDefs.get(def.name);
+    if (du && du.discriminant === key) return true;
+    const f = def.fields.find((x) => x.name === key);
+    if (!f) return true; // not a field: left to the existing handling
+    if (f.type === "string") return /^(["'])(?:\\.|(?!\1).)*\1$/.test(v);
+    return plainArrayLiteral(v, f.type) !== undefined;
+  }
+
   private allocStructData(
     def: StructDef,
     initFields: Record<string, string>,
@@ -5769,18 +5871,34 @@ class WasicTranspiler {
         const t = raw.trim();
         const inner = t.slice(1, t.lastIndexOf("]")).trim();
         const elems = inner ? this.splitArgs(inner).map((e) => e.trim()).filter(Boolean) : [];
-        const arrPtr = this.allocArrayData(
-          elems,
-          (field.arrayIsString ? "string" : field.arrayElemType) as WatType,
-        );
+        const fieldElemType = (field.arrayIsString ? "string" : field.arrayElemType) as WatType;
+        // This literal lives in the data section: only plain literals can be laid out (sw69).
+        if (fieldElemType !== "string" && !allPlainArrayLiterals(elems, fieldElemType)) {
+          this.diagnostics.push(
+            `unsupported: the array field '${field.name}' is initialized with '${t}', whose elements ` +
+              `are not all plain ${fieldElemType} literals; build the array first and assign it`,
+          );
+          continue;
+        }
+        const arrPtr = this.allocArrayData(elems, fieldElemType);
         view.setInt32(field.offset, arrPtr, true);
       } else {
-        const val = (raw === "true") ? 1 : (raw === "false") ? 0 : parseFloat(raw) || 0;
-        if (field.type === "f64") view.setFloat64(field.offset, val, true);
-        else if (field.type === "f32") view.setFloat32(field.offset, val, true);
-        else if (field.type === "i64") {
-          view.setBigInt64(field.offset, BigInt(Math.trunc(val)), true);
-        } else view.setInt32(field.offset, Math.trunc(val), true);
+        // Exact literals only (sw69): `parseFloat(raw) || 0` stored a name or an expression as 0,
+        // `-0` as 0, and `1.5` in an integer field truncated. The declaration paths send any other
+        // value to a run-time store first (isStaticFieldValue); one reaching here is refused.
+        const t = field.type === "bool" ? "bool" : field.type;
+        const v = raw === "null" || raw === "undefined" ? 0 : plainArrayLiteral(raw, t);
+        if (v === undefined) {
+          this.diagnostics.push(
+            `unsupported: field '${field.name}' of a ${def.name} literal laid out at compile time is ` +
+              `'${raw.trim()}', not a plain ${field.type} literal; assign it after the declaration`,
+          );
+          continue;
+        }
+        if (field.type === "f64") view.setFloat64(field.offset, Number(v), true);
+        else if (field.type === "f32") view.setFloat32(field.offset, Number(v), true);
+        else if (field.type === "i64") view.setBigInt64(field.offset, BigInt(v), true);
+        else view.setInt32(field.offset, Number(v), true);
       }
     }
     // sw51: a flagged field that is null, undefined or omitted gets its flag (the bytes are 0).
@@ -6412,18 +6530,20 @@ class WasicTranspiler {
     const header = encodeI32LE(elements.length) + encodeI32LE(elements.length);
     let encoded = header;
     for (const elem of elements) {
-      const e = elem.trim();
+      // Only exact literals reach here (sw69): callers send any other array to run-time init.
+      // A pointer list (struct elements) is the numbers allocStructData returned.
+      const v = plainArrayLiteral(elem, elemType);
+      if (v === undefined) {
+        throw new Error(`wasic: internal: static array element '${elem.trim()}' is not a plain ${elemType} literal`);
+      }
       if (elemType === "f64") {
-        encoded += encodeF64LE(parseFloat(e) || 0);
+        encoded += encodeF64LE(Number(v));
       } else if (elemType === "f32") {
-        encoded += encodeF32LE(parseFloat(e) || 0); // sw43: 4 bytes, the slot elemSize reserves
+        encoded += encodeF32LE(Number(v)); // sw43: 4 bytes, the slot elemSize reserves
       } else if (elemType === "i64") {
-        // Simplified: encode as i32 pair (handles values within ±2^31)
-        const val = parseInt(e.replace(/n$/, ""), 10) || 0;
-        encoded += encodeI32LE(val);
-        encoded += encodeI32LE(val < 0 ? -1 : 0);
+        encoded += encodeI64LE(BigInt(v)); // all 64 bits (it encoded ±2^31 only)
       } else {
-        encoded += encodeI32LE(parseInt(e, 10) || 0);
+        encoded += encodeI32LE(Number(v));
       }
     }
     if (encoded) this.rawDataSegments.push({ ptr, bytes: encoded });
@@ -6512,7 +6632,8 @@ class WasicTranspiler {
     length: number;
     capacity?: number;
     initElements?: string[];
-  }): string {
+    structTypeName?: string;
+  }, locals?: Map<string, WatType>): string {
     const capacity = info.capacity ?? Math.max(info.length * 2, 8);
     const elemSize =
       (info.elemType === "f64" || info.elemType === "i64" || info.elemType === "string") ? 8 : 4;
@@ -6528,24 +6649,56 @@ class WasicTranspiler {
     for (let i = 0; i < (info.initElements?.length ?? 0); i++) {
       const raw = info.initElements![i].trim();
       const byteOffset = 8 + i * elemSize;
-      let valExpr: string;
-      if (info.elemType === "f64") {
-        valExpr = `(f64.const ${parseFloat(raw) || 0})`;
-      } else if (info.elemType === "i64") {
-        valExpr = `(i64.const ${parseInt(raw.replace(/n$/, ""), 10) || 0})`;
-      } else {
-        valExpr = `(i32.const ${parseInt(raw, 10) || 0})`;
+      if (info.elemType === "string") {
+        // An element is a [ptr, len] pair. Each was `(i32.store … (i32.const 0))`: a string array
+        // literal that is pushed to (so dynamic) printed every literal element as "" (sw69).
+        const lit = raw.match(/^(["'])((?:\\.|(?!\1).)*)\1$/);
+        if (!lit) {
+          this.diagnostics.push(
+            `unsupported: the string array '${varName}' is initialized with '${raw}', which is not a ` +
+              `string literal; push it after the declaration`,
+          );
+          continue;
+        }
+        const [p, n] = this.allocString(unescapeString(lit[2]));
+        stmts.push(`(i32.store offset=${byteOffset} ${getWat} (i32.const ${p}))`);
+        stmts.push(`(i32.store offset=${byteOffset + 4} ${getWat} (i32.const ${n}))`);
+        continue;
       }
-      stmts.push(`(${storeOp} offset=${byteOffset} ${getWat} ${valExpr})`);
+      // A struct literal element is built at run time (it was `parseInt(raw) || 0`: a null
+      // pointer; sw69). Uses $__rt_struct_ptr, which the pre-scan declares for these arrays.
+      if (info.structTypeName && raw.startsWith("{")) {
+        const rt = this.emitRuntimeStructLiteral(raw, info.structTypeName, locals ?? new Map());
+        if (rt) {
+          stmts.push(`(i32.store offset=${byteOffset} ${getWat} ${rt})`);
+          continue;
+        }
+      }
+      stmts.push(`(${storeOp} offset=${byteOffset} ${getWat} ${this.arrayElemWat(raw, info.elemType, locals)})`);
     }
     return stmts.join("\n      ");
+  }
+
+  /** One array-literal element's value: a constant for a plain literal, else the expression
+   *  evaluated as the element type (sw69: every element was `parseFloat(raw) || 0`). */
+  private arrayElemWat(raw: string, elemType: WatType, locals: Map<string, WatType> | undefined): string {
+    const v = plainArrayLiteral(raw, elemType);
+    if (v !== undefined) {
+      if (elemType === "f64" || elemType === "f32") {
+        const n = Number(v);
+        // Object.is: -0 keeps its sign; NaN / Infinity never pass plainArrayLiteral
+        return `(${elemType}.const ${Object.is(n, -0) ? "-0" : String(n)})`;
+      }
+      return `(${elemType === "i64" ? "i64" : "i32"}.const ${String(v)})`;
+    }
+    return this.emitExpr(raw, locals ?? new Map(), elemType);
   }
 
   /** Phase 6d: Emits WAT to malloc + init a 2D dynamic array (outer stores i32 row-ptrs). */
   private emitDynArray2DInit(varName: string, info: {
     elemType: WatType;
     rows: string[][];
-  }): string {
+  }, locals?: Map<string, WatType>): string {
     const outerLen = info.rows.length;
     const outerCap = Math.max(outerLen * 2, 8);
     const outerSize = outerCap * 4 + 8; // outer elements are i32 ptrs (4 bytes each)
@@ -6573,11 +6726,7 @@ class WasicTranspiler {
       for (let j = 0; j < row.length; j++) {
         const raw = row[j].trim();
         const off = 8 + j * elemSize;
-        const val = info.elemType === "f64"
-          ? `(f64.const ${parseFloat(raw) || 0})`
-          : info.elemType === "i64"
-          ? `(i64.const ${parseInt(raw.replace(/n$/, ""), 10) || 0})`
-          : `(i32.const ${parseInt(raw, 10) || 0})`;
+        const val = this.arrayElemWat(raw, info.elemType, locals); // sw69
         stmts.push(`(${storeOp} offset=${off} (local.get $__2d_tmp) ${val})`);
       }
     }
@@ -9176,6 +9325,19 @@ ${prefixed}
 
     // Numeric literal (decimal, float, or scientific notation e.g. 1e16, 3.5e-4)
     if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(expr)) {
+      // An integer context takes the literal's integer VALUE (`1e3` is 1000); a fraction there is
+      // D3's float-to-integer refusal. Both were `(i32.const 1.5)` / `(i32.const 1e3)`, which the
+      // assembler rejected with no location (found with sw69, 2026-10-13).
+      if (defaultType === "i32" || defaultType === "i64") {
+        const n = Number(expr);
+        if (Number.isInteger(n)) return `(${defaultType}.const ${BigInt(n)})`;
+        if (this.emitDiagSuppressDepth === 0) {
+          this.diagnostics.push(
+            implicitTruncDiagnostic(this.d3Stmt || expr, `the literal ${expr} as ${defaultType}`),
+          );
+        }
+        return `(${defaultType}.const 0)`;
+      }
       return `(${defaultType}.const ${expr})`;
     }
 
@@ -12771,7 +12933,7 @@ ${prefixed}
     );
     if (funcArrLetMatch) {
       const info = this.arrayVars.get(funcArrLetMatch[1]);
-      if (info?.dynamic) return this.emitDynArrayInit(funcArrLetMatch[1], info);
+      if (info?.dynamic) return this.emitDynArrayInit(funcArrLetMatch[1], info, locals);
     }
 
     // Phase 6d: 2D array literal declaration: const matrix: i32[][] = [[...], [...]]
@@ -12782,7 +12944,7 @@ ${prefixed}
         return this.emitDynArray2DInit(arr2DLetMatch[1], {
           elemType: info.elemType,
           rows: info.rows,
-        });
+        }, locals);
       }
       // Phase 18 fix: Array.from({ length: N }, () => []) — runtime 2D array initialization
       if (info?.is2D && info.arrayFromExpr) {
@@ -12795,8 +12957,18 @@ ${prefixed}
     if (arrLetMatch) {
       const info = this.arrayVars.get(arrLetMatch[1]);
       if (info) {
-        if (info.dynamic) return this.emitDynArrayInit(arrLetMatch[1], info);
-        return `(local.set $${arrLetMatch[1]} (i32.const ${info.ptr}))`;
+        if (info.dynamic) return this.emitDynArrayInit(arrLetMatch[1], info, locals);
+        const setArr = `(local.set $${arrLetMatch[1]} (i32.const ${info.ptr}))`;
+        // sw69: the struct elements' non-literal field values, stored here, at the declaration
+        const later = this.structArrayFieldInits.get(arrLetMatch[1]);
+        const def = info.structTypeName ? this.structDefs.get(info.structTypeName) : undefined;
+        if (!later || !def) return setArr;
+        const stmts = [setArr];
+        for (const { ptr, field, expr } of later) {
+          const f = def.fields.find((x) => x.name === field);
+          if (f) stmts.push(...this.fieldStore(f, expr, `(i32.const ${ptr})`, locals));
+        }
+        return stmts.join("\n      ");
       }
     }
 
@@ -19243,6 +19415,7 @@ ${sum}
     this.typedArrayVars = new Map();
     this.structVars = new Map();
     this.structVarRuntimeInits = new Map();
+    this.structArrayFieldInits = new Map();
     this.structSpreadVars = new Map();
     this.classVars = new Map();
     this.interfaceVars = new Map();
@@ -19620,16 +19793,12 @@ ${sum}
               namedTokens.add(fieldKey);
               // Nested struct literals (starting with {) are treated as compile-time constants
               // and handled recursively in allocStructData when field.structType is set.
-              const isConstant = /^-?\d+(\.\d+)?$/.test(valStr) ||
-                valStr === "true" || valStr === "false" ||
-                valStr === "null" || valStr === "undefined" ||
-                /^["'].*["']$/.test(valStr) ||
-                valStr.startsWith("{");
-              if (isConstant) {
+              // Type-aware (sw69): `-0` kept its sign only at run time, `1.5` into an integer
+              // field was truncated, and a hex literal was stored as 0.
+              if (this.isStaticFieldValue(def, fieldKey, valStr)) {
                 initFields[fieldKey] = valStr;
               } else {
-                runtimeInits[fieldKey] = valStr;
-                initFields[fieldKey] = "0"; // placeholder so allocStructData reserves space
+                runtimeInits[fieldKey] = valStr; // ptr -3 below: built at run time, never laid out
               }
             }
           }
@@ -19929,7 +20098,11 @@ ${sum}
           : elements.some((e) => /[.]/.test(e) && !/^-?\d+n?$/.test(e))
           ? "f64"
           : "i32";
-        if (dynamicArrayNames.has(varName)) {
+        // sw69: an element that is not a plain literal (a name, an expression, NaN, 0x10…) is
+        // evaluated at run time, so the array is initialized at run time.
+        const runtimeElems = !structTypeName && elemType !== "string" &&
+          !allPlainArrayLiterals(elements, elemType);
+        if (dynamicArrayNames.has(varName) || runtimeElems) {
           // Dynamic array: runtime malloc with [length, capacity] header. ptr=-2 signals heap layout.
           const capacity = Math.max(elements.length * 2, 8);
           this.arrayVars.set(varName, {
@@ -19941,17 +20114,16 @@ ${sum}
             initElements: elements,
             structTypeName,
           });
+          // its struct-literal elements are built at run time, through $__rt_struct_ptr (sw69)
+          if (structTypeName && elements.length > 0 && !locals.has("__rt_struct_ptr")) {
+            declaredLocals.push(["__rt_struct_ptr", "i32"]);
+            locals.set("__rt_struct_ptr", "i32");
+          }
         } else {
           let ptr: number;
           if (structTypeName) {
             const def = this.structDefs.get(structTypeName)!;
-            const ptrStrs = elements.map((elem) => {
-              const initFields: Record<string, string> = {};
-              const initRe = /(\w+)\s*:\s*([^,}]+)/g;
-              let im: RegExpExecArray | null;
-              while ((im = initRe.exec(elem)) !== null) initFields[im[1]] = im[2].trim();
-              return String(this.allocStructData(def, initFields));
-            });
+            const ptrStrs = this.allocStructArrayElems(def, elements, varName); // sw69
             ptr = this.allocArrayData(ptrStrs, "i32");
           } else {
             ptr = this.allocArrayData(elements, elemType);
@@ -21416,6 +21588,7 @@ ${sum}
       this.typedArrayVars = new Map();
       this.structVars = new Map();
       this.structVarRuntimeInits = new Map();
+      this.structArrayFieldInits = new Map();
       this.structSpreadVars = new Map();
       this.classVars = new Map();
       this.forOfDepth = 0;
@@ -21523,10 +21696,14 @@ ${sum}
               }
               continue;
             }
+            // sw69: a field value that is not a plain literal is STORED at the declaration; the
+            // struct stays static (functions read a module struct at its address).
+            const valueInits2: Record<string, string> = {};
             if (bodyStr2 !== null) {
               const rawFields2 = parseDepth0Fields(bodyStr2);
               for (const [fieldKey2, valStr2] of Object.entries(rawFields2)) {
-                initFields2[fieldKey2] = valStr2;
+                if (this.isStaticFieldValue(def2, fieldKey2, valStr2)) initFields2[fieldKey2] = valStr2;
+                else valueInits2[fieldKey2] = valStr2;
                 namedTokens2.add(fieldKey2);
               }
               const shorthandRe2 = /\b(\w+)\b(?!\s*:)/g;
@@ -21538,6 +21715,10 @@ ${sum}
                 }
               }
             }
+            // A shorthand field keeps the run-time (ptr -3) layout it had; value fields only add
+            // stores to the static struct (the declaration emits structVarRuntimeInits either way).
+            const hasShorthand2 = Object.keys(runtimeInits2).length > 0;
+            Object.assign(runtimeInits2, valueInits2);
             if (Object.keys(runtimeInits2).length > 0) {
               this.structVarRuntimeInits.set(varName2, runtimeInits2);
             }
@@ -21551,8 +21732,7 @@ ${sum}
                 if (variant2) initFields2[duDefPre2.discriminant] = String(variant2.tagIndex);
               }
             }
-            const hasRuntimeInits2 = Object.keys(runtimeInits2).length > 0;
-            const ptr2 = hasRuntimeInits2 ? -3 : this.allocStructData(def2, initFields2);
+            const ptr2 = hasShorthand2 ? -3 : this.allocStructData(def2, initFields2);
             this.structVars.set(varName2, { def: def2, ptr: ptr2 });
             startLocals.set(varName2, "i32");
             startDeclaredLocals.push([varName2, "i32"]);
@@ -21817,7 +21997,10 @@ ${sum}
           // Module-level arrays used in functions become WASM globals — don't declare as _start locals.
           const isGlobalArr2 = this.moduleArrayVars.has(varName2) &&
             this.moduleGlobals.has(varName2);
-          if (startDynArrayNames.has(varName2) || isGlobalArr2) {
+          // sw69: an element that is not a plain literal is evaluated at run time (as above)
+          const runtimeElems2 = !structTypeName2 && elemType2 !== "string" &&
+            !allPlainArrayLiterals(elements2, elemType2);
+          if (startDynArrayNames.has(varName2) || isGlobalArr2 || runtimeElems2) {
             const capacity2 = Math.max(elements2.length * 2, 8);
             this.arrayVars.set(varName2, {
               elemType: elemType2,
@@ -21828,17 +22011,16 @@ ${sum}
               initElements: elements2,
               structTypeName: structTypeName2,
             });
+            // its struct-literal elements are built at run time, through $__rt_struct_ptr (sw69)
+            if (structTypeName2 && elements2.length > 0 && !startLocals.has("__rt_struct_ptr")) {
+              startLocals.set("__rt_struct_ptr", "i32");
+              startDeclaredLocals.push(["__rt_struct_ptr", "i32"]);
+            }
           } else {
             let ptr2: number;
             if (structTypeName2) {
               const def2 = this.structDefs.get(structTypeName2)!;
-              const ptrStrs2 = elements2.map((elem) => {
-                const initFields2: Record<string, string> = {};
-                const initRe2 = /(\w+)\s*:\s*([^,}]+)/g;
-                let im2: RegExpExecArray | null;
-                while ((im2 = initRe2.exec(elem)) !== null) initFields2[im2[1]] = im2[2].trim();
-                return String(this.allocStructData(def2, initFields2));
-              });
+              const ptrStrs2 = this.allocStructArrayElems(def2, elements2, varName2); // sw69
               ptr2 = this.allocArrayData(ptrStrs2, "i32");
             } else {
               ptr2 = this.allocArrayData(elements2, elemType2);
