@@ -444,6 +444,41 @@ export function setConsoleDiagnosticSink(fn: ((msg: string) => void) | undefined
   _diagnosticSink = fn;
 }
 
+/**
+ * The element layout `$__arr_inspect` reads for an `arrptr` segment's elemType: an array's element
+ * type name (as written: `i32`, `f64`, `number`...) or a typed array's name. undefined = no writer
+ * (strings, booleans, bigints, structs): the caller refuses it rather than print element bits as
+ * numbers (sw66, 2026-10-13). Unannotated numeric names map to f64, as wasic's mapType does.
+ */
+export function arrInspectKind(elemType: string): number | undefined {
+  const typed: Record<string, number> = {
+    Int32Array: 0,
+    Float64Array: 1,
+    Int8Array: 2,
+    Uint8Array: 3,
+    Uint8ClampedArray: 3,
+    Int16Array: 4,
+    Uint16Array: 5,
+    Uint32Array: 6,
+    Float32Array: 7,
+  };
+  if (elemType in typed) return typed[elemType];
+  const t = elemType.trim().toLowerCase();
+  if (t === "i32" || t === "int") return 0;
+  if (t === "f64" || t === "number" || t === "u32") return 1;
+  return undefined;
+}
+
+/** The `$__arr_inspect` call for an `arrptr` segment, appending at the cursor stored at `cursorWat`. */
+function arrInspectCall(seg: { wat: string; elemType: string; nameLen?: number }, cursorWat: string): string {
+  const kind = arrInspectKind(seg.elemType);
+  if (kind === undefined) {
+    // parseSingleArg refuses these before emission; reaching here is a compiler bug, never output
+    throw new Error(`console.log: no array writer for elements of type '${seg.elemType}'`);
+  }
+  return `(call $__arr_inspect ${seg.wat} (i32.const ${kind}) (i32.const ${seg.nameLen ?? 0}) ${cursorWat})`;
+}
+
 /** Callback to resolve an array variable by name: returns its element type, base ptr, and length.
  *  ptr=-1 means runtime local (param). ptr=-2 means dynamic heap array (local with 8-byte header).
  *  dynamic=true means the array has a [length, capacity] header at its pointer. */
@@ -593,7 +628,9 @@ export type LogSegment =
   | { kind: "strvar"; ptrLocal: string; lenLocal: string } // string variable (ptr + len i32 locals)
   | { kind: "boolvar"; name: string } // bool-typed local (i32, 0=false 1=true)
   | { kind: "boolexpr"; wat: string } // arbitrary WAT expression yielding bool i32
-  | { kind: "arrptr"; wat: string; elemType: string } // WAT expression yielding a dynamic array ptr
+  // WAT expression yielding an array ptr; nameLen: a typed array's name length (its "Int32Array(n) "
+  // prefix is a literal segment before this one, and the layout counts it: sw67)
+  | { kind: "arrptr"; wat: string; elemType: string; nameLen?: number }
   | { kind: "joinarr"; arrWat: string; sepPtr: number; sepLen: number; elemType: string } // arr.join(sep)
   | { kind: "strcall"; callWat: string } // void WAT call that sets $__str_ret_ptr/$__str_ret_len
   | { kind: "strexpr"; ptrWat: string; lenWat: string }; // arbitrary WAT expressions yielding string ptr+len
@@ -967,6 +1004,33 @@ function parseSingleArg(
 
   // ── Simple identifier
   if (/^\w+$/.test(token)) {
+    // An ARRAY variable prints its elements as Deno does, not its address (sw66, 2026-10-13).
+    // Every array has the [length, capacity] header; its pointer is built as `arr.join` builds it.
+    const arrInfo = arrayLookup?.(token);
+    if (arrInfo) {
+      const shown = arrInfo.elemType === "i64" ? "bigint" : arrInfo.elemType === "bool" ? "boolean" : arrInfo.elemType;
+      const what = arrInfo.is2D
+        ? "2D array"
+        : arrInfo.customLoadOp
+        ? "typed array beside other arguments"
+        : arrInfo.isStringArr
+        ? "string[] array"
+        : arrInspectKind(arrInfo.elemType) === undefined
+        ? `${shown}[] array`
+        : undefined;
+      if (what) {
+        _diagnosticSink?.(
+          `console argument: printing a whole ${what} is not supported yet; print its elements (${token})`,
+        );
+        return [{ kind: "literal", text: "" }];
+      }
+      const wat = arrInfo.isGlobal
+        ? `(global.get $${token})`
+        : (arrInfo.ptr === -1 || arrInfo.ptr === -2 || arrInfo.dynamic)
+        ? `(local.get $${token})`
+        : `(i32.const ${arrInfo.ptr})`;
+      return [{ kind: "arrptr" as const, wat, elemType: arrInfo.elemType }];
+    }
     // Module-level globals: emit global.get instead of local.get
     if (globals?.has(token)) {
       const gType = globals.get(token)!;
@@ -1444,6 +1508,13 @@ function parseSingleArg(
     const retTsName = sig?.resultTsName;
     if (retTsName && /\[\]$/.test(retTsName)) {
       const elemType = retTsName.replace(/\[\]$/, "");
+      // only numeric elements have a writer; the rest printed their bits as i32 (sw66)
+      if (arrInspectKind(elemType) === undefined) {
+        _diagnosticSink?.(
+          `console argument: printing a whole ${elemType}[] array is not supported yet; print its elements (${callee}(...))`,
+        );
+        return [{ kind: "literal", text: "" }];
+      }
       return [{ kind: "arrptr" as const, wat, elemType }];
     }
     const retType = (sig as { result?: string } | undefined)?.result;
@@ -3667,16 +3738,10 @@ export function emitConsoleLog(
       } else if (seg.kind === "arrptr") {
         // Array pointer — write "[ elem, ... ]" into scratch via helper
         needsArrPrintHelper = true;
-        needsHelpers = true; // $__write_i32arr_to_scratch depends on $__i32_to_str
-        // The wrapper loads the length ONCE, ensures room for the worst case, then writes.
-        // There is no i64 array writer (the old code called an undefined one: an invalid module);
-        // printing i64 elements as i32 would be silently wrong, so it is refused.
-        if (seg.elemType === "i64" || seg.elemType === "bigint") {
-          _diagnosticSink?.("console argument: printing a whole bigint[] array is not supported yet; print its elements");
-        }
+        needsHelpers = true; // $__arr_inspect depends on $__i32_to_str / $__f64_to_str
+        // $__arr_inspect loads the length ONCE, ensures room for the worst case, then writes.
         pin();
-        const helperName = seg.elemType === "f64" ? "$__cbuf_arr_f64" : "$__cbuf_arr_i32";
-        statements.push(`${indent}(call ${helperName} ${seg.wat} (i32.const ${cursorAddr}))`);
+        statements.push(`${indent}${arrInspectCall(seg, `(i32.const ${cursorAddr})`)}`);
       } else if (seg.kind === "joinarr") {
         // Phase 28: arr.join(sep) — written into the buffer via a wrapper that ensures room
         needsJoinHelper = true;
@@ -3818,10 +3883,9 @@ export function emitConsoleLog(
         needsHelpers = true;
         // into the growable console buffer (sw62): the fixed scratch is 128 bytes
         needsStrGather = true;
-        const helperName = seg.elemType === "f64" ? "$__cbuf_arr_f64" : "$__cbuf_arr_i32";
         statements.push(
           `${indent}(i32.store (i32.const ${iovLen}) (i32.const 0))`,
-          `${indent}(call ${helperName} ${seg.wat} (i32.const ${iovLen}))`,
+          `${indent}${arrInspectCall(seg, `(i32.const ${iovLen})`)}`,
           `${indent}(i32.store (i32.const ${iovPtr}) (global.get $__cbuf))`,
         );
         lastNumericScratch = -1;
@@ -4570,121 +4634,200 @@ export function getHelperWat(): string {
 }
 
 /**
- * Returns a WAT helper function that writes a dynamic i32 array's contents
- * into the scratch gather buffer in "[ elem, elem, ... ]" format.
- *
- * Signature: $__write_i32arr_to_scratch(arr_ptr: i32, scratch_base: i32, cursor_addr: i32)
- *   arr_ptr     – pointer to [length:i32, capacity:i32, elem0:i32, ...]
- *   scratch_base – start address of the scratch buffer (i32.const scratchBase)
- *   cursor_addr  – address of the i32 cursor (running byte offset from scratch_base)
- * Depends on: $__i32_to_str (from getHelperWat)
+ * Returns the WAT helpers that print a whole array (or typed array) into the console buffer in
+ * Deno / Node's layout: `$__arr_inspect(arr, kind, name_len, cursor_addr)`.
+ * arr layout: [length:i32, capacity:i32, elements from +8 (i32 or f64)].
+ * Depends on: $__i32_to_str, $__f64_to_str (getHelperWat) and $__cbuf_need (the string gather).
  */
 export function getArrPrintHelperWat(): string {
   return `
-  ;; ── write i32[] to scratch ────────────────────────────────────────────────
-  ;; Appends "[ elem, elem, ... ]" into the gather buffer.
-  ;; arr_ptr layout: [length:i32, capacity:i32, elem0:i32, elem1:i32, ...]
-  (func $__write_i32arr_to_scratch (param $arr_ptr i32) (param $scratch_base i32) (param $cursor_addr i32)
-    (local $len i32)
-    (local $idx i32)
-    (local $cur i32)
-    (local $elem i32)
-    (local $slen i32)
-    (local.set $len (i32.load (local.get $arr_ptr)))
-    (local.set $cur (i32.load (local.get $cursor_addr)))
-    ;; Write "[ "
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 91))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 32))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    ;; Loop over elements
-    (local.set $idx (i32.const 0))
+  ;; ── console: an array as Deno and Node print it (sw66, sw67, 2026-10-13) ──
+  ;; util.inspect's layout for a top-level argument (groupArrayElements + reduceToSingleString):
+  ;; at most 100 elements, then "... N more items"; one line "[ a, b ]" when it fits 80 columns;
+  ;; otherwise more than 6 entries are grouped into right-aligned columns; otherwise one element
+  ;; per line. name_len is 0 for an array, else a typed array's name length: its opening is then
+  ;; "Int32Array(3) [" (name, "(", the length's digits, ") [").
+  ;; Element i's text, at dest; returns its length. kind is the element layout (arrInspectKind):
+  ;; 0 i32, 1 f64, 2 i8, 3 u8, 4 i16, 5 u16, 6 u32, 7 f32. An f64 -0 prints "-0", as inspect does.
+  (func $__arr_elem_str (param $arr i32) (param $i i32) (param $kind i32) (param $dest i32) (result i32)
+    (local $v f64) (local $a i32)
+    (local.set $a (i32.add (local.get $arr) (i32.const 8)))
+    (if (i32.eqz (local.get $kind))
+      (then (return (call $__i32_to_str
+        (i32.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 2)))) (local.get $dest)))))
+    (if (i32.eq (local.get $kind) (i32.const 2))
+      (then (return (call $__i32_to_str (i32.load8_s (i32.add (local.get $a) (local.get $i))) (local.get $dest)))))
+    (if (i32.eq (local.get $kind) (i32.const 3))
+      (then (return (call $__i32_to_str (i32.load8_u (i32.add (local.get $a) (local.get $i))) (local.get $dest)))))
+    (if (i32.eq (local.get $kind) (i32.const 4))
+      (then (return (call $__i32_to_str
+        (i32.load16_s (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 1)))) (local.get $dest)))))
+    (if (i32.eq (local.get $kind) (i32.const 5))
+      (then (return (call $__i32_to_str
+        (i32.load16_u (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 1)))) (local.get $dest)))))
+    (if (i32.eq (local.get $kind) (i32.const 6))
+      (then (local.set $v (f64.convert_i32_u (i32.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 2))))))))
+    (if (i32.eq (local.get $kind) (i32.const 7))
+      (then (local.set $v (f64.promote_f32 (f32.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 2))))))))
+    (if (i32.eq (local.get $kind) (i32.const 1))
+      (then (local.set $v (f64.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 3)))))))
+    (if (i32.and (f64.eq (local.get $v) (f64.const 0))
+                 (i64.lt_s (i64.reinterpret_f64 (local.get $v)) (i64.const 0)))
+      (then
+        (i32.store8 (local.get $dest) (i32.const 45))
+        (i32.store8 offset=1 (local.get $dest) (i32.const 48))
+        (return (i32.const 2))))
+    (call $__f64_to_str (local.get $v) (local.get $dest))
+  )
+  (func $__arr_spaces (param $dest i32) (param $n i32) (result i32)
     (block $done
-      (loop $loop
-        (br_if $done (i32.ge_u (local.get $idx) (local.get $len)))
-        ;; Write ", " separator between elements
-        (if (i32.gt_u (local.get $idx) (i32.const 0))
-          (then
-            (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 44))
-            (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-            (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 32))
-            (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-          )
-        )
-        ;; Load element at arr_ptr+8+idx*4 and convert to decimal string
-        (local.set $elem (i32.load (i32.add (i32.add (local.get $arr_ptr) (i32.const 8)) (i32.shl (local.get $idx) (i32.const 2)))))
-        (local.set $slen (call $__i32_to_str (local.get $elem) (i32.add (local.get $scratch_base) (local.get $cur))))
-        (local.set $cur (i32.add (local.get $cur) (local.get $slen)))
-        (local.set $idx (i32.add (local.get $idx) (i32.const 1)))
-        (br $loop)
-      )
-    )
-    ;; Write " ]"
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 32))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 93))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    ;; Update cursor
-    (i32.store (local.get $cursor_addr) (local.get $cur))
+      (loop $fill
+        (br_if $done (i32.le_s (local.get $n) (i32.const 0)))
+        (i32.store8 (local.get $dest) (i32.const 32))
+        (local.set $dest (i32.add (local.get $dest) (i32.const 1)))
+        (local.set $n (i32.sub (local.get $n) (i32.const 1)))
+        (br $fill)))
+    (local.get $dest)
   )
-  ;; ── write f64[] to scratch ────────────────────────────────────────────────
-  ;; Appends "[ elem, elem, ... ]" into the gather buffer.
-  ;; arr_ptr layout: [length:i32, 0:i32, elem0:f64, elem1:f64, ...]
-  (func $__write_f64arr_to_scratch (param $arr_ptr i32) (param $scratch_base i32) (param $cursor_addr i32)
-    (local $len i32)
-    (local $idx i32)
-    (local $cur i32)
-    (local $elem f64)
-    (local $slen i32)
-    (local.set $len (i32.load (local.get $arr_ptr)))
+  (func $__arr_inspect (param $arr i32) (param $kind i32) (param $name_len i32) (param $cursor_addr i32)
+    (local $brace_len i32) (local $len i32) (local $shown i32) (local $more i32) (local $outn i32) (local $cur i32)
+    (local $p i32) (local $q i32) (local $lens i32) (local $cw i32) (local $i i32) (local $j i32)
+    (local $l i32) (local $total i32) (local $maxl i32) (local $amax i32) (local $cols i32)
+    (local $c i32) (local $w i32) (local $more_len i32) (local $one i32) (local $t i32)
+    (local $bias f64) (local $bmax f64)
+    (local.set $len (i32.load (local.get $arr)))
     (local.set $cur (i32.load (local.get $cursor_addr)))
-    ;; Write "[ "
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 91))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 32))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    ;; Loop over elements
-    (local.set $idx (i32.const 0))
-    (block $done
-      (loop $loop
-        (br_if $done (i32.ge_u (local.get $idx) (local.get $len)))
-        ;; Write ", " separator between elements
-        (if (i32.gt_u (local.get $idx) (i32.const 0))
+    (local.set $shown (select (i32.const 100) (local.get $len) (i32.gt_u (local.get $len) (i32.const 100))))
+    (local.set $more (i32.sub (local.get $len) (local.get $shown)))
+    ;; room: an element <= 24 bytes, with its padding and separators <= 30; the "more" entry and
+    ;; the brackets <= 64; then the length table (4 per element) and the column widths (12 x 4)
+    (call $__cbuf_need (i32.add (local.get $cur)
+      (i32.add (i32.mul (local.get $shown) (i32.const 34)) (i32.const 128))))
+    (local.set $p (i32.add (global.get $__cbuf) (local.get $cur)))
+    (if (i32.eqz (local.get $len))
+      (then
+        (i32.store16 (local.get $p) (i32.const 0x5d5b)) ;; "[]"
+        (i32.store (local.get $cursor_addr) (i32.add (local.get $cur) (i32.const 2)))
+        (return)))
+    (local.set $lens (i32.and (i32.add (i32.add (local.get $p)
+      (i32.add (i32.mul (local.get $shown) (i32.const 30)) (i32.const 64))) (i32.const 3)) (i32.const -4)))
+    (local.set $cw (i32.add (local.get $lens) (i32.shl (local.get $shown) (i32.const 2))))
+    ;; pass 1: each element's length (its text is written at p and overwritten below)
+    (local.set $i (i32.const 0))
+    (block $m_done
+      (loop $measure
+        (br_if $m_done (i32.ge_u (local.get $i) (local.get $shown)))
+        (local.set $l (call $__arr_elem_str (local.get $arr) (local.get $i) (local.get $kind) (local.get $p)))
+        (i32.store (i32.add (local.get $lens) (i32.shl (local.get $i) (i32.const 2))) (local.get $l))
+        (local.set $total (i32.add (local.get $total) (i32.add (local.get $l) (i32.const 2))))
+        (if (i32.gt_u (local.get $l) (local.get $maxl)) (then (local.set $maxl (local.get $l))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $measure)))
+    (local.set $outn (i32.add (local.get $shown) (i32.ne (local.get $more) (i32.const 0))))
+    (local.set $brace_len (i32.const 1))
+    (if (local.get $name_len)
+      (then (local.set $brace_len (i32.add (i32.add (local.get $name_len) (i32.const 4))
+        (call $__i32_to_str (local.get $len) (local.get $p))))))
+    ;; "... N more item" + "s" when N > 1
+    (if (local.get $more)
+      (then (local.set $more_len (i32.add (i32.add (call $__i32_to_str (local.get $more) (local.get $p))
+        (i32.const 14)) (i32.gt_u (local.get $more) (i32.const 1))))))
+    ;; grouping: more than 6 entries, short enough, and many or narrow
+    (if (i32.gt_u (local.get $outn) (i32.const 6))
+      (then
+        (local.set $amax (i32.add (local.get $maxl) (i32.const 2)))
+        (if (i32.and (i32.lt_u (i32.mul (local.get $amax) (i32.const 3)) (i32.const 80))
+                     (i32.or (f64.gt (f64.div (f64.convert_i32_u (local.get $total)) (f64.convert_i32_u (local.get $amax)))
+                                     (f64.const 5))
+                             (i32.le_u (local.get $maxl) (i32.const 6))))
           (then
-            (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 44))
-            (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-            (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 32))
-            (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-          )
-        )
-        ;; Load element at arr_ptr+8+idx*8 and convert to decimal string
-        (local.set $elem (f64.load (i32.add (i32.add (local.get $arr_ptr) (i32.const 8)) (i32.shl (local.get $idx) (i32.const 3)))))
-        (local.set $slen (call $__f64_to_str (local.get $elem) (i32.add (local.get $scratch_base) (local.get $cur))))
-        (local.set $cur (i32.add (local.get $cur) (local.get $slen)))
-        (local.set $idx (i32.add (local.get $idx) (i32.const 1)))
-        (br $loop)
-      )
-    )
-    ;; Write " ]"
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 32))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    (i32.store8 (i32.add (local.get $scratch_base) (local.get $cur)) (i32.const 93))
-    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-    ;; Update cursor
-    (i32.store (local.get $cursor_addr) (local.get $cur))
-  )
-  ;; ── console: an array into the growable console buffer (sw62, 2026-10-13) ──
-  ;; Loads the length ONCE, ensures room for the worst case (an i32 is <= 11 bytes, an f64 <= 24,
-  ;; each with ", "; plus the brackets), then writes at the buffer's current address.
-  (func $__cbuf_arr_i32 (param $arr i32) (param $cursor_addr i32)
-    (call $__cbuf_need (i32.add (i32.load (local.get $cursor_addr))
-      (i32.add (i32.mul (i32.load (local.get $arr)) (i32.const 13)) (i32.const 8))))
-    (call $__write_i32arr_to_scratch (local.get $arr) (global.get $__cbuf) (local.get $cursor_addr))
-  )
-  (func $__cbuf_arr_f64 (param $arr i32) (param $cursor_addr i32)
-    (call $__cbuf_need (i32.add (i32.load (local.get $cursor_addr))
-      (i32.add (i32.mul (i32.load (local.get $arr)) (i32.const 26)) (i32.const 8))))
-    (call $__write_f64arr_to_scratch (local.get $arr) (global.get $__cbuf) (local.get $cursor_addr))
+            (local.set $bias (f64.sqrt (f64.sub (f64.convert_i32_u (local.get $amax))
+              (f64.div (f64.convert_i32_u (local.get $total)) (f64.convert_i32_u (local.get $outn))))))
+            (local.set $bmax (f64.max (f64.sub (f64.sub (f64.convert_i32_u (local.get $amax)) (f64.const 3))
+              (local.get $bias)) (f64.const 1)))
+            ;; Math.round (half up) of sqrt(2.5 * biasedMax * entries) / biasedMax
+            (local.set $cols (i32.trunc_f64_u (f64.floor (f64.add (f64.div
+              (f64.sqrt (f64.mul (f64.mul (f64.const 2.5) (local.get $bmax)) (f64.convert_i32_u (local.get $shown))))
+              (local.get $bmax)) (f64.const 0.5)))))
+            (local.set $t (i32.div_u (i32.const 80) (local.get $amax)))
+            (if (i32.lt_u (local.get $t) (local.get $cols)) (then (local.set $cols (local.get $t))))
+            (if (i32.gt_u (local.get $cols) (i32.const 12)) (then (local.set $cols (i32.const 12))))
+            (if (i32.le_u (local.get $cols) (i32.const 1)) (then (local.set $cols (i32.const 0))))))))
+    ;; each column's width: its widest element + 2
+    (local.set $c (i32.const 0))
+    (block $w_done
+      (loop $widths
+        (br_if $w_done (i32.ge_u (local.get $c) (local.get $cols)))
+        (local.set $w (i32.const 0))
+        (local.set $j (local.get $c))
+        (block $col_done
+          (loop $col
+            (br_if $col_done (i32.ge_u (local.get $j) (local.get $shown)))
+            (local.set $l (i32.load (i32.add (local.get $lens) (i32.shl (local.get $j) (i32.const 2)))))
+            (if (i32.gt_u (local.get $l) (local.get $w)) (then (local.set $w (local.get $l))))
+            (local.set $j (i32.add (local.get $j) (local.get $cols)))
+            (br $col)))
+        (i32.store (i32.add (local.get $cw) (i32.shl (local.get $c) (i32.const 2))) (i32.add (local.get $w) (i32.const 2)))
+        (local.set $c (i32.add (local.get $c) (i32.const 1)))
+        (br $widths)))
+    ;; one line when ungrouped and within 80 columns: start = entries + brace_len + 10
+    (if (i32.eqz (local.get $cols))
+      (then
+        (local.set $t (i32.add (i32.add (i32.shl (local.get $outn) (i32.const 1)) (local.get $brace_len)) (i32.const 10)))
+        (local.set $one (i32.and
+          (i32.le_u (i32.add (local.get $t) (local.get $outn)) (i32.const 80))
+          (i32.le_u (i32.add (i32.add (local.get $t) (i32.sub (local.get $total) (i32.shl (local.get $shown) (i32.const 1))))
+            (local.get $more_len)) (i32.const 80))))))
+    ;; pass 2: write
+    (local.set $q (local.get $p))
+    (if (local.get $one)
+      (then (i32.store16 (local.get $q) (i32.const 0x205b)) (local.set $q (i32.add (local.get $q) (i32.const 2)))) ;; "[ "
+      (else (i32.store (local.get $q) (i32.const 0x20200a5b)) (local.set $q (i32.add (local.get $q) (i32.const 4))))) ;; "[\\n  "
+    (local.set $i (i32.const 0))
+    (block $e_done
+      (loop $emit
+        (br_if $e_done (i32.ge_u (local.get $i) (local.get $shown)))
+        (local.set $l (i32.load (i32.add (local.get $lens) (i32.shl (local.get $i) (i32.const 2)))))
+        (if (local.get $cols)
+          (then
+            (local.set $c (i32.rem_u (local.get $i) (local.get $cols)))
+            (local.set $w (i32.load (i32.add (local.get $cw) (i32.shl (local.get $c) (i32.const 2)))))
+            (if (i32.and (i32.eqz (local.get $c)) (i32.ne (local.get $i) (i32.const 0)))
+              (then (i32.store (local.get $q) (i32.const 0x20200a2c)) (local.set $q (i32.add (local.get $q) (i32.const 4))))) ;; ",\\n  "
+            ;; padStart: every cell but a row's last is "elem, " padded to the column width
+            (local.set $q (call $__arr_spaces (local.get $q) (i32.sub (i32.sub (local.get $w) (i32.const 2)) (local.get $l))))
+            (local.set $q (i32.add (local.get $q)
+              (call $__arr_elem_str (local.get $arr) (local.get $i) (local.get $kind) (local.get $q))))
+            (if (i32.and (i32.ne (local.get $c) (i32.sub (local.get $cols) (i32.const 1)))
+                         (i32.ne (local.get $i) (i32.sub (local.get $shown) (i32.const 1))))
+              (then (i32.store16 (local.get $q) (i32.const 0x202c)) (local.set $q (i32.add (local.get $q) (i32.const 2)))))) ;; ", "
+          (else
+            (if (local.get $i)
+              (then
+                (if (local.get $one)
+                  (then (i32.store16 (local.get $q) (i32.const 0x202c)) (local.set $q (i32.add (local.get $q) (i32.const 2))))
+                  (else (i32.store (local.get $q) (i32.const 0x20200a2c)) (local.set $q (i32.add (local.get $q) (i32.const 4)))))))
+            (local.set $q (i32.add (local.get $q)
+              (call $__arr_elem_str (local.get $arr) (local.get $i) (local.get $kind) (local.get $q))))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $emit)))
+    (if (local.get $more)
+      (then
+        (if (local.get $one)
+          (then (i32.store16 (local.get $q) (i32.const 0x202c)) (local.set $q (i32.add (local.get $q) (i32.const 2))))
+          (else (i32.store (local.get $q) (i32.const 0x20200a2c)) (local.set $q (i32.add (local.get $q) (i32.const 4)))))
+        (i32.store (local.get $q) (i32.const 0x202e2e2e)) ;; "... "
+        (local.set $q (i32.add (local.get $q) (i32.const 4)))
+        (local.set $q (i32.add (local.get $q) (call $__i32_to_str (local.get $more) (local.get $q))))
+        (i64.store (local.get $q) (i64.const 0x74692065726f6d20)) ;; " more it"
+        (i32.store16 offset=8 (local.get $q) (i32.const 0x6d65)) ;; "em"
+        (local.set $q (i32.add (local.get $q) (i32.const 10)))
+        (if (i32.gt_u (local.get $more) (i32.const 1))
+          (then (i32.store8 (local.get $q) (i32.const 115)) (local.set $q (i32.add (local.get $q) (i32.const 1)))))))
+    (if (local.get $one)
+      (then (i32.store16 (local.get $q) (i32.const 0x5d20)) (local.set $q (i32.add (local.get $q) (i32.const 2)))) ;; " ]"
+      (else (i32.store16 (local.get $q) (i32.const 0x5d0a)) (local.set $q (i32.add (local.get $q) (i32.const 2))))) ;; "\\n]"
+    (i32.store (local.get $cursor_addr) (i32.add (local.get $cur) (i32.sub (local.get $q) (local.get $p))))
   )`;
 }
 

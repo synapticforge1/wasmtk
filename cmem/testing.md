@@ -114,6 +114,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-13, sw66 + sw67 (arrays print as Deno prints them), gate green except the known
+> `go_asyncify_tests` 9 / 12.** wasi **455/455** (+`7d_ConsoleArrays`) · golden-WAT **512**: 5
+> entries changed (the new test; `12_InterfaceTypes` and three `31_*` typed-array programs, their
+> output still Deno's); re-recorded · bindgen 142 · bundle 4 · merge 1 · mod 55 · varscope 12 ·
+> jstyper 73 · dync 3 + 3 · typed_decl 37 · engine 11 · wast_runner 8 · wasmath_lower 199 exact ·
+> hybrid + guard 15 · go_bindgen 7 · go_merge 7 · wast 64,506 / 0 / 16 · engine cross-check 1152
+> on baseline · api-surface re-baselined (`LogSegment` arrptr `nameLen`, `arrInspectKind`).
+>
 > **2026-10-13, sw62 (console lines over 128 bytes), gate green except the known
 > `go_asyncify_tests` 9 / 12.** wasi **454/454** (+`7c_ConsoleLongLines`) · golden-WAT 511: 348
 > entries changed (the iov pointer stored before the write; lines that can exceed the scratch use
