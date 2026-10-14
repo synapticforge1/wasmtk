@@ -705,6 +705,17 @@ So:
   (an un-asyncified module has unresolved `asyncify.*` imports and won't instantiate), so `gowasic`
   reports a hard error rather than shipping a broken module.
 
+  **TinyGo 0.43 (Go 1.27.2), 2026-10-13: two binaryang Asyncify bugs, both on binaryang's side.**
+  (1) TinyGo 0.43 calls `asyncify.stop_unwind` from a new panic-catch wrapper and binaryang's pass
+  threw `Flatten: unresolved call target "$asyncify_stop_unwind"` (waitgroup, pipeline, nested);
+  fixed in binaryang 1.11.0, pinned as **1.12.0** (the owner skipped 1.11.0). (2) Then NESTED built
+  but trapped `uninitialized element` on a rewind: binaryang saved only the locals live AFTER an
+  unwinding call, not that call's operands (a `call_indirect` index loaded from a defer frame);
+  upstream `wasm-opt` 133 runs the same bytes. Fixed on binaryang's main, UNRELEASED (a 1.12.1 would
+  carry it). Repros `scripts/repros/tinygo043_{waitgroup,nested}_pre_asyncify.wasm`; letters in
+  `scripts/binaryang-report.md`. `go_asyncify_tests` is **11 / 12** until that release (nested is
+  KNOWN); on it, bump and expect 12 / 12. The owner's rule: no workaround in wasmtk.
+
   **NESTED SUSPENSION — found (B3) then FIXED (2026-07-09), binaryen-ts 1.4.3.** A goroutine that
   itself suspends (blocks on `inner.Wait()`) while running *inside* another suspending goroutine
   trapped `RuntimeError: memory access out of bounds` under the in-house path (even a 2×2 = 4-goroutine
