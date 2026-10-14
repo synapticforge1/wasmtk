@@ -8,6 +8,51 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## DRAFT (not yet sent) — 2026-10-13: `Asyncify` fails on TinyGo 0.43 output, upstream Binaryen does not (measured)
+
+**Short version:** binaryang's `Asyncify` pass throws `Flatten: unresolved call target
+"$asyncify_stop_unwind"` on a module TinyGo 0.43.0 builds for goroutines, in **1.8.1 (our pin)
+and 1.10.0 (your latest)**. Upstream Binaryen 123 (npm `binaryen@123.0.0`, binaryen.js) runs the
+same pass on the same bytes, the result validates, and it RUNS correctly (`wg-counter: 45`, the
+program's expected output). So this looks like a port difference, exposed by a new shape in
+TinyGo's output. Our goroutine build (`wasmtk build --lang=go` without a real `wasm-opt`) is
+broken for any user on TinyGo 0.43.
+
+### Reproducer
+
+`scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm` in wasmtk (16,417 bytes, SHA-256
+`8A9812A11392DC47…`): TinyGo's output BEFORE asyncify, captured by a passthrough `wasm-opt`.
+Built from wasmtk's `tests/go_fixtures/goroutines/waitgroup/main.go` with TinyGo 0.43.0 (Go
+1.27.2, LLVM 22.1.4), `tinygo build -scheduler=asyncify -no-debug -panic=trap -target=wasip1`.
+TinyGo called wasm-opt as `--asyncify -Oz -g <in> --output <out>` (note: `--output`, not `-o`).
+
+The calls we make, which fail on both binaryang versions with both spellings of the pass name:
+
+```ts
+const m = lib.readBinary(bytes);
+m.setFeatures(lib.Features.All);
+m.runPasses(["Asyncify"]);           // or "asyncify": the same error
+lib.setShrinkLevel(2); lib.setOptimizeLevel(2); m.optimize();
+```
+
+### What is new in TinyGo 0.43's output (our reading; please check)
+
+The module imports the four `asyncify.*` functions as before (`stop_unwind` is import 0,
+`start_rewind` 1, `stop_rewind` 4, `start_unwind` 5). With TinyGo 0.41.1 the suite passed on
+binaryang 1.8.1, so the imports themselves are not new. **New:** `asyncify.stop_unwind` has THREE
+call sites, and the third is in a function TinyGo 0.43 generates to catch a panic across a
+suspend: `$main.main$1.asyncifysuspendcatch.0.paniccatch`, next to `$tinygo.asyncify.panicreplay.0`.
+The other two are the usual `$tinygo_launch` and `$tinygo_rewind`. The error names the internal
+function Asyncify substitutes for that import (`$asyncify_stop_unwind`), so our guess is that the
+substitution or the function's creation does not reach that third caller before Flatten runs (a
+function your port skips, or visits in a different order). We have not reduced it further.
+
+### Not an ask, but what we do meanwhile
+
+We have not changed anything yet. Options on our side, put to the owner: pin TinyGo 0.41.1 for
+the gate, or run upstream binaryen.js for this one pass until your fix lands. Whichever it is,
+we will re-run `go_asyncify_tests` (9 / 12 today) on your fix.
+
 ## SENT 2026-10-06 — 2026-10-06: `wasm-bundle` — can each producer emit `linking` + `reloc.*`? (measured)
 
 > **binaryang's response (2026-10-06):** accurate, nothing to adjust. They agree to bundle before
