@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-13, binaryang **1.12.0**; latest release v2.0.3)
 
+> **2026-10-13, sw68 (arguments evaluated before the console line), gate green except the known
+> `go_asyncify_tests` 11 / 12. No silent-wrong row is open.** wasi **458/458**
+> (+`7e_ConsoleNestedLog`; the 198 programs whose WAT moved print exactly as before) · golden-WAT
+> **515**, 198 re-recorded, each checked capture-only against a copied snapshot (scratchpad
+> `sw68/shape.ts` + reading) · api-surface re-baselined (`consoleTempLocals`) · every other count
+> as on sw69 below.
+>
 > **2026-10-13, sw70 (a local array shadowing a module one), gate green except the known
 > `go_asyncify_tests` 11 / 12.** wasi **457/457** (+`9_LocalArrayShadowsModule`) · golden-WAT
 > **514**, only the new entry · every other count as on sw69 below.

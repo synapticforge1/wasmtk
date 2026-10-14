@@ -469,6 +469,67 @@ export function arrInspectKind(elemType: string): number | undefined {
   return undefined;
 }
 
+/** A call that may print: a user function (helpers are `$__…`) or any indirect call. */
+const USER_CALL = /\(call \$(?!__)|\(call_indirect\b/;
+
+/**
+ * sw68: when an argument calls a user function, every expression argument is evaluated, in order,
+ * into a `$__clt_<type>_<n>` temporary BEFORE the line is built (`pre`), and its segment reads the
+ * temporary. Variable segments are locals of this function, which a callee cannot change.
+ * The emitting function declares the temporaries it finds (consoleTempLocals).
+ */
+function hoistCallingArgs(segments: LogSegment[]): { segments: LogSegment[]; pre: string[] } {
+  const wats = (s: LogSegment): string[] =>
+    "wat" in s ? [s.wat] : s.kind === "joinarr" ? [s.arrWat] : s.kind === "strcall"
+      ? [s.callWat]
+      : s.kind === "strexpr"
+      ? [s.ptrWat, s.lenWat]
+      : [];
+  if (!segments.some((s) => wats(s).some((w) => USER_CALL.test(w)))) return { segments, pre: [] };
+  const pre: string[] = [];
+  let n = 0;
+  const tmp = (t: "i32" | "i64" | "f64", w: string): string => {
+    const name = `$__clt_${t}_${n++}`;
+    pre.push(`(local.set ${name} ${w})`);
+    return `(local.get ${name})`;
+  };
+  const out = segments.map((s): LogSegment => {
+    switch (s.kind) {
+      case "i32expr":
+      case "boolexpr":
+      case "arrptr":
+        return { ...s, wat: tmp("i32", s.wat) };
+      case "i64expr":
+        return { ...s, wat: tmp("i64", s.wat) };
+      case "f64expr":
+        return { ...s, wat: tmp("f64", s.wat) };
+      case "joinarr":
+        return { ...s, arrWat: tmp("i32", s.arrWat) };
+      case "strcall":
+        pre.push(s.callWat);
+        return {
+          kind: "strexpr",
+          ptrWat: tmp("i32", "(global.get $__str_ret_ptr)"),
+          lenWat: tmp("i32", "(global.get $__str_ret_len)"),
+        };
+      case "strexpr":
+        return { kind: "strexpr", ptrWat: tmp("i32", s.ptrWat), lenWat: tmp("i32", s.lenWat) };
+      default:
+        return s;
+    }
+  });
+  return { segments: out, pre };
+}
+
+/** The `$__clt_*` temporaries a function body uses (sw68), as `(local …)` declarations. */
+export function consoleTempLocals(body: string, declared: { has(name: string): boolean }): string[] {
+  const names = new Set<string>();
+  for (const m of body.matchAll(/\$(__clt_(i32|i64|f64)_\d+)\b/g)) {
+    if (!declared.has(m[1])) names.add(m[1]);
+  }
+  return [...names].sort().map((n) => `    (local $${n} ${n.split("_")[3]})`);
+}
+
 /** The `$__arr_inspect` call for an `arrptr` segment, appending at the cursor stored at `cursorWat`. */
 function arrInspectCall(seg: { wat: string; elemType: string; nameLen?: number }, cursorWat: string): string {
   const kind = arrInspectKind(seg.elemType);
@@ -3564,6 +3625,13 @@ export function emitConsoleLog(
   needsJoinHelper: boolean;
 } {
   const nwrittenOffset = iovBase + (NWRITTEN_OFFSET - IOV_BASE); // = iovBase + 128
+  // Step 0 (sw68): an argument that calls a user function may PRINT, and a nested console.log
+  // writes the same cursor, buffer and iov area this line is being built in: the outer line lost
+  // what it had (`console.log("outer:", scale(4), "end")` printed `inner 40.25 end`). JavaScript
+  // evaluates every argument, left to right, before printing, so do that: each expression goes to
+  // a temporary first, then the line is built from the temporaries. Only lines with such a call.
+  const hoisted = hoistCallingArgs(segments);
+  segments = hoisted.segments;
   // Step 1: merge consecutive literal segments to minimise iov count.
   // e.g. [{literal,"x: "},{literal," "},{literal,"\n"}] → [{literal,"x:  \n"}]
   const merged: LogSegment[] = [];
@@ -3987,6 +4055,8 @@ export function emitConsoleLog(
     );
   }
 
+  // sw68: the arguments, evaluated before the line is touched
+  statements.unshift(...hoisted.pre.map((p) => `${indent}${p}`));
   return { statements, needsHelpers, needsStrGather, needsArrPrintHelper, needsJoinHelper };
 }
 

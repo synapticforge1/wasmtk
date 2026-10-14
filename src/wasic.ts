@@ -131,6 +131,7 @@ import { implicitTruncDiagnostic, intDivisionDiagnostic, type WmHelper, WM_WAT }
 import {
   arrInspectKind,
   type ClosureVarLookup,
+  consoleTempLocals,
   type DataAllocator,
   type DotCallLookup,
   emitConsoleLog,
@@ -20629,6 +20630,8 @@ ${sum}
     const strOpTempDecls = /\$__str_op_(?:ptr|len)\b/.test(body) && !seenLocals.has("__str_op_ptr")
       ? `    (local $__str_op_ptr i32)\n    (local $__str_op_len i32)`
       : "";
+    // console.log's argument temporaries (sw68), named by type: `$__clt_f64_1`
+    const consoleTempDecls = consoleTempLocals(body, seenLocals).join("\n");
     this.scalarStrTempsUsed = savedScalarTemps;
     this.currentBoxedCaptures = new Set();
     this.currentSharedMutableCaptures = new Set();
@@ -20655,6 +20658,7 @@ ${sum}
       localDecls ? localDecls : "",
       scalarTempDecls,
       strOpTempDecls,
+      consoleTempDecls,
       finalBody + neverSuffix,
       `  )`,
     ].filter((l) => l.trim() !== "").join("\n");
@@ -22392,6 +22396,10 @@ ${sum}
       if (/\$__str_op_(?:ptr|len)\b/.test(bodyWat) && !declMap.has("__str_op_ptr")) {
         declMap.set("__str_op_ptr", "i32");
         declMap.set("__str_op_len", "i32");
+      }
+      // console.log's argument temporaries (sw68)
+      for (const m of bodyWat.matchAll(/\$(__clt_(i32|i64|f64)_\d+)\b/g)) {
+        if (!declMap.has(m[1])) declMap.set(m[1], m[2] as WatType);
       }
       this.scalarStrTempsUsed = savedScalarTemps;
       const localDecls = [...declMap.entries()]
