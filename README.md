@@ -1034,7 +1034,7 @@ wasmtk wast file.wast --verbose               # show skip/toolchain-gap detail
 > wabt-ts 1.4.1 — `exact.wast` now reports `pass=20 fail=0`). Measured on the full 288-file corpus in
 > a single process: **63,693 passed, 0 failed, 913 skipped** (2026-09-28), no OOM. (The repo's own
 > test gate enables V8's experimental wide-arithmetic for every file, and custom-descriptors for
-> that proposal's own files only, and reads 64,506 / 16 on binaryang 1.8.1: binaryang's validator
+> that proposal's own files only, and reads 64,506 / 16 on binaryang 1.12.0 (as on 1.8.1): binaryang's validator
 > also decides the `assert_invalid` modules V8 cannot judge, and modules V8 refuses only for custom
 > page sizes are run after binaryang's `LowerCustomPageSizes` rewrite, with those passes reported
 > separately. The CLI uses the stable engine and V8's verdicts only.) An `assert_trap` passes only when the trap is the kind the script

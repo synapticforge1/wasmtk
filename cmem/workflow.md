@@ -47,7 +47,7 @@ pin."* The premature `-Oz` skip removal on 2026-08-25 is what that sentence is p
 `git config --global --add safe.directory <abs-path-to>/upstream/binaryang`. The symptom is a silent
 `unknown` where `upstream:link` should print the checkout revision.
 
-## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1)
+## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, and 1.8.1 → 1.12.0)
 
 Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full text before the
 2026-09-30 rewrite: `git show ab5d1273644:cmem/next-work.md`). Each step has cost time when skipped.
@@ -69,7 +69,11 @@ Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full
 6. **At-risk suites first** (what the changelog touches; for a printer change, the merge paths:
    merge, bundle, mod, go_merge, wasmmerge_guard), then **the full gate in order** (§ The full gate).
    Golden-WAT changes must be checked token by token against a snapshot of the old goldens before
-   re-recording.
+   re-recording. **`tests/.golden` is gitignored: COPY it aside before `--record`, or the old state
+   is gone.** A golden entry records a FAILED compile as readily as a good one (`"success": false`
+   with the error): after recording, grep for it; the count must be 0, as before. (1.12.0, 2026-10-13:
+   35 dynrt bundles recorded as failures; the optimizer had changed shapes the merge reads — block
+   types by index, `$__malloc` inlined. An OPTIMIZER change reaches the merge too.)
 7. **wast: re-record only drift that is explained**, file by file, and the validator-oracle guard
    (binaryang rejects no valid module) must read 0.
 8. **If a report went to binaryang, verify every item it claims fixed against OUR numbers**, and
@@ -217,7 +221,7 @@ deno run --allow-read --allow-write --allow-run --allow-env tests/wasi_tests.ts 
 
 # 2b. hybrid + wasmmerge_guard are Deno.test-based — `deno run` runs NOTHING and exits 0
 deno test --no-check --allow-read --allow-write --allow-run --allow-env \
-  tests/hybrid_tests.ts tests/wasmmerge_guard_tests.ts     # expect 15 passed (13 + 2)
+  tests/hybrid_tests.ts tests/wasmmerge_guard_tests.ts     # expect 17 passed (13 + 4; 2026-10-13)
 #     A hand-rolled gate script must switch to `deno test` for any file containing `Deno.test(`.
 
 # 2c. typed_decl_tests + engine_tests + wast_runner_tests + golden_wat_tests (`deno run`); golden expects 512 / 0 diverged (2026-10-13, sw66)
@@ -226,7 +230,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 #    go_bindgen go_merge go_asyncify
 
 # 4. wast_tests   → expect 288 files / 64506 assertions / 0 failures / 16 skipped / 0 unrunnable, "of which 33 passed on 23 module(s) lowered"
-#    (as of 2026-09-30, binaryang 1.8.1) → "✅ ALL CLEAN". Should a known failure ever be pinned
+#    (as of 2026-09-30, binaryang 1.8.1; unchanged on 1.12.0, 2026-10-13) → "✅ ALL CLEAN". Should a known failure ever be pinned
 #    again, "✅ ON BASELINE — N known failure(s) still standing" is the pass condition.
 #    The known failures print in red every run by design; the gate fails only if a count MOVES.
 

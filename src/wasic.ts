@@ -22305,7 +22305,11 @@ ${sum}
       `(module`,
       imports,
       `  (memory (export "memory") ${memoryPages})`,
-      `  (global $__heap_ptr (mut i32) (i32.const ${heapStart}))`,
+      // A LIBRARY exports its heap pointer so a merge can unify the allocator by it: the optimizer
+      // may inline `$__malloc` away (binaryang 1.9.0+), leaving no function to recognise.
+      this.mode === "library"
+        ? `  (global $__heap_ptr (export "__heap_ptr") (mut i32) (i32.const ${heapStart}))`
+        : `  (global $__heap_ptr (mut i32) (i32.const ${heapStart}))`,
       // Dragon4 f64→string bignum scratch base (0 = not yet allocated; lazily malloc'd on first
       // $__f64_to_str call). Unused-stripped by -Oz when no f64 is ever printed.
       `  (global $__d4s (mut i32) (i32.const 0))`,
