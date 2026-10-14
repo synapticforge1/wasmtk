@@ -114,6 +114,15 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-13, binaryang **1.12.0**; latest release v2.0.3)
 
+> **2026-10-13, sw69 (array and struct literal values), gate green except the known
+> `go_asyncify_tests` 11 / 12.** wasi **456/456** (+`9_LiteralElementValues`) · golden-WAT
+> **513**, 4 re-recorded against a copied snapshot (the new test; `28_slices` and `6b_pointers`,
+> whose literals were the bug; `6b_SimpleStructs`, now static), 6 entries failing on purpose, as
+> before · typed_decl **40** (+3 float-literal refusals) · bindgen 142 · bundle 4 · merge 1 · mod
+> 55 · varscope 12 · jstyper 73 · dync 3 + 3 · engine 11 · wast_runner 8 · wasmath_lower 199 exact
+> · hybrid + guard 17 · go_bindgen 7 · go_merge 7 · wast 64,506 / 0 / 16 · engine cross-check
+> 1152 on baseline · `-Oz` guard 42 / 42 · api-surface matches.
+>
 > **2026-10-13, binaryang 1.8.1 → 1.12.0 pinned, gate green except `go_asyncify_tests` 11 / 12
 > (nested: binaryang's Asyncify, KNOWN, letter drafted).** Predictions written first: every
 > `.wasm` moves, outputs do not (held: wasi **455/455**); golden holds but for pipeline entries

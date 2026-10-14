@@ -133,6 +133,11 @@ const REFUSED: [string, string, string | string[]][] = [
   ["float passed to an i32 parameter", `function h(n: i32): i32 { return n + 1; }\nconst f: f64 = 2.5;\nconsole.log(h(f));`, "passed to 'h'"],
   ["float into an i32 field", `interface P { n: i32; }\nconst f: f64 = 2.5;\nconst p: P = { n: 0 };\np.n = f;\nconsole.log(p.n);`, "float stored as an integer in 'p.n = f;'"],
   ["f as i32", `const f: f64 = 2.5;\nconst x: i32 = f as i32;\nconsole.log(x);`, "'as i32' on a float"],
+  // A float LITERAL in an integer slot (found with sw69): `(i32.const 1.5)` failed in the
+  // assembler, with no location; D3 reports it. Arrays and fields were silently truncated before.
+  ["float literal into an i32", `const z: i32 = 1.5;\nconsole.log(z);`, ["the literal 1.5 as i32", at("float literal into an i32", 3, 16)]],
+  ["float literal in an i32[]", `const a: i32[] = [1, 2.5];\nconsole.log(a[1]);`, "float stored as an integer in 'const a: i32[] = [1, 2.5];' (the literal 2.5 as i32)"],
+  ["float literal into an i32 field", `interface Q { n: i32; }\nconst q: Q = { n: 1.5 };\nconsole.log(q.n);`, "float stored as an integer in 'const q: Q = { n: 1.5 };' (the literal 1.5 as i32)"],
   [
     "float passed to a wasMath i32 function",
     `import { f64, i32 } from "${new URL("../src/wasmath.ts", import.meta.url).href}";\nconst f: f64 = 2.5;\nconst x: i32 = i32.add(f, 1);\nconsole.log(x);`,

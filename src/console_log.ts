@@ -1570,6 +1570,7 @@ function parseSingleArg(
       const eLoad = memLoadOp(a2.elemType);
       const wat =
         `(${eLoad} (i32.add (i32.add ${rowPtr} (i32.const 8)) (i32.shl ${colIdx} (i32.const ${eShift}))))`;
+      if (a2.elemType === "bool") return [{ kind: "boolexpr", wat }]; // true / false, not 1 / 0
       const kind = a2.elemType === "f64" || a2.elemType === "f32"
         ? "f64expr" as const
         : a2.elemType === "i64"
@@ -1660,6 +1661,8 @@ function parseSingleArg(
         : `(i32.add ${dataBase} (i32.shl ${idxWat} (i32.const ${shift})))`;
       const wat = `(${loadOp} ${addrWat})`;
       // An f32 element prints as a number (it was an i32expr: its bit pattern; sw43).
+      // A boolean element prints true / false (it printed 1 / 0; found with sw69).
+      if (arrInfo.elemType === "bool" && !arrInfo.customLoadOp) return [{ kind: "boolexpr", wat }];
       const kind = arrInfo.elemType === "f64" || arrInfo.elemType === "f32"
         ? "f64expr" as const
         : arrInfo.elemType === "i64"
@@ -3102,9 +3105,11 @@ function exprToWat(
     const leadArrElem = (leadM && leadM[2] === undefined && restAfterLead.startsWith("["))
       ? arrayLookup?.(leadM[1])?.elemType
       : undefined;
+    // A boolean element is an i32 (`flags[0] === false` was f64.eq over an i32 load: an invalid
+    // module; found with sw69).
     const lhsArrNumType =
       (leadArrElem === "i32" || leadArrElem === "i64" || leadArrElem === "f64" ||
-          leadArrElem === "f32")
+          leadArrElem === "f32" || leadArrElem === "bool")
         ? leadArrElem
         : undefined;
     const lhsLocalType = lhsArrNumType

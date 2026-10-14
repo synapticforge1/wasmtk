@@ -299,6 +299,14 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
 
 ## Numeric / codegen correctness
 
+- **A literal's value is laid out at compile time ONLY when it is an exact literal of its slot's
+  type; everything else is evaluated at run time (sw69, 2026-10-13).** `plainArrayLiteral(e, t)`
+  is the one gate (decimal, hex / binary / octal, bigint with `n`, `true` / `false`), used by
+  `allocArrayData`, `allocStructData`, `arrayElemWat` and `isStaticFieldValue`. Never write
+  `parseFloat(raw) || 0` / `parseInt(raw, 10) || 0` on source text: it turns a name, an
+  expression, `NaN`, `-0` or `0x10` into 0 with no error, which is how every array and struct
+  literal layout was silently wrong. A value that must be static and is not plain is a
+  diagnostic, never a 0. In an integer context a float literal is D3's refusal; `1e3` is 1000.
 - **Operator grouping follows JavaScript's precedence table, in BOTH emitters (2026-10-06,
   sw10–sw17).** The ternary splits at the FIRST top-level `?` and its own `:` (right-assoc);
   unary `- ! ~` and `**` apply only when no binary operator is at top level; every
