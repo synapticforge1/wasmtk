@@ -114,6 +114,10 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-13, binaryang **1.12.0**; latest release v2.0.3)
 
+> **2026-10-13, sw70 (a local array shadowing a module one), gate green except the known
+> `go_asyncify_tests` 11 / 12.** wasi **457/457** (+`9_LocalArrayShadowsModule`) · golden-WAT
+> **514**, only the new entry · every other count as on sw69 below.
+>
 > **2026-10-13, sw69 (array and struct literal values), gate green except the known
 > `go_asyncify_tests` 11 / 12.** wasi **456/456** (+`9_LiteralElementValues`) · golden-WAT
 > **513**, 4 re-recorded against a copied snapshot (the new test; `28_slices` and `6b_pointers`,
