@@ -18494,6 +18494,33 @@ ${sum}
     )
   )
 
+  ;; ── the console buffer (sw62, 2026-10-13): console.log builds a line here ──────────
+  ;; A heap block that GROWS (it was the fixed 128-byte scratch, and a longer line overwrote the
+  ;; data after it). Kept across lines, so steady-state printing allocates nothing.
+  (global $__cbuf (mut i32) (i32.const 0))
+  (global $__cbuf_cap (mut i32) (i32.const 0))
+  ;; Room for \`need\` bytes in all: 256 the first time, else double (or \`need\`), contents kept.
+  (func $__cbuf_need (param $need i32)
+    (local $cap i32) (local $nb i32)
+    (if (i32.le_u (local.get $need) (global.get $__cbuf_cap)) (then (return)))
+    (local.set $cap (select (i32.shl (global.get $__cbuf_cap) (i32.const 1)) (i32.const 256)
+      (global.get $__cbuf_cap)))
+    (if (i32.lt_u (local.get $cap) (local.get $need)) (then (local.set $cap (local.get $need))))
+    (local.set $nb (call $__malloc (local.get $cap)))
+    (if (global.get $__cbuf_cap)
+      (then (call $__str_gather (global.get $__cbuf) (global.get $__cbuf_cap) (local.get $nb))))
+    (global.set $__cbuf (local.get $nb))
+    (global.set $__cbuf_cap (local.get $cap))
+  )
+  ;; Appends len bytes from src at the cursor stored at cursor_addr, and advances it.
+  (func $__cbuf_put (param $src i32) (param $len i32) (param $cursor_addr i32)
+    (local $cur i32)
+    (local.set $cur (i32.load (local.get $cursor_addr)))
+    (call $__cbuf_need (i32.add (local.get $cur) (local.get $len)))
+    (call $__str_gather (local.get $src) (local.get $len) (i32.add (global.get $__cbuf) (local.get $cur)))
+    (i32.store (local.get $cursor_addr) (i32.add (local.get $cur) (local.get $len)))
+  )
+
   ;; ── str_concat: heap-allocate new string = a ++ b ───────────────────────────
   ;; Copies bytes of a then b into a malloc'd buffer. Returns (ptr, len).
   ;; Old buffers become dead memory (bump allocator has no free).
