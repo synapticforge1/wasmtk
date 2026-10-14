@@ -2116,6 +2116,10 @@ class WasicTranspiler {
   // Phase 30: runtime field initializers for struct literals with non-constant values
   // varName → { fieldName: exprString } — emitted as store instructions after local.set $p
   private structVarRuntimeInits: Map<string, Record<string, string>> = new Map();
+  /** sw70: the module globals the function being emitted shadows with its own local or param of
+   *  the same name. A local array `a` beside a module array `a` was initialized with
+   *  `global.set $a` (isModuleGlobalArr saw only the name), replacing the module's array. */
+  private fnShadowedGlobals: Set<string> = new Set();
   /** sw69: a static array of struct literals' non-literal field values, stored at its declaration. */
   private structArrayFieldInits: Map<string, Array<{ ptr: number; field: string; expr: string }>> =
     new Map();
@@ -4056,7 +4060,8 @@ class WasicTranspiler {
 
   /** Returns whether an array is a true module-level WASM global (registered in moduleGlobals AND not shadowed by a local/parameter in the current function scope). */
   private isModuleGlobalArr(arrName: string): boolean {
-    return this.moduleGlobals.has(arrName) && this.arrayVars.get(arrName)?.ptr === -2;
+    return this.moduleGlobals.has(arrName) && !this.fnShadowedGlobals.has(arrName) &&
+      this.arrayVars.get(arrName)?.ptr === -2;
   }
 
   /** Returns the WAT expression to read the array pointer: global.get for module globals, local.get otherwise. */
@@ -20601,11 +20606,21 @@ ${sum}
     // sw48: a boxed parameter is rebound to a heap cell holding its value, before the body runs.
     const boxedParams = fn.params.filter((p) => this.currentSharedMutableCaptures.has(p.name));
     for (const p of boxedParams) this.boxHelpers.add(this.boxType(p.name));
-    const body = boxedParams
-      .map((p) =>
-        `    (local.set $${this.boxSlot(p.name)} (call $__box_${this.boxType(p.name)} (local.get $${p.name})))\n`
-      )
-      .join("") + this.emitBlock(fn.bodyLines, locals, blockResult);
+    // sw70: what this function declares itself is local, whatever a module global is called
+    this.fnShadowedGlobals = new Set(
+      [...declaredLocals.map(([n]) => n), ...fn.params.map((p) => p.name)]
+        .filter((n) => this.moduleGlobals.has(n)),
+    );
+    let body: string;
+    try {
+      body = boxedParams
+        .map((p) =>
+          `    (local.set $${this.boxSlot(p.name)} (call $__box_${this.boxType(p.name)} (local.get $${p.name})))\n`
+        )
+        .join("") + this.emitBlock(fn.bodyLines, locals, blockResult);
+    } finally {
+      this.fnShadowedGlobals = new Set();
+    }
     // Declare the number/bool → text temps if the body used them and the pre-scan didn't already.
     const scalarTempDecls = this.scalarStrTempsUsed && !seenLocals.has("__tmpl_num_ptr")
       ? `    (local $__tmpl_num_ptr i32)\n    (local $__tmpl_num_len i32)`

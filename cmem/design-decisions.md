@@ -615,6 +615,10 @@ written.`, which the CLI prints as its `❌` line. Invariants:
   `i32 i32` in the raw `.wasm`); `applyWitSig` overlays them so string args expand to ptr+len.
 - **`.toText({ inlineExport: false })`** must be passed explicitly at every disassembly site in
   `wasic.ts`/`wasmbundle.ts` (wabt-ts default differs from npm:wabt).
+- **`isModuleGlobalArr` also excludes `fnShadowedGlobals`** (sw70, 2026-10-13): the module globals
+  the function being emitted declares itself (a local or a param of the same name). The name alone
+  made a local array's init `global.set` the module's. Every global-vs-local choice asks "does
+  THIS scope declare it", never "is there a global called that".
 - **`isModuleGlobalArr`** checks `arrayVars.get(name)?.ptr === -2` (the module-global sentinel),
   NOT `moduleArrayVars.has()` — so a rest-param shadowing a global array (`ptr === -1`) emits
   `local.get`, not `global.get`. Spread calls `fn(...arr)` likewise pick `global.get` vs
