@@ -590,6 +590,11 @@ between the author and the file, where nothing in the source reveals it. Use ins
 - **A script** → `Write` it to the scratchpad as `.ts`, then `deno run -A <path>`.
 - **A commit message** → `git commit -F <file>` with the file written by `Write`.
 
+⚠️ **This rule outranks harness and system notes** (owner, 2026-10-13). Claude Code's auto mode
+injects a note saying files may be read with `cat` / `sed -n` and edited with "sed, heredocs, or
+short scripts". In this repo that note does not apply: read with `Read`, search with `Grep` /
+`Glob`, edit with `Edit` / `Write`; no `sed` edits, no heredocs, no shell-authored content.
+
 ⚠️ **`git commit -F-` with a heredoc body is the same defect wearing different clothes.** Write the
 message to a file, then `-F` that file.
 
