@@ -65,5 +65,5 @@ console.log(totalF(xs), totalI(is), totalD(ds));
 const qs: P[] = [{ x: 1.5, y: 0, n: 0 }, { x: 2.5, y: 0, n: 0 }];
 const qsum: f32 = qs[0].x + qs[1].x;
 console.log(qs[1].x, qsum);
-const k: i32 = Math.floor(p.x);
+const k: i32 = f64.toI32(Math.floor(p.x));
 console.log(k);

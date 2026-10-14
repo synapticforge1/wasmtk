@@ -21,16 +21,18 @@ console.log(Math.round(0.49999999999999994), Math.round(2.5), Math.round(-2.5), 
 console.log(1 / Math.round(-0.4), 1 / Math.round(-0.5), Math.round(4503599627370495.5));
 console.log(Math.round(nan), Math.round(inf), Math.round(1.5), Math.round(-1.5));
 
-// Integral results only: `const q: i32 = Math.sqrt(17)` is 4 in wasm and 4.123… in Deno BY DESIGN
-// (the declared type decides; design-decisions.md § "Wasm types in TypeScript").
+// A Math result (always a float) into an i32 says its conversion with wasMath since the owner's D3
+// (2026-10-13): `const q: i32 = Math.sqrt(17)` was silently 4 in wasm and 4.123… in Deno; it is now
+// a compile error, and `f64.toI32(Math.sqrt(17))` is 4 in both (design-decisions.md § "Wasm types
+// in TypeScript").
 const y: f64 = 3.7;
-const fl: i32 = Math.floor(y);
-const ce: i32 = Math.ceil(y);
-const tr: i32 = Math.trunc(-y);
-const ro: i32 = Math.round(y);
-const sq: i32 = Math.sqrt(16);
-const sg: i32 = Math.sign(-y);
-const hy: i32 = Math.hypot(3, 4);
+const fl: i32 = f64.toI32(Math.floor(y));
+const ce: i32 = f64.toI32(Math.ceil(y));
+const tr: i32 = f64.toI32(Math.trunc(-y));
+const ro: i32 = f64.toI32(Math.round(y));
+const sq: i32 = f64.toI32(Math.sqrt(16));
+const sg: i32 = f64.toI32(Math.sign(-y));
+const hy: i32 = f64.toI32(Math.hypot(3, 4));
 console.log(fl, ce, tr, ro, sq, sg, hy);
 
 function pick(a: i32, b: i32, c: i32): i32 {

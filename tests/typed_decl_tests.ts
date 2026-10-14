@@ -121,6 +121,19 @@ const REFUSED: [string, string, string][] = [
   ["i32 division, the | 0 idiom", `const a: i32 = 7;\nconst b: i32 = 2;\nconst q: i32 = (a / b) | 0;\nconsole.log(q);`, "integer division 'a / b'"],
   ["i32 /= ", `let a: i32 = 7;\na /= 2;\nconsole.log(a);`, "integer division 'a /= 2'"],
   ["i32 division in console.log", `const a: i32 = 7;\nconst b: i32 = 2;\nconsole.log(a / b);`, "integer division 'a / b'"],
+  // D3 (owner, 2026-10-13): a float STORED into a declared integer, and `as i32` on a float.
+  ["float into an i32 declaration", `const f: f64 = 3.7;\nconst x: i32 = f;\nconsole.log(x);`, "float stored as an integer in 'const x: i32 = f;' (stored into 'x')"],
+  ["Math result into an i32", `const y: f64 = 3.7;\nconst q: i32 = Math.floor(y);\nconsole.log(q);`, "float stored as an integer in 'const q: i32 = Math.floor(y);'"],
+  ["float assigned to an i32", `let n: i32 = 0;\nconst f: f64 = 2.5;\nn = f;\nconsole.log(n);`, "float stored as an integer in 'n = f;'"],
+  ["float returned as an i32", `function g(f: f64): i32 { return f; }\nconsole.log(g(2.5));`, "returned from an integer function"],
+  ["float passed to an i32 parameter", `function h(n: i32): i32 { return n + 1; }\nconst f: f64 = 2.5;\nconsole.log(h(f));`, "passed to 'h'"],
+  ["float into an i32 field", `interface P { n: i32; }\nconst f: f64 = 2.5;\nconst p: P = { n: 0 };\np.n = f;\nconsole.log(p.n);`, "float stored as an integer in 'p.n = f;'"],
+  ["f as i32", `const f: f64 = 2.5;\nconst x: i32 = f as i32;\nconsole.log(x);`, "'as i32' on a float"],
+  [
+    "float passed to a wasMath i32 function",
+    `import { f64, i32 } from "${new URL("../src/wasmath.ts", import.meta.url).href}";\nconst f: f64 = 2.5;\nconst x: i32 = i32.add(f, 1);\nconsole.log(x);`,
+    "passed to 'i32.add'",
+  ],
   // `>>>` on a bigint is a TypeError in JavaScript (wasMath L4, 2026-10-13).
   ["bigint >>>", `const a: bigint = 7n;\nconst s: bigint = a >>> 1n;\nconsole.log(s);`, "'>>>' on a bigint is a TypeError"],
   [
@@ -197,6 +210,24 @@ const b: i32 = -2;
 console.log(x / y, p / s, i32.div(a, b), f64.div(a, b));`,
     "3.5 3n -3 -3.5",
   ],
+  [
+    "D3's accepted forms: an index or position from a number, wasMath's conversions, x | 0",
+    `import { f64, i32 } from "${new URL("../src/wasmath.ts", import.meta.url).href}";
+const arr: i32[] = [10, 20, 30];
+const s: string = "hello";
+let total: i32 = 0;
+for (let i: number = 0; i < 3; i++) total = total + arr[i];
+const pos: number = 1;
+const y: f64 = 3.7;
+const big: f64 = 1e10;
+const a: i32 = f64.toI32(Math.floor(y));
+const b: i32 = f64.toI32Sat(big);
+const c: i32 = f64.toI32Wrap(big);
+const d: i32 = big | 0;
+const ch: string = s[pos];
+console.log(total, ch, s.indexOf("l", pos), a, b, c, d);`,
+    "60 e 2 3 2147483647 1410065408 1410065408",
+  ],
 ];
 
 const dir = await Deno.makeTempDir({ prefix: "wasmtk_typed_decl_" });
@@ -204,7 +235,7 @@ try {
   console.log("\n  refused, for the stated reason:");
   for (const [name, body, frag] of REFUSED) {
     const file = `r_${name.replace(/\W+/g, "_")}.ts`;
-    await Deno.writeTextFile(join(dir, file), H + body + "\n");
+    await Deno.writeTextFile(join(dir, file), (body.startsWith("import") ? "" : H) + body + "\n");
     const r = await run(["wasic", file], dir);
     ok(
       `${name}`,

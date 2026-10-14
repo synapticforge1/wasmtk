@@ -1,6 +1,9 @@
 # Wasm number types in TypeScript: `Math` stays JavaScript's, a typed library carries wasm's (SCOPE, 2026-10-09)
 
-**Status: L1–L4 DONE (L4 2026-10-13).** **L4**, the operator bugs, both emitters: ld29 (every
+**Status: L1–L4 DONE (L4 2026-10-13), and D3 built the same day** (a float stored into a declared
+integer, or `as i32` on one, is a compile error naming `f64.toI32` / `toI32Sat` / `toI32Wrap`;
+indices and positions kept; this closes the library's known gap of an out-of-range f64 into an
+`i32.*` argument). **L4:** **L4**, the operator bugs, both emitters: ld29 (every
 bitwise / shift operand and `~` is ToInt32'd, never a trapping trunc), ld31 (bigint `&` `|` `^`
 are i64 ops; `<<` / `>>` follow JavaScript's unbounded count wrapped to 64 bits via
 `$__i64_shl` / `$__i64_shr`; bigint `>>>` is a compile error), ld30 (bigint `**` is

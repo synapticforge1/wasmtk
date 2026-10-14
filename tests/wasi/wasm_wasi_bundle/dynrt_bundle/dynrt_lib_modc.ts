@@ -32,8 +32,11 @@
 // elsewhere in wasic). Absent object keys return the sentinel -1 (the future wasic `any` lowering
 // maps that to `undefined`).
 
-type i32 = number;
-type f64 = number;
+// The number types come from wasMath. A dynamic number used as a position or count (`slice`,
+// `at`, `repeat`, an index) is converted by `f64.toI32Sat`: NaN → 0 and ±Infinity clamped, as
+// JavaScript's ToIntegerOrInfinity does before clamping to the length. (It was `x as unknown as
+// i32`, a trapping truncation; the owner's D3, 2026-10-13, refuses `as i32` on a float.)
+import { f64, i32 } from "../../../../src/wasmath.ts";
 
 // #14 Phase 2 (host→core callbacks): the ONE host import. When a host passes a JS function into the
 // core as `any`, bindgen boxes it as a tag-7 cell with marker slot[1] = -2 and slot[2] = a host
@@ -1206,11 +1209,11 @@ function dynArrayMethod(arr: i32, name: string, args: i32): i32 {
     let end: i32 = len;
     if (argc > 0) {
       const s0: f64 = dynToNumber(dynArrGet(args, 0));
-      start = s0 as unknown as i32;
+      start = f64.toI32Sat(s0);
     }
     if (argc > 1) {
       const e0: f64 = dynToNumber(dynArrGet(args, 1));
-      end = e0 as unknown as i32;
+      end = f64.toI32Sat(e0);
     }
     if (start < 0) start = len + start;
     if (end < 0) end = len + end;
@@ -1308,7 +1311,7 @@ function dynArrayMethod(arr: i32, name: string, args: i32): i32 {
     let idx: i32 = 0;
     if (argc > 0) {
       const a0: f64 = dynToNumber(dynArrGet(args, 0));
-      idx = a0 as unknown as i32;
+      idx = f64.toI32Sat(a0);
     }
     if (idx < 0) idx = len + idx;
     if (idx < 0 || idx >= len) return dynUndefined();
@@ -1482,7 +1485,7 @@ function dynStringMethod(str: i32, name: string, args: i32): i32 {
     let idx: i32 = 0;
     if (argc > 0) {
       const a0: f64 = dynToNumber(dynArrGet(args, 0));
-      idx = a0 as unknown as i32;
+      idx = f64.toI32Sat(a0);
     }
     const c: string = s.charAt(idx);
     return dynString(c);
@@ -1491,7 +1494,7 @@ function dynStringMethod(str: i32, name: string, args: i32): i32 {
     let idx: i32 = 0;
     if (argc > 0) {
       const a0: f64 = dynToNumber(dynArrGet(args, 0));
-      idx = a0 as unknown as i32;
+      idx = f64.toI32Sat(a0);
     }
     const cc: i32 = s.charCodeAt(idx);
     return dynNumber(cc);
@@ -1513,11 +1516,11 @@ function dynStringMethod(str: i32, name: string, args: i32): i32 {
     let end: i32 = slen;
     if (argc > 0) {
       const a0: f64 = dynToNumber(dynArrGet(args, 0));
-      start = a0 as unknown as i32;
+      start = f64.toI32Sat(a0);
     }
     if (argc > 1) {
       const a1: f64 = dynToNumber(dynArrGet(args, 1));
-      end = a1 as unknown as i32;
+      end = f64.toI32Sat(a1);
     }
     if (start < 0) start = slen + start;
     if (end < 0) end = slen + end;
@@ -1552,7 +1555,7 @@ function dynStringMethod(str: i32, name: string, args: i32): i32 {
     let n: i32 = 0;
     if (argc > 0) {
       const a0: f64 = dynToNumber(dynArrGet(args, 0));
-      n = a0 as unknown as i32;
+      n = f64.toI32Sat(a0);
     }
     const r: string = s.repeat(n);
     return dynString(r);
@@ -1561,7 +1564,7 @@ function dynStringMethod(str: i32, name: string, args: i32): i32 {
     let n: i32 = 0;
     if (argc > 0) {
       const a0: f64 = dynToNumber(dynArrGet(args, 0));
-      n = a0 as unknown as i32;
+      n = f64.toI32Sat(a0);
     }
     let pad: string = " ";
     if (argc > 1) pad = boxToStr(dynArrGet(args, 1));
@@ -1572,7 +1575,7 @@ function dynStringMethod(str: i32, name: string, args: i32): i32 {
     let n: i32 = 0;
     if (argc > 0) {
       const a0: f64 = dynToNumber(dynArrGet(args, 0));
-      n = a0 as unknown as i32;
+      n = f64.toI32Sat(a0);
     }
     let pad: string = " ";
     if (argc > 1) pad = boxToStr(dynArrGet(args, 1));
@@ -1759,7 +1762,7 @@ function dynMathMethod(name: string, args: i32): i32 {
     } else if (y === -0.5) {
       r = 1.0 / Math.sqrt(x);
     } else {
-      let n: i32 = (y as i32);
+      let n: i32 = f64.toI32Sat(y);
       while (n > 0) {
         r = r * x;
         n = n - 1;
@@ -2247,7 +2250,7 @@ function dynGenMethod(g: i32, name: string, args: i32): i32 {
     const gv: i32 = dynGet(g, "__genv");
     const gi: i32 = dynGet(g, "__geni");
     const idxf: f64 = dynNumberValue(gi);
-    const idx: i32 = idxf as unknown as i32;
+    const idx: i32 = f64.toI32Sat(idxf);
     const len: i32 = dynArrLen(gv);
     const result: i32 = dynObject();
     if (idx < len) {
@@ -2411,7 +2414,7 @@ function dynIndexSet(container: i32, idxBox: i32, val: i32): void {
   if (ct === 5) { // array
     if (it === 3) {
       const idxf: f64 = dynNumberValue(idxBox);
-      const ii: i32 = idxf as unknown as i32; // truncate toward zero
+      const ii: i32 = f64.toI32Sat(idxf); // toward zero; NaN → 0, ±Infinity clamped
       dynArrSet(container, ii, val);
     }
   } else if (ct === 6) { // object
@@ -3059,7 +3062,7 @@ export function dynIndexValue(container: i32, idxBox: i32): i32 {
   if (ct === 5) { // array
     if (it === 3) {
       const idxf: f64 = dynNumberValue(idxBox);
-      const ii: i32 = idxf as unknown as i32; // truncate toward zero
+      const ii: i32 = f64.toI32Sat(idxf); // toward zero; NaN → 0, ±Infinity clamped
       const len: i32 = dynArrLen(container);
       if (ii < 0 || ii >= len) return dynUndefined();
       return dynArrGet(container, ii);

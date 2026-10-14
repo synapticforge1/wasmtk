@@ -10,8 +10,9 @@
 // Self-checking: each expectation calls check(); on the first failure check() reads far out of
 // bounds, trapping the module (nonzero exit), so a successful `run` proves it.
 
-type i32 = number;
-type f64 = number;
+// An `any` number unboxes as a float (`x as f64`); an integer is then said with wasMath
+// (`f64.toI32(x as f64)`): `x as i32` is refused since the owner's D3 (2026-10-13).
+import { f64, i32 } from "../../../../src/wasmath.ts";
 
 const guard: i32[] = [0];
 
@@ -48,7 +49,7 @@ check(dynNumberValue(chosen) === 42 ? 1 : 0);
 
 // ── 3.1-sugar: implicit boxing of literal initialisers + `as`-unboxing ────────────────────────
 const num: any = 42; // implicitly → dynNumber(42)
-const ni: i32 = num as i32; // unbox → dynNumberValue + trunc
+const ni: i32 = f64.toI32(num as f64); // unbox → dynNumberValue, then truncate (wasMath)
 check(ni === 42 ? 1 : 0);
 const nf: f64 = num as f64; // unbox → dynNumberValue
 check(nf === 42 ? 1 : 0);
@@ -56,7 +57,7 @@ check(nf === 42 ? 1 : 0);
 const pi: any = 3.5; // implicit f64 box
 const pf: f64 = pi as f64;
 check(pf === 3.5 ? 1 : 0);
-const pit: i32 = pi as i32; // truncates
+const pit: i32 = f64.toI32(pi as f64); // truncates
 check(pit === 3 ? 1 : 0);
 
 const txt: any = "hello"; // implicitly → dynString("hello")
@@ -74,17 +75,17 @@ check(nb === 0 ? 1 : 0);
 const a: any = 10;
 const b: any = 3;
 
-// arithmetic → an `any` handle; unbox via an intermediate any var + `as`
+// arithmetic → an `any` handle; unbox via an intermediate any var + `as f64`
 const sum: any = a + b;
-check((sum as i32) === 13 ? 1 : 0);
+check((sum as f64) ===13 ? 1 : 0);
 const diff: any = a - b;
-check((diff as i32) === 7 ? 1 : 0);
+check((diff as f64) ===7 ? 1 : 0);
 const prod: any = a * b;
-check((prod as i32) === 30 ? 1 : 0);
+check((prod as f64) ===30 ? 1 : 0);
 const rem: any = a % b;
-check((rem as i32) === 1 ? 1 : 0);
+check((rem as f64) ===1 ? 1 : 0);
 const inc: any = a + 5; // any + typed literal (boxed)
-check((inc as i32) === 15 ? 1 : 0);
+check((inc as f64) ===15 ? 1 : 0);
 
 // comparisons → raw i32 (0/1) — usable directly in conditions
 const ltAB: i32 = a < b;
@@ -126,9 +127,9 @@ const obj: any = dynObject();
 dynSet(obj, "x", dynNumber(5));
 dynSet(obj, "y", dynNumber(7));
 const xv: any = obj.x;
-check((xv as i32) === 5 ? 1 : 0);
+check((xv as f64) ===5 ? 1 : 0);
 const yv: any = obj.y;
-check((yv as i32) === 7 ? 1 : 0);
+check((yv as f64) ===7 ? 1 : 0);
 
 // index access: array elements via `arr[i]` (literal + computed index)
 const arr2: any = dynArray();
@@ -136,24 +137,24 @@ dynPush(arr2, dynNumber(10));
 dynPush(arr2, dynNumber(20));
 dynPush(arr2, dynNumber(30));
 const el0: any = arr2[0];
-check((el0 as i32) === 10 ? 1 : 0);
+check((el0 as f64) ===10 ? 1 : 0);
 const el2: any = arr2[2];
-check((el2 as i32) === 30 ? 1 : 0);
+check((el2 as f64) ===30 ? 1 : 0);
 const ix: any = 1;
 const el1: any = arr2[ix]; // computed (any) index
-check((el1 as i32) === 20 ? 1 : 0);
+check((el1 as f64) ===20 ? 1 : 0);
 
 // call on `any`: a function value pulled from the std env, called via `fn(args)`
 const env: any = dynStdEnv();
 const sqrtFn: any = env.sqrt;
 const r1: any = sqrtFn(16); // dynCall1 → 4
-check((r1 as i32) === 4 ? 1 : 0);
+check((r1 as f64) ===4 ? 1 : 0);
 const maxFn: any = env.max;
 const r2: any = maxFn(3, 8); // dynCall2 → 8
-check((r2 as i32) === 8 ? 1 : 0);
+check((r2 as f64) ===8 ? 1 : 0);
 
 // bare `eval(...)` (rewritten to dynrt_dynEval)
 const ev: any = eval("2 + 3 * 4");
-check((ev as i32) === 14 ? 1 : 0);
+check((ev as f64) ===14 ? 1 : 0);
 
 console.log("dynrt any foundation: all checks passed");

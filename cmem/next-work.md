@@ -15,13 +15,15 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > TinyGo 0.43 still imports the four `asyncify.*` functions, but now also calls `stop_unwind` from
 > a new panic-catch wrapper (`…asyncifysuspendcatch.0.paniccatch`). binaryang's `Asyncify` fails on
 > it in 1.8.1 AND 1.10.0; upstream binaryen.js 123 succeeds and the result runs (`wg-counter: 45`).
-> Report DRAFTED in `scripts/binaryang-report.md` (2026-10-13), reproducer
-> `scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm`; the owner sends it. Meanwhile, owner's
-> call: pin TinyGo 0.41.1 for the gate, or upstream binaryen.js for this one pass.
+> Report SENT 2026-10-13 (owner; `scripts/binaryang-report.md`), reproducer
+> `scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm`; waiting on binaryang's fix. **Owner, 2026-10-13:
+> wait for binaryang** (no workaround in wasmtk): `go_asyncify_tests` 9 / 12 is EXPECTED on this
+> machine until binaryang's fix and a pin bump; the gate treats those 3 as known, any other change
+> as a failure.
 >
 > **2026-10-13: wasMath L4 DONE** (ld29, ld30, ld31, sw64, the u64 printer; wasm-number-types.md).
-> **Next, in order:** the D3 refusal and the D6 report (both below), sw62 (console line
-> corruption), the 19 loud rows, then the binaryang 1.10.0 items. The next release is MAJOR
+> **Next, in order:** the D6 report (below; D3 is built), sw62 (console line corruption), the 20
+> loud rows (ld34 new), then the binaryang 1.10.0 items. The next release is MAJOR
 > (3.0.0) and waits on the owner's word.
 >
 > **PAUSED 2026-10-09, end of day (owner).** `main` was clean at the integer-division commit
@@ -29,6 +31,20 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > same day (owner): `(a / b) | 0` STAYS refused, pointing at wasMath; **D6: a compile-stopping
 > issue is REPORTED with its location** (below); **D3: an implicit f64 → i32 conversion is
 > REFUSED**, naming `f64.toI32` (traps) / `f64.toI32Sat` (clamps) / `f64.toI32Wrap` (wraps).
+>
+> **D3 BUILT 2026-10-13** (design-decisions.md § "Wasm types in TypeScript"): stores into declared
+> integers, `as i32` / `as i64` on a float or an `any`, and floats into wasMath `i32.*` / `i64.*`
+> arguments are refused; indices and positions kept. Found with it: ld34 (open), ld35 (fixed).
+>
+> **D3 SCOPE DECIDED (owner, 2026-10-13), after a measurement** (every implicit float → integer
+> conversion in the corpus tagged by the statement it is in): only 2 programs STORE a float into a
+> declared integer (`38_MathExactSemantics`' `const fl: i32 = Math.floor(y)` ×7, `18_Multi-Scope…`'s
+> `const namePtr: i32 = nameMatrix[d][v]` from a `number[][]`); 26 programs use a float as an
+> INDEX or POSITION (`arr[i]`, `s.indexOf(x, pos)`, `splice(i, 1)`, 115 conversions), which
+> JavaScript itself converts. **Refused: stores into a declared integer** (declaration,
+> assignment, argument to an integer parameter, return from an integer function, field / element
+> store) **and `x as i32` / `as i64` on a float** (it names the type, not the conversion). **Kept:
+> indices and positions.**
 >
 > **D3 refusal (owner 2026-10-09; designed, not built).** Today wasic silently inserts
 > `i32.trunc_f64_s` wherever an f64 meets an i32 destination: `const x: i32 = f`, an f64 argument
@@ -116,7 +132,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     off, documented): sw57–sw59, sw61, sw63, ld27, ld28, ld33 fixed, sw60 closed by decision;
     Payne–Hanek trig reduction; 199 / 199 exact from compiled programs. **L4 DONE 2026-10-13**
     (ld29, ld30, ld31, sw64, u64 printed unsigned). The library's track is complete; its one known
-    gap (an out-of-range f64 into an `i32.*` argument traps) closes with D3.
+    gap (an out-of-range f64 into an `i32.*` argument trapped) is CLOSED by D3 (2026-10-13): a
+    float into a wasMath integer parameter is now a compile error.
 - ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **1 open silent-wrong (sw62), 19
   open loud** (2026-10-13: L4 closed sw64, ld29–ld31; 2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
   wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33; earlier the same day
