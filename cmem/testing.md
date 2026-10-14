@@ -114,6 +114,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-13, sw62 (console lines over 128 bytes), gate green except the known
+> `go_asyncify_tests` 9 / 12.** wasi **454/454** (+`7c_ConsoleLongLines`) · golden-WAT 511: 348
+> entries changed (the iov pointer stored before the write; lines that can exceed the scratch use
+> `$__cbuf`), none refused; re-recorded · every other suite as before · wast 64,506 / 0 / 16 ·
+> engine cross-check on baseline · api-surface matches.
+>
 > **2026-10-13, D6 (the located compile-error report), gate green except the known
 > `go_asyncify_tests` 9 / 12.** wasi **453/453** · golden-WAT 510: 4 entries changed, the
 > refused-by-design programs' recorded summary (`N error(s) in <file>; no .wasm was written.`);

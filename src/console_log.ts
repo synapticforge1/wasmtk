@@ -3552,35 +3552,75 @@ export function emitConsoleLog(
 
   if (useGather) {
     // ── Gather-buffer mode ────────────────────────────────────────────────────
-    // iov[0].ptr (iovBase+0) = scratchBase  (set once)
-    // iov[0].len (iovBase+4) doubles as the running cursor into scratch.
+    // The line is built in the console buffer `$__cbuf`, a heap block that GROWS on demand
+    // (`$__cbuf_need`, `$__cbuf_put`; sw62, 2026-10-13): it was the fixed 128-byte scratch at
+    // SCRATCH_BASE, and any longer line (eight floats, a long string, an array) ran over the data
+    // after it and corrupted later output. Every write ensures room first. The buffer can MOVE
+    // when it grows, so iov[0].ptr is set just before the write.
+    // iov[0].len (iovBase+4) doubles as the running cursor into the buffer.
     const cursorAddr = iovBase + 4;
-    statements.push(
-      `${indent}(i32.store (i32.const ${iovBase}) (i32.const ${scratchBase}))`,
-      `${indent}(i32.store (i32.const ${cursorAddr}) (i32.const 0))`,
+    // A line of literals and numbers whose worst case fits the fixed scratch keeps it: no
+    // allocation, the code exactly as before (an f64 prints in at most 24 bytes; 32 are kept).
+    // Anything that can be longer (strings, booleans, arrays, joins, or more numbers than fit)
+    // goes to the growable buffer.
+    const SCRATCH_BYTES = SCRATCH_SLOTS * 32;
+    const worst = activeSegs.reduce(
+      (n, s) =>
+        s.kind === "literal"
+          ? n + new TextEncoder().encode(s.text).length
+          : numericKinds.has(s.kind)
+          ? n + 32
+          : Infinity,
+      canInlineNL ? 1 : 0,
     );
+    const fits = worst <= SCRATCH_BYTES;
+    const B = fits ? `(i32.const ${scratchBase})` : "(global.get $__cbuf)";
+    /** The buffer address `off` bytes in (a constant when the line uses the fixed scratch). */
+    const at = (off: number) => fits ? `(i32.const ${scratchBase + off})` : `(i32.add ${B} (i32.const ${off}))`;
+    if (fits) {
+      statements.push(
+        `${indent}(i32.store (i32.const ${iovBase}) (i32.const ${scratchBase}))`,
+        `${indent}(i32.store (i32.const ${cursorAddr}) (i32.const 0))`,
+      );
+    } else {
+      needsStrGather = true; // wasic emits $__cbuf_* with $__str_gather
+      statements.push(`${indent}(i32.store (i32.const ${cursorAddr}) (i32.const 0))`);
+    }
 
-    let compileCursor = 0; // byte offset from SCRATCH_BASE, valid until first numeric
+    let compileCursor = 0; // byte offset into the buffer, valid until the first runtime write
     let runtimeCursor = false; // true after the first numeric (cursor only in mem[cursorAddr])
+    /** Room for `extra` more bytes at the current cursor (nothing to do in the fixed scratch). */
+    const need = (extra: string) => {
+      if (fits) return;
+      statements.push(
+        `${indent}(call $__cbuf_need (i32.add ${
+          runtimeCursor ? `(i32.load (i32.const ${cursorAddr}))` : `(i32.const ${compileCursor})`
+        } ${extra}))`,
+      );
+    };
+    /** Pins the compile-time cursor into memory (before a helper reads it). */
+    const pin = () => {
+      if (!runtimeCursor) {
+        statements.push(`${indent}(i32.store (i32.const ${cursorAddr}) (i32.const ${compileCursor}))`);
+        runtimeCursor = true;
+      }
+    };
 
     for (const seg of activeSegs) {
       if (seg.kind === "literal") {
         const bytes = Array.from(new TextEncoder().encode(seg.text));
+        if (bytes.length > 0) need(`(i32.const ${bytes.length})`);
         if (!runtimeCursor) {
-          // Compile-time position: fixed-address stores
+          // Compile-time position: buffer-relative constant offsets
           for (let j = 0; j < bytes.length; j++) {
-            statements.push(
-              `${indent}(i32.store8 (i32.const ${scratchBase + compileCursor + j}) (i32.const ${
-                bytes[j]
-              }))`,
-            );
+            statements.push(`${indent}(i32.store8 ${at(compileCursor + j)} (i32.const ${bytes[j]}))`);
           }
           compileCursor += bytes.length;
         } else {
           // Runtime position: cursor-relative stores then advance cursor
           for (let j = 0; j < bytes.length; j++) {
             statements.push(
-              `${indent}(i32.store8 (i32.add (i32.const ${scratchBase}) (i32.add (i32.load (i32.const ${cursorAddr})) (i32.const ${j}))) (i32.const ${
+              `${indent}(i32.store8 (i32.add ${B} (i32.add (i32.load (i32.const ${cursorAddr})) (i32.const ${j}))) (i32.const ${
                 bytes[j]
               }))`,
             );
@@ -3600,22 +3640,8 @@ export function emitConsoleLog(
         const lenMsc = seg.lenLocal.match(/^__strconst_len_(\d+)$/);
         const ptrWat = ptrMsc ? `(i32.const ${ptrMsc[1]})` : `(local.get $${seg.ptrLocal})`;
         const lenWat = lenMsc ? `(i32.const ${lenMsc[1]})` : `(local.get $${seg.lenLocal})`;
-        const destExpr = runtimeCursor
-          ? `(i32.add (i32.const ${scratchBase}) (i32.load (i32.const ${cursorAddr})))`
-          : `(i32.const ${scratchBase + compileCursor})`;
-        statements.push(
-          `${indent}(call $__str_gather ${ptrWat} ${lenWat} ${destExpr})`,
-        );
-        if (!runtimeCursor) {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.add (i32.const ${compileCursor}) ${lenWat}))`,
-          );
-          runtimeCursor = true;
-        } else {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.add (i32.load (i32.const ${cursorAddr})) ${lenWat}))`,
-          );
-        }
+        pin();
+        statements.push(`${indent}(call $__cbuf_put ${ptrWat} ${lenWat} (i32.const ${cursorAddr}))`);
       } else if (seg.kind === "boolvar" || seg.kind === "boolexpr") {
         // Bool — copy "true"/"false" bytes into scratch via $__str_gather, advance cursor.
         //
@@ -3632,101 +3658,53 @@ export function emitConsoleLog(
         const [trueOff] = allocString("true");
         const [falseOff] = allocString("false");
         const val = seg.kind === "boolvar" ? `(local.get $${seg.name})` : seg.wat;
-        const destExpr = runtimeCursor
-          ? `(i32.add (i32.const ${scratchBase}) (i32.load (i32.const ${cursorAddr})))`
-          : `(i32.const ${scratchBase + compileCursor})`;
-        const bump = (len: number) =>
-          runtimeCursor
-            ? `(i32.store (i32.const ${cursorAddr}) (i32.add (i32.load (i32.const ${cursorAddr})) (i32.const ${len})))`
-            : `(i32.store (i32.const ${cursorAddr}) (i32.add (i32.const ${compileCursor}) (i32.const ${len})))`;
+        pin();
         statements.push(
           `${indent}(if ${val}`,
-          `${indent}  (then`,
-          `${indent}    (call $__str_gather (i32.const ${trueOff}) (i32.const 4) ${destExpr})`,
-          `${indent}    ${bump(4)})`,
-          `${indent}  (else`,
-          `${indent}    (call $__str_gather (i32.const ${falseOff}) (i32.const 5) ${destExpr})`,
-          `${indent}    ${bump(5)}))`,
+          `${indent}  (then (call $__cbuf_put (i32.const ${trueOff}) (i32.const 4) (i32.const ${cursorAddr})))`,
+          `${indent}  (else (call $__cbuf_put (i32.const ${falseOff}) (i32.const 5) (i32.const ${cursorAddr}))))`,
         );
-        runtimeCursor = true;
       } else if (seg.kind === "arrptr") {
         // Array pointer — write "[ elem, ... ]" into scratch via helper
         needsArrPrintHelper = true;
         needsHelpers = true; // $__write_i32arr_to_scratch depends on $__i32_to_str
-        // Flush compile-time cursor to memory before calling helper
-        if (!runtimeCursor) {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.const ${compileCursor}))`,
-          );
-          runtimeCursor = true;
+        // The wrapper loads the length ONCE, ensures room for the worst case, then writes.
+        // There is no i64 array writer (the old code called an undefined one: an invalid module);
+        // printing i64 elements as i32 would be silently wrong, so it is refused.
+        if (seg.elemType === "i64" || seg.elemType === "bigint") {
+          _diagnosticSink?.("console argument: printing a whole bigint[] array is not supported yet; print its elements");
         }
-        const helperName = seg.elemType === "f64"
-          ? "$__write_f64arr_to_scratch"
-          : seg.elemType === "i64"
-          ? "$__write_i64arr_to_scratch"
-          : "$__write_i32arr_to_scratch";
-        statements.push(
-          `${indent}(call ${helperName} ${seg.wat} (i32.const ${scratchBase}) (i32.const ${cursorAddr}))`,
-        );
+        pin();
+        const helperName = seg.elemType === "f64" ? "$__cbuf_arr_f64" : "$__cbuf_arr_i32";
+        statements.push(`${indent}(call ${helperName} ${seg.wat} (i32.const ${cursorAddr}))`);
       } else if (seg.kind === "joinarr") {
-        // Phase 28: arr.join(sep) — write joined string into scratch via helper
+        // Phase 28: arr.join(sep) — written into the buffer via a wrapper that ensures room
         needsJoinHelper = true;
         needsHelpers = true; // $__dynarr_join_to_scratch_* depends on $__i32_to_str / $__f64_to_str
-        if (!runtimeCursor) {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.const ${compileCursor}))`,
-          );
-          runtimeCursor = true;
-        }
-        const joinHelper = seg.elemType === "f64"
-          ? "$__dynarr_join_to_scratch_f64"
-          : "$__dynarr_join_to_scratch_i32";
+        pin();
+        const joinHelper = seg.elemType === "f64" ? "$__cbuf_join_f64" : "$__cbuf_join_i32";
         statements.push(
-          `${indent}(call ${joinHelper} ${seg.arrWat} (i32.const ${seg.sepPtr}) (i32.const ${seg.sepLen}) (i32.const ${scratchBase}) (i32.const ${cursorAddr}))`,
+          `${indent}(call ${joinHelper} ${seg.arrWat} (i32.const ${seg.sepPtr}) (i32.const ${seg.sepLen}) (i32.const ${cursorAddr}))`,
         );
       } else if (seg.kind === "strcall") {
-        // String-returning function: call (void, sets globals), then gather from globals
-        needsStrGather = true;
+        // String-returning function: call (void, sets globals), then append from the globals
         statements.push(`${indent}${seg.callWat}`);
-        const ptrWat = `(global.get $__str_ret_ptr)`;
-        const lenWat = `(global.get $__str_ret_len)`;
-        const destExpr = runtimeCursor
-          ? `(i32.add (i32.const ${scratchBase}) (i32.load (i32.const ${cursorAddr})))`
-          : `(i32.const ${scratchBase + compileCursor})`;
-        statements.push(`${indent}(call $__str_gather ${ptrWat} ${lenWat} ${destExpr})`);
-        if (!runtimeCursor) {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.add (i32.const ${compileCursor}) ${lenWat}))`,
-          );
-          runtimeCursor = true;
-        } else {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.add (i32.load (i32.const ${cursorAddr})) ${lenWat}))`,
-          );
-        }
+        pin();
+        statements.push(
+          `${indent}(call $__cbuf_put (global.get $__str_ret_ptr) (global.get $__str_ret_len) (i32.const ${cursorAddr}))`,
+        );
       } else if (seg.kind === "strexpr") {
-        // Arbitrary WAT ptr+len expressions — gather directly from the computed ptr/len
-        needsStrGather = true;
-        const destExpr = runtimeCursor
-          ? `(i32.add (i32.const ${scratchBase}) (i32.load (i32.const ${cursorAddr})))`
-          : `(i32.const ${scratchBase + compileCursor})`;
-        statements.push(`${indent}(call $__str_gather ${seg.ptrWat} ${seg.lenWat} ${destExpr})`);
-        if (!runtimeCursor) {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.add (i32.const ${compileCursor}) ${seg.lenWat}))`,
-          );
-          runtimeCursor = true;
-        } else {
-          statements.push(
-            `${indent}(i32.store (i32.const ${cursorAddr}) (i32.add (i32.load (i32.const ${cursorAddr})) ${seg.lenWat}))`,
-          );
-        }
+        // Arbitrary WAT ptr+len expressions, evaluated pointer first, as before
+        pin();
+        statements.push(`${indent}(call $__cbuf_put ${seg.ptrWat} ${seg.lenWat} (i32.const ${cursorAddr}))`);
       } else {
-        // Numeric segment — convert directly into scratch at current cursor position
+        // Numeric segment — convert directly into the buffer at the cursor (32 bytes holds any
+        // number: an f64 is at most 24, an i64 21 with its `n`)
         needsHelpers = true;
+        need("(i32.const 32)");
         const destExpr = runtimeCursor
-          ? `(i32.add (i32.const ${scratchBase}) (i32.load (i32.const ${cursorAddr})))`
-          : `(i32.const ${scratchBase + compileCursor})`;
+          ? `(i32.add ${B} (i32.load (i32.const ${cursorAddr})))`
+          : at(compileCursor);
 
         let callExpr: string;
         if (seg.kind === "i32var") {
@@ -3762,15 +3740,20 @@ export function emitConsoleLog(
       }
     }
 
-    // Inline the trailing newline into scratch
+    // Inline the trailing newline
     if (canInlineNL) {
+      pin();
+      need("(i32.const 1)");
       statements.push(
-        `${indent}(i32.store8 (i32.add (i32.const ${scratchBase}) (i32.load (i32.const ${cursorAddr}))) (i32.const 10))`,
+        `${indent}(i32.store8 (i32.add ${B} (i32.load (i32.const ${cursorAddr}))) (i32.const 10))`,
         `${indent}(i32.store (i32.const ${cursorAddr}) (i32.add (i32.load (i32.const ${cursorAddr})) (i32.const 1)))`,
       );
     }
+    pin(); // a line of literals only: the cursor has to be in memory for the iov
 
-    // Single fd_write — iov[0].ptr is scratchBase, iov[0].len is the cursor value
+    // Single fd_write — iov[0].ptr is the buffer (where it is NOW: the growable one can move, and
+    // a nested console.log in an argument rewrites the iov), iov[0].len the cursor
+    statements.push(`${indent}(i32.store (i32.const ${iovBase}) ${B})`);
     statements.push(
       `${indent}(call $__fd_write_all`,
       `${indent}  (i32.const ${fd})`,
@@ -3833,26 +3816,25 @@ export function emitConsoleLog(
       } else if (seg.kind === "arrptr") {
         needsArrPrintHelper = true;
         needsHelpers = true;
-        const helperName = seg.elemType === "f64"
-          ? "$__write_f64arr_to_scratch"
-          : "$__write_i32arr_to_scratch";
+        // into the growable console buffer (sw62): the fixed scratch is 128 bytes
+        needsStrGather = true;
+        const helperName = seg.elemType === "f64" ? "$__cbuf_arr_f64" : "$__cbuf_arr_i32";
         statements.push(
-          `${indent}(i32.store (i32.const ${iovPtr}) (i32.const ${scratchBase}))`,
           `${indent}(i32.store (i32.const ${iovLen}) (i32.const 0))`,
-          `${indent}(call ${helperName} ${seg.wat} (i32.const ${scratchBase}) (i32.const ${iovLen}))`,
+          `${indent}(call ${helperName} ${seg.wat} (i32.const ${iovLen}))`,
+          `${indent}(i32.store (i32.const ${iovPtr}) (global.get $__cbuf))`,
         );
         lastNumericScratch = -1;
         lastNumericIovLen = -1;
       } else if (seg.kind === "joinarr") {
         needsJoinHelper = true;
         needsHelpers = true;
-        const joinHelper = seg.elemType === "f64"
-          ? "$__dynarr_join_to_scratch_f64"
-          : "$__dynarr_join_to_scratch_i32";
+        needsStrGather = true; // the growable console buffer (sw62)
+        const joinHelper = seg.elemType === "f64" ? "$__cbuf_join_f64" : "$__cbuf_join_i32";
         statements.push(
-          `${indent}(i32.store (i32.const ${iovPtr}) (i32.const ${scratchBase}))`,
           `${indent}(i32.store (i32.const ${iovLen}) (i32.const 0))`,
-          `${indent}(call ${joinHelper} ${seg.arrWat} (i32.const ${seg.sepPtr}) (i32.const ${seg.sepLen}) (i32.const ${scratchBase}) (i32.const ${iovLen}))`,
+          `${indent}(call ${joinHelper} ${seg.arrWat} (i32.const ${seg.sepPtr}) (i32.const ${seg.sepLen}) (i32.const ${iovLen}))`,
+          `${indent}(i32.store (i32.const ${iovPtr}) (global.get $__cbuf))`,
         );
         lastNumericScratch = -1;
         lastNumericIovLen = -1;
@@ -3907,9 +3889,12 @@ export function emitConsoleLog(
           callExpr = `(i32.sub ${callExpr} (i32.const 1))`;
         }
 
+        // The value FIRST, then the pointer: evaluating the value can run a nested console.log (a
+        // function that prints, `console.log(scale(4))`), which rewrites the iov; a pointer stored
+        // before it was stale (sw62, 2026-10-13: it pointed into the nested line's buffer).
         statements.push(
-          `${indent}(i32.store (i32.const ${iovPtr}) (i32.const ${scratchPtr}))`,
           `${indent}(i32.store (i32.const ${iovLen}) ${callExpr})`,
+          `${indent}(i32.store (i32.const ${iovPtr}) (i32.const ${scratchPtr}))`,
         );
         lastNumericScratch = scratchPtr;
         lastNumericIovLen = iovLen;
@@ -4687,6 +4672,19 @@ export function getArrPrintHelperWat(): string {
     (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
     ;; Update cursor
     (i32.store (local.get $cursor_addr) (local.get $cur))
+  )
+  ;; ── console: an array into the growable console buffer (sw62, 2026-10-13) ──
+  ;; Loads the length ONCE, ensures room for the worst case (an i32 is <= 11 bytes, an f64 <= 24,
+  ;; each with ", "; plus the brackets), then writes at the buffer's current address.
+  (func $__cbuf_arr_i32 (param $arr i32) (param $cursor_addr i32)
+    (call $__cbuf_need (i32.add (i32.load (local.get $cursor_addr))
+      (i32.add (i32.mul (i32.load (local.get $arr)) (i32.const 13)) (i32.const 8))))
+    (call $__write_i32arr_to_scratch (local.get $arr) (global.get $__cbuf) (local.get $cursor_addr))
+  )
+  (func $__cbuf_arr_f64 (param $arr i32) (param $cursor_addr i32)
+    (call $__cbuf_need (i32.add (i32.load (local.get $cursor_addr))
+      (i32.add (i32.mul (i32.load (local.get $arr)) (i32.const 26)) (i32.const 8))))
+    (call $__write_f64arr_to_scratch (local.get $arr) (global.get $__cbuf) (local.get $cursor_addr))
   )`;
 }
 
@@ -4827,5 +4825,20 @@ export function getJoinHelperWat(): string {
       (local.get $buf) (local.get $cursor))
     (local.get $buf)
     (i32.load (local.get $cursor))
+  )
+  ;; ── console: arr.join(sep) into the growable console buffer (sw62, 2026-10-13) ──
+  (func $__cbuf_join_i32 (param $arr i32) (param $sep_ptr i32) (param $sep_len i32) (param $cursor_addr i32)
+    (call $__cbuf_need (i32.add (i32.load (local.get $cursor_addr))
+      (i32.add (i32.mul (i32.load (local.get $arr)) (i32.add (i32.const 11) (local.get $sep_len)))
+               (i32.const 8))))
+    (call $__dynarr_join_to_scratch_i32 (local.get $arr) (local.get $sep_ptr) (local.get $sep_len)
+      (global.get $__cbuf) (local.get $cursor_addr))
+  )
+  (func $__cbuf_join_f64 (param $arr i32) (param $sep_ptr i32) (param $sep_len i32) (param $cursor_addr i32)
+    (call $__cbuf_need (i32.add (i32.load (local.get $cursor_addr))
+      (i32.add (i32.mul (i32.load (local.get $arr)) (i32.add (i32.const 24) (local.get $sep_len)))
+               (i32.const 8))))
+    (call $__dynarr_join_to_scratch_f64 (local.get $arr) (local.get $sep_ptr) (local.get $sep_len)
+      (global.get $__cbuf) (local.get $cursor_addr))
   )`;
 }

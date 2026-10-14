@@ -847,6 +847,26 @@ string-array element, and `Math.*`/`Number.*` handling all have such twins.
   `dotLenM` (not just `parseSingleArg`), plus a general `<stringExpr>.length` via the resolver's len
   word. Regression: `27_ConsoleLogStringCompare`. KNOWN LIMIT: 5th+ numeric arg in per-iov mode prints
   `"?"` (SCRATCH_SLOTS=4; raising it shifts `DATA_BASE`/260 = wasmmerge `DATA_PTR_THRESHOLD`).
+- **A console line that can exceed the 128-byte scratch is built in `$__cbuf`** (sw62,
+  2026-10-13). The scratch at SCRATCH_BASE is 128 bytes and the data section starts right after
+  it (260), so a longer gathered line overwrote program data. A gathered line of literals and
+  numbers whose WORST case fits (literal bytes + 32 per number + the newline ≤ 128) keeps the
+  fixed scratch, its code as before and no allocator; any other gathered line (strings,
+  booleans, arrays, joins, or too many numbers), and per-iov array / join printing, writes into
+  `$__cbuf`, a heap buffer that grows: every write first ensures room (`$__cbuf_need(total)`;
+  literals their length, a number 32, strings and booleans through `$__cbuf_put`, arrays and
+  joins through wrappers that read the length ONCE and ensure the worst case). Anything new that
+  writes a console line must ensure first.
+- **iov pointers are stored AFTER the values they describe** (sw62). A value can run a nested
+  `console.log` (an argument that is a call to a function that prints), which rewrites the iov
+  region and the cursor at iovBase+4; a pointer stored before it was stale. Gather mode stores
+  iov[0].ptr just before `fd_write`; per-iov numerics store the length (the call) first.
+  Still open as sw68: a nested console.log inside a GATHERED line's argument shares the cursor at
+  iovBase+4 and the buffer, so the outer line's bytes before that argument are lost.
+- **`wasmbundle` cannot bundle a wasic module that prints a string, boolean or array**: those
+  lines use `$__malloc`, whose executable form calls `memory.grow`, which `wasmmerge`'s
+  foreign-runtime guard refuses. binaryang's `wasm-bundle` is to replace `wasmbundle`
+  (next-work.md); a number-and-literal line stays bundleable.
 - **Greedy `dotCallExprMatch` / `newMatch` / `superDotExprMatch` in `emitExpr` are guarded** (FIXED
   2026-06-08). `a.method() + b.method()`, `new A(x) OP new B(y)`, `super.m() OP x` — the greedy
   `([\s\S]*)` args capture used to consume across the operator (e.g. `a.unwrap() + b.unwrap()` →
