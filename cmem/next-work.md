@@ -29,14 +29,15 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > **2026-10-13: wasMath L4 DONE** (ld29, ld30, ld31, sw64, the u64 printer; wasm-number-types.md).
 > **D6 BUILT 2026-10-13** (`src/diagnostics.ts`; design-decisions.md § "The compile-error report").
 > **sw62 FIXED 2026-10-13** (any console line over 128 bytes corrupted memory; the line is built in
-> a growable heap buffer now). **binaryang pin: HOLD at 1.8.1** (owner, 2026-10-13: 1.11.0 is
-> live with the Asyncify fix, but 1.12.0 is close; bump straight to 1.12.0 when it ships and test
-> on that, per workflow.md's bump checklist; predictions for 1.9.0–1.11.0 are in the sw62 session
-> notes: the optimizer moves every `.wasm`, golden holds but for pipeline entries merging
-> modc-built libraries, `go_asyncify` → 12 / 12). **Next, in order:** sw66 (an array variable prints its
-> address) with sw67 (Deno's multi-line layout for long arrays), sw68 (a nested console.log in an
-> argument), the 20 loud rows (ld34 new), then the rest of the binaryang items. The next release is MAJOR
-> (3.0.0) and waits on the owner's word.
+> a growable heap buffer now). **sw66 + sw67 FIXED 2026-10-13** (an array prints as Deno prints
+> it, `$__arr_inspect`; found with them sw69, sw70 silent and ld37 loud). **binaryang 1.12.0 is
+> LIVE on JSR (owner, 2026-10-13): bump the pin from 1.8.1 straight to 1.12.0 NEXT**, per
+> workflow.md's bump checklist (the optimizer moves every `.wasm`; golden should hold but for
+> pipeline entries merging modc-built libraries; `go_asyncify` should go 9 → 12 / 12, and
+> binaryang gets the count). **Then, in order:** sw69 (static array literal elements), sw70 (a
+> local array shadowing a module one), sw68 (a nested console.log in an argument), the 21 loud
+> rows (ld34, ld37), then the rest of the binaryang items. The next release is MAJOR (3.0.0) and
+> waits on the owner's word.
 >
 > **PAUSED 2026-10-09, end of day (owner).** `main` was clean at the integer-division commit
 > (`7bda25f`). Decided later the
@@ -151,10 +152,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   open loud** (2026-10-13: L4 closed sw64, ld29–ld31; 2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
   wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33; earlier the same day
   sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 and friends).
-  - Open silent (2026-10-13): sw66 (`console.log(arr)` of an array variable prints its address),
-    sw67 (a long array's layout differs from Deno's), sw68 (a nested console.log inside a
-    gathered argument overwrites the outer line).
-  - NEXT: sw66 + sw67, the 20 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
+  - Open silent (2026-10-13, after sw66 + sw67): sw68 (a nested console.log inside a gathered
+    argument overwrites the outer line), sw69 (a static array literal's non-numeric elements
+    become 0), sw70 (a local array named like a module array initializes the module's).
+  - NEXT (after the binaryang 1.12.0 pin bump): sw69, sw70, sw68, the 21 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
     compiler bugs BEFORE the binaryang 1.10.0 items below.
   - Nullable gaps left by sw51's option A (no corpus use; design-decisions.md § "Nullable FIELDS
     carry a flag word"): class-embedded tuple destructuring, union-variant / `Record` fields,

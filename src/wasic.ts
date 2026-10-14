@@ -129,6 +129,7 @@ import { findUntypedDeclarations } from "./decltypes.ts";
 import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
 import { implicitTruncDiagnostic, intDivisionDiagnostic, type WmHelper, WM_WAT } from "./wasmath_lower.ts";
 import {
+  arrInspectKind,
   type ClosureVarLookup,
   type DataAllocator,
   type DotCallLookup,
@@ -13987,6 +13988,15 @@ ${prefixed}
       // Phase 31: console.log of a TypedArray variable → print "TypedArrayName(len) [ ... ]"
       const logSingleArgRaw = logMatch[1].trim();
       const taInfoLog = this.typedArrayVars.get(logSingleArgRaw);
+      if (taInfoLog && arrInspectKind(taInfoLog.taType) === undefined) {
+        // BigInt64Array / BigUint64Array: no element writer (sw66)
+        if (this.emitDiagSuppressDepth === 0) {
+          this.diagnostics.push(
+            `console argument: printing a whole ${taInfoLog.taType} is not supported yet; print its elements (${logSingleArgRaw})`,
+          );
+        }
+        return "";
+      }
       if (taInfoLog) {
         this.needsArrPrintHelper = true;
         this.needsNumericHelpers = true;
@@ -13996,7 +14006,9 @@ ${prefixed}
           { kind: "literal", text: `${taInfoLog.taType}(` },
           { kind: "i32expr", wat: lenWat },
           { kind: "literal", text: ") " },
-          { kind: "arrptr", wat: ptrWat, elemType: taInfoLog.elemType === "f64" ? "f64" : "i32" },
+          // elemType is the typed array's NAME: its element width (sw66; an Int8Array was read as
+          // 4-byte i32s) and its "Name(n) " prefix's length, which the layout counts (sw67)
+          { kind: "arrptr", wat: ptrWat, elemType: taInfoLog.taType, nameLen: taInfoLog.taType.length },
           { kind: "literal", text: "\n" },
         ];
         const { statements: taStmts, needsStrGather: taSG } = emitConsoleLog(
