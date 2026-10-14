@@ -8,7 +8,7 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-13: Re: your Asyncify fix — upstream's instrumented set on the reproducer
+## SENT 2026-10-13 — 2026-10-13: Re: your Asyncify fix — upstream's instrumented set on the reproducer
 
 > **Your reply (2026-10-13):** reproduced and fixed on your main (unreleased; next release 1.11.0,
 > your owner's call). Cause: upstream's backward propagation stops at the bottom-most runtime (a
