@@ -162,6 +162,29 @@
     nullable local prints `null` in every position (it did only as console.log's single
     argument), `console.log(v === null)` reads the flag, and `f() ?? d` on a `T | null` function
     takes `d` (sw51, sw54–sw56, ld26). Test `24_NullableFields`.
+27. ⚠️ **BREAKING: a plain integer `/` is a compile error (2026-10-09, owner).** Use wasMath's
+    `i32.div` / `f64.div` (sw36, sw37 closed). README Breaking Changes row.
+28. **wasMath L3 and L4 (2026-10-09, 2026-10-13).** `Math` correctly rounded in both runtimes
+    ("CR, in both"; Payne–Hanek trig), JavaScript's edge cases (sw57–sw61, sw63); the bigint
+    operators and the u64 printer (ld29–ld31, sw64). wasm-number-types.md.
+29. ⚠️ **BREAKING: D3, a float stored into an integer is refused; D6, the located compile-error
+    report (2026-10-13, owner).** `error[code]: …`, `--> file:line:col`, the source line and a
+    `help:`. README Breaking Changes row (D3).
+30. **Console output (2026-10-13).** A line over 128 bytes no longer corrupts memory (sw62);
+    arrays print as Deno prints them, variables included, in its multi-line layout, typed arrays
+    at their element width (sw66, sw67); a `console.log` whose argument prints no longer loses
+    its line (sw68). ⚠️ `./console_log`'s `LogSegment` changed (README Breaking Changes row).
+    Tests `7c_ConsoleLongLines`, `7d_ConsoleArrays`, `7e_ConsoleNestedLog`.
+31. **Literal values and shadowed arrays (2026-10-13).** Array and struct literals hold their
+    values (`NaN`, `Math.PI`, `0x10`, names, expressions were 0; sw69); a function's array named
+    like a module array no longer replaces it (sw70). Tests `9_LiteralElementValues`,
+    `9_LocalArrayShadowsModule`. No silent-wrong compiler row is open after it.
+32. **Backend → binaryang 1.12.0 (2026-10-13; 1.11.0 skipped).** Its optimizer broke two merge
+    assumptions, fixed (block types by index; `$__malloc` inlined — a wasic library now EXPORTS
+    `__heap_ptr`, additive). `go_asyncify` 11 / 12: the nested case waits on binaryang's next
+    release (polyglot-producers.md).
+33. **Additive API:** `./console_log` exports `arrInspectKind`, `consoleTempLocals`;
+    `./tsbundler`'s `BundleResult.files` (D6).
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 

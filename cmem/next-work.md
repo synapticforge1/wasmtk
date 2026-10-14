@@ -7,6 +7,15 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **PAUSED 2026-10-13, end of day (owner).** `main` is clean and green on binaryang 1.12.0 (wasi
+> 458/458, golden 515, wast 64,506 / 0 / 16; `go_asyncify` 11 / 12 KNOWN). **No silent-wrong row is
+> open.** Resume with: the 21 loud rows (compiler-bugs.md; ld34 a float index into a string in
+> console.log, ld37 a whole string / boolean / bigint array in console.log, the oracle for its
+> layout in `scripts/console/inspect_array_ref.ts`). Waiting on others: binaryang's release with
+> the nested-Asyncify fix (then bump, expect 12 / 12, send the count); the owner's word on the
+> Deno-exit plan (deno-exit-plan.md, P0–P8) and on releasing 3.0.0 (roadmap.md items 27–33;
+> nothing pushed, published or tagged).
+>
 > **2026-10-13, later: binaryang PINNED at 1.12.0** (from 1.8.1; the owner's choice to skip
 > 1.11.0). `go_asyncify_tests` **9 → 11 / 12**: binaryang's Flatten fix holds; the NESTED goroutine
 > program now builds but TRAPS (`uninitialized element` during a rewind into `$main.main$1`), while
