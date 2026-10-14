@@ -1,0 +1,44 @@
+﻿[asyncify] asyncify_stop_unwind is an import that can change the state
+[asyncify] asyncify_start_rewind is an import that can change the state
+[asyncify] runtime.fd_write is an import that can change the state
+[asyncify] runtime.proc_exit is an import that can change the state
+[asyncify] __imported_wasi_snapshot_preview1_random_get is an import that can change the state
+[asyncify] tinygo_unwind can change the state due to initial scan
+[asyncify] runtime.hashmapBinaryDelete can change the state due to initial scan
+[asyncify] runtime.hashmapGet can change the state due to initial scan
+[asyncify] runtime.hashmapSet can change the state due to initial scan
+[asyncify] main.main$1 can change the state due to initial scan
+[asyncify] main.main$1.asyncifysuspendcatch.0.target can change the state due to initial scan
+[asyncify] \28*internal/task.Mutex\29.Lock can change the state due to internal/task.Pause
+[asyncify] __getentropy can change the state due to __wasi_random_get
+[asyncify] __wasi_random_get can change the state due to __imported_wasi_snapshot_preview1_random_get
+[asyncify] _start can change the state due to arc4random
+[asyncify] _start can change the state due to runtime.proc_exit
+[asyncify] arc4random can change the state due to arc4random_buf
+[asyncify] arc4random_buf can change the state due to __getentropy
+[asyncify] calloc can change the state due to malloc
+[asyncify] free can change the state due to runtime.hashmapBinaryDelete
+[asyncify] free can change the state due to runtime.hashmapBinaryGet
+[asyncify] internal/task.Exit can change the state due to internal/task.exit
+[asyncify] internal/task.Pause can change the state due to tinygo_unwind
+[asyncify] internal/task.exit can change the state due to internal/task.Pause
+[asyncify] main.main$1 can change the state due to internal/task.exit
+[asyncify] main.main$1 can change the state due to tinygo_unwind
+[asyncify] main.main$1$gowrapper can change the state due to main.main$1
+[asyncify] main.main$1$gowrapper can change the state due to runtime.exitGoroutine
+[asyncify] malloc can change the state due to runtime.hashmapBinarySet
+[asyncify] realloc can change the state due to free
+[asyncify] realloc can change the state due to runtime.hashmapBinaryDelete
+[asyncify] realloc can change the state due to runtime.hashmapBinaryGet
+[asyncify] realloc can change the state due to runtime.hashmapBinarySet
+[asyncify] runtime.exitGoroutine can change the state due to internal/task.Exit
+[asyncify] runtime.hashmapBinaryGet can change the state due to runtime.hashmapGet
+[asyncify] runtime.hashmapBinarySet can change the state due to runtime.hashmapSet
+[asyncify] runtime.hashmapSet can change the state due to runtime.hashmapGet
+[asyncify] runtime.hashmapSet can change the state due to runtime.hashmapSet
+[asyncify] runtime.putchar can change the state due to runtime.fd_write
+[asyncify] runtime.run$1 can change the state due to internal/task.Pause
+[asyncify] runtime.run$1 can change the state due to runtime.putchar
+[asyncify] runtime.run$1$gowrapper can change the state due to runtime.exitGoroutine
+[asyncify] runtime.run$1$gowrapper can change the state due to runtime.run$1
+-- 0 verbose line(s)
