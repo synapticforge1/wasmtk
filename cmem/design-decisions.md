@@ -578,6 +578,19 @@ written.`, which the CLI prints as its `❌` line. Invariants:
   exactly one global with `global.get`/`global.set` each occurring **exactly once**, has
   `local.get 0` + `i32.add`, and NO calls/loads/stores. The once-each rule is what keeps a
   `global += param; return global` accumulator from being mis-dropped.
+- **A wasic library EXPORTS its heap pointer (`__heap_ptr`), and the merge unifies the allocator
+  by that export first** (2026-10-13, the binaryang 1.12.0 bump). The optimizer may inline
+  `$__malloc` into its callers and remove it (binaryang's `Inlining`, 1.9.0+), and then
+  `detectBumpAllocator` finds nothing: the library kept a PRIVATE heap and the "no unification"
+  branch moved every mutable global to 131072, 0-sentinels included. With the export, every
+  `global.get/set` of that index (inlined allocations included) becomes `$__heap_ptr`; a surviving
+  `$__malloc` is still dropped; an export and a detected allocator naming DIFFERENT globals is
+  refused. `droppedAllocator` means "the bodies reference `$__heap_ptr`", so wasmbundle defines it.
+  Do not remove the export to tidy a library's exports.
+- **A `(type N)` left in a copied body is a BLOCK signature and is spelled inline** from the source
+  type section (2026-10-13). The library's type section is not copied, so an index would name the
+  program's type N. Headers lose their `(type N)` and `call_indirect` is refused, so nothing else
+  carries one; an index the source does not define is refused.
 - **`relocateDataPtrs`** relocates only `i32.const` values inside the merged module's own `(data …)`
   address extent (`[dataLo, dataHi)`) — never blanket-shift every `>= 260`, or arithmetic constants
   get corrupted. **AND (2026-06-09) within that range it skips any in-range `i32.const` whose NEXT
