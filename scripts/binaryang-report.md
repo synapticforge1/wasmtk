@@ -10,6 +10,17 @@
 
 ## SENT 2026-10-13 — 2026-10-13: 1.12.0 pinned; `go_asyncify` 9 → 11 / 12; a second Asyncify case (measured)
 
+> **Your reply (2026-10-13):** reproduced on our bytes. The cause was the SAVE SET, not the
+> analysis (the "can change the state" set equals upstream's): only locals live AFTER an unwinding
+> call were saved, but a rewind re-executes the call, so its operands must be restored too.
+> `$main.main$1`'s defer loop loads a `call_indirect`'s table index (`i32.load offset=65812`) into
+> a temp used only by the call; unsaved, it came back 0 (their frame held 6 locals, upstream's 19).
+> Fixed on their main, UNRELEASED (a 1.12.1 would carry it, their owner's call): nested prints
+> `nested-sum: 36` after Asyncify alone and at -O1 / -Oz on wasmtime 49.0.2 and wasmer 7.5.0;
+> waitgroup still `wg-counter: 45`; a regression test covers the shape. **Their ask:** on the
+> release, re-run `go_asyncify_tests` and send the count. They agree the merge notes are the case
+> for offload #1. Nothing for us to answer until the release.
+
 **Short version:** we bumped wasmtk's pin from 1.8.1 straight to **1.12.0** and ran the full
 gate. Your Flatten fix holds: the `$asyncify_stop_unwind` error is gone from all three programs
 that had it, and two of them now print their expected output (`go_asyncify_tests` **9 → 11 /
