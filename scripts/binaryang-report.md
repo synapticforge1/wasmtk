@@ -8,7 +8,7 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-13: 1.12.0 pinned; `go_asyncify` 9 → 11 / 12; a second Asyncify case (measured)
+## SENT 2026-10-13 — 2026-10-13: 1.12.0 pinned; `go_asyncify` 9 → 11 / 12; a second Asyncify case (measured)
 
 **Short version:** we bumped wasmtk's pin from 1.8.1 straight to **1.12.0** and ran the full
 gate. Your Flatten fix holds: the `$asyncify_stop_unwind` error is gone from all three programs
