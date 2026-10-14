@@ -19,9 +19,9 @@
  * ToInt32 and give back an f64). Comparisons return `bool` (printed `true` / `false`).
  *
  * A `u64` prints unsigned (L4, 2026-10-13: wasic tracks the names, parameters and results declared
- * `u64`, and these helpers' u64 results). Known gap (wasm-number-types.md): an `i32`-namespace
- * argument that is an f64 OUT of the int32 range traps (wasic's f64 → i32 rule) where the
- * TypeScript wraps (`| 0`); the owner's D3 (refuse the implicit f64 → i32) closes it.
+ * `u64`, and these helpers' u64 results). An `i32`- / `i64`-namespace argument that is a float is a
+ * compile error since the owner's D3 (2026-10-13; it trapped out of range where the TypeScript
+ * body wraps): the program says `f64.toI32` / `toI32Sat` / `toI32Wrap` first.
  *
  * @module
  */
@@ -34,6 +34,16 @@ export function intDivisionDiagnostic(expr: string): string {
   return `integer division '${expr.trim().slice(0, 60)}': TypeScript gives a fraction (7 / 2 is 3.5) ` +
     `but wasm truncates (3). Say which you mean with wasMath: i32.div(a, b) for the truncated ` +
     `quotient, f64.div(a, b) for the fraction`;
+}
+
+/** The diagnostic for a float stored into a declared integer (owner decision D3, 2026-10-13):
+ *  TypeScript keeps the float (`const x: i32 = 3.7` is 3.7 under Deno) and wasm needs an integer,
+ *  so the program says which conversion it means. Raised by wasic's `checkImplicitTrunc` and its
+ *  `as i32` / `as i64` cast. */
+export function implicitTruncDiagnostic(stmt: string, where: string): string {
+  return `float stored as an integer in '${stmt.trim().slice(0, 60)}' (${where}): TypeScript keeps ` +
+    `the float, wasm needs an integer. Say which conversion with wasMath: f64.toI32(x) truncates ` +
+    `and stops on NaN or out of range, f64.toI32Sat(x) clamps, f64.toI32Wrap(x) (or x | 0) wraps`;
 }
 
 /** True for an import specifier that names the wasMath module. */

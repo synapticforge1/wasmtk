@@ -1,5 +1,5 @@
 // 1. Natively import functions and linear memory directly from the WASM binary!
-import { i32 } from "../../../src/wasmath.ts";
+import { f64, i32 } from "../../../src/wasmath.ts";
 import { insert_symbol, lookup_symbol } from "./18_symbol_table.wasm";
 
 function runDenoPhase18Test() {
@@ -23,7 +23,7 @@ function runDenoPhase18Test() {
     // --- PHASE 18A: INSERTION & ARITHMETIC ---
     for (let depth = 1; depth <= MAX_DEPTH; depth++) {
       for (let v = 0; v < VARS_PER_SCOPE; v++) {
-        const namePtr: i32 = nameMatrix[depth][v];
+        const namePtr: i32 = f64.toI32(nameMatrix[depth][v]);
         const typeId: i32 = (v % 4) + 1;
         
         // Directly executed with native performance

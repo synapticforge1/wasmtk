@@ -15,8 +15,10 @@ proposed format in next-work.md. **`(a / b) | 0` stays refused** and refers the 
 explicit conversion: trunc traps, trunc_sat clamps, ToInt32 wraps). **D3 DECIDED (owner,
 2026-10-09): "refuse the f64 to i32 store and point the user to the correct wasMath conversion
 mechanism"**: an implicit f64 → i32 conversion is a compile error naming `f64.toI32` (traps),
-`f64.toI32Sat` (clamps), `f64.toI32Wrap` (wraps, JavaScript's `| 0`). Designed, not built; see
-next-work.md. All D1–D6 are now settled. The rest of this file is the 2026-09-30 scope, kept
+`f64.toI32Sat` (clamps), `f64.toI32Wrap` (wraps, JavaScript's `| 0`). **BUILT 2026-10-13**, to
+the owner's measured scope (stores refused, `as i32` refused, indices and positions kept):
+design-decisions.md § "Wasm types in TypeScript". All D1–D6 are settled; D6 (the located report)
+is the one not yet built. The rest of this file is the 2026-09-30 scope, kept
 as the record. Earlier status: Phases 2–4 waited on D1–D6; the owner: "the division
 question deserves more thought first". What has been measured is the two bugs (table below);
 what has NOT is how many corpus programs each D1 option would change. Offered (not started): a
