@@ -8,6 +8,67 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## DRAFT (not yet sent) — 2026-10-13: 1.12.0 pinned; `go_asyncify` 9 → 11 / 12; a second Asyncify case (measured)
+
+**Short version:** we bumped wasmtk's pin from 1.8.1 straight to **1.12.0** and ran the full
+gate. Your Flatten fix holds: the `$asyncify_stop_unwind` error is gone from all three programs
+that had it, and two of them now print their expected output (`go_asyncify_tests` **9 → 11 /
+12**). The third, a NESTED-goroutine program, now passes the pass but the module it produces
+**traps at run time** (`uninitialized element`, a `call_indirect` into an empty table slot).
+Upstream `wasm-opt --asyncify` on the same input runs it correctly. Every other number is
+unchanged: wast 64,506 / 0 / 16, the five-engine cross-check on its baseline, the `-Oz`
+try_table guard 42 / 42.
+
+### Reproducer
+
+`scripts/repros/tinygo043_nested_pre_asyncify.wasm` in wasmtk (19,246 bytes, SHA-256
+`B9A51D877B374901…`): TinyGo's output BEFORE asyncify, captured by a passthrough `wasm-opt`
+exactly as for the waitgroup case. Built from wasmtk's
+`tests/go_fixtures/goroutines/nested/main.go` with TinyGo 0.43.0 (Go 1.27.2, LLVM 22.1.4),
+`tinygo build -scheduler=asyncify -no-debug -panic=trap -target=wasip1`. The program: three outer
+goroutines, each starting three inner goroutines and waiting on its own `sync.WaitGroup`; expected
+output `nested-sum: 36`.
+
+| pipeline on those bytes | result under wasmtime 49.0.2 (and V8 via `wasmtk run`) |
+| --- | --- |
+| binaryang 1.12.0: `readBinary`, `Features.All`, `runPasses(["Asyncify"])`, `emitBinary` | trap: `uninitialized element` |
+| the same + `optimize()` at -O1 or -Oz | the same trap |
+| upstream `wasm-opt` 133 `--asyncify` (bulk-memory, sign-ext, nontrapping-fptoint, mutable-globals) | `nested-sum: 36` |
+
+So it is the Asyncify pass, not the optimizer after it. wasmtime's backtrace on your output, with
+the four removed `asyncify.*` imports added back to the indices (names from the same build without
+`-no-debug`, whose code is identical): `$main.main$1` (the outer goroutine body: it starts the
+inner goroutines, then `inner.Wait()`) ← `$main.main$1$gowrapper` ← `$tinygo_rewind` ← `$_start`.
+The trap is during a REWIND into `$main.main$1`, which has four `call_indirect`s (its `defer
+wg.Done()` runs through one: `runtime.setupDeferFrame` … `runtime.destroyDeferFrame`), starts
+the inner goroutines with a direct `call $internal/task.start`, and suspends in `inner.Wait()`.
+Our guess, not checked: a value one of those indirect calls needs (the callee index, or the defer
+frame it is loaded from) is not saved at the unwind or not restored at the rewind, so the rewind
+calls an empty slot. A function with a pending `defer` that suspends in a NESTED wait is the new
+shape here; the waitgroup case has one level.
+
+### Also from the bump, for your information (fixed on our side)
+
+Your 1.9.0+ optimizer exposed two assumptions in wasmtk's regex-over-WAT merge, which reads an
+optimized library's text and splices it into a program (the merge your stage 5 would replace,
+offload #1):
+
+- A **multi-value block type** printed by index, `(block (type 17)`, with no inline signature:
+  we dropped the library's type section, so 17 meant another signature in the program. Every
+  dynrt bundle failed validation (35 golden entries). We now spell the library's signature inline.
+- **`$__malloc` inlined** into its callers and removed: we recognised a library's bump allocator by
+  that function, so the library kept a private heap. A wasic library now exports its heap pointer
+  (`__heap_ptr`) and we unify by that.
+
+Neither is a binaryang bug: the libraries validate and run on their own. They are evidence for
+offload #1: the merge should read your IR, not our regexes over your printer.
+
+### What we do meanwhile
+
+The pin is 1.12.0. `go_asyncify_tests` carries the nested case as KNOWN (11 / 12) until your
+fix; when it ships we bump again and send the count. One difference from before is worth naming:
+on 1.8.1 that program failed at BUILD time; on 1.12.0 it builds and traps when run.
+
 ## SENT 2026-10-13 — 2026-10-13: Re: your Asyncify fix — upstream's instrumented set on the reproducer
 
 > **Your reply (2026-10-13):** reproduced and fixed on your main (unreleased; next release 1.11.0,

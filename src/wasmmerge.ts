@@ -440,6 +440,7 @@ export function mergeWasmWat(
   // to the page-2 boundary and hand out overlapping addresses.
   let droppedMallocIdx: number | null = null;
   let droppedHeapPtrGlobalIdx: number | null = null;
+  let heapPtrExportIdx: number | null = null;
 
   for (const form of forms) {
     const kind = formKind(form);
@@ -459,6 +460,10 @@ export function mergeWasmWat(
       if (expM) {
         exportFuncMap.set(parseInt(expM[2]), expM[1]);
       }
+      // A wasic library exports its heap pointer (`__heap_ptr`), so the allocator unifies even when
+      // the optimizer has inlined `$__malloc` away (see below).
+      const heapM = form.match(/\(export\s+"__heap_ptr"\s+\(global\s+(\d+)\)\)/);
+      if (heapM) heapPtrExportIdx = parseInt(heapM[1]);
     }
 
     if (kind === "func") {
@@ -499,6 +504,21 @@ export function mergeWasmWat(
     }
   }
 
+  // The heap pointer by its export: binaryang 1.9.0+'s optimizer INLINES a small `$__malloc` into
+  // its callers and removes it, so detecting the allocator by its function found nothing; the
+  // library then kept a private heap, and every mutable global it had was moved to the page-2
+  // boundary (131072), a 0-sentinel included (found bumping to 1.12.0, 2026-10-13: the regex
+  // bundle). The global's uses, inlined allocations included, redirect to `$__heap_ptr`.
+  if (heapPtrExportIdx !== null) {
+    if (droppedHeapPtrGlobalIdx !== null && droppedHeapPtrGlobalIdx !== heapPtrExportIdx) {
+      throw new Error(
+        `wasmmerge: '${prefix}' exports global ${heapPtrExportIdx} as __heap_ptr, but its $__malloc ` +
+          `bumps global ${droppedHeapPtrGlobalIdx}`,
+      );
+    }
+    droppedHeapPtrGlobalIdx = heapPtrExportIdx;
+  }
+
   // ── Identify & strip entry-only items ────────────────────────────────────
   // In wasmbundle mode (exportOverrides provided) we preserve _start and
   // proc_exit so the bundle remains a runnable WASI executable. In Phase-18
@@ -535,9 +555,11 @@ export function mergeWasmWat(
     );
   }
 
-  if (droppedMallocIdx !== null) {
+  if (droppedHeapPtrGlobalIdx !== null) {
     notices.push(
-      `allocator unified: dropped $__malloc + heap-ptr global; call sites redirected to main module's $__malloc / $__heap_ptr.`,
+      droppedMallocIdx !== null
+        ? `allocator unified: dropped $__malloc + heap-ptr global; call sites redirected to main module's $__malloc / $__heap_ptr.`
+        : `allocator unified: heap-ptr global (exported __heap_ptr) redirected to main module's $__heap_ptr; $__malloc was inlined.`,
     );
   }
 
@@ -896,6 +918,21 @@ export function mergeWasmWat(
             `closure, or vtable dispatch across the merge boundary — or keep it standalone.`,
         );
       }
+      // A block / loop / if with a multi-value signature names it by type index, `(block (type 17)`,
+      // and the text carries no inline copy. The source type section is not copied (the main module
+      // emits its own), so index 17 is ANOTHER signature there: spell the source signature inline.
+      // With the header's `(type N)` gone and call_indirect refused above, every `(type N)` left is
+      // a block type. (binaryang 1.9.0+'s optimizer emits them; found bumping to 1.12.0, 2026-10-13:
+      // every dynrt bundle failed validation, "expected 1 elements on the stack but got 0".)
+      body = body.replace(/\(type\s+(\d+)\)/g, (_m, n: string) => {
+        const sig = sourceTypes.get(Number(n));
+        if (sig === undefined) {
+          throw new Error(
+            `wasmmerge: '${prefix}' uses type ${n} as a block signature, which the source module does not define`,
+          );
+        }
+        return sig;
+      });
       // memory.grow means the imported module carries its OWN allocator that claims linear memory
       // upward (a foreign-language growing heap — Go's runtime allocator, Rust dlmalloc, Zig's
       // page_allocator). It does NOT share wasmtk's unified bump heap ($__malloc / $__heap_ptr), so
@@ -986,6 +1023,7 @@ export function mergeWasmWat(
     exportDecls,
     exportMap,
     hasMutableGlobals,
-    droppedAllocator: droppedMallocIdx !== null,
+    // the bodies reference $__heap_ptr (and $__malloc when it survived): the host must define them
+    droppedAllocator: droppedHeapPtrGlobalIdx !== null,
   };
 }

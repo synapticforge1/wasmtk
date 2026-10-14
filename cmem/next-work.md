@@ -7,6 +7,16 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **2026-10-13, later: binaryang PINNED at 1.12.0** (from 1.8.1; the owner's choice to skip
+> 1.11.0). `go_asyncify_tests` **9 → 11 / 12**: binaryang's Flatten fix holds; the NESTED goroutine
+> program now builds but TRAPS (`uninitialized element` during a rewind into `$main.main$1`), while
+> upstream `wasm-opt` 133 `--asyncify` on the same bytes runs it: a second binaryang Asyncify bug.
+> Reproducer `scripts/repros/tinygo043_nested_pre_asyncify.wasm`; letter **DRAFT** in
+> `scripts/binaryang-report.md`, for the owner to send. The gate carries nested as KNOWN (11 / 12).
+> The new optimizer also broke two merge assumptions, fixed with the bump (design-decisions.md §
+> "Merge (wasmmerge) invariants"): block types printed by index, and `$__malloc` inlined away
+> (a wasic library now exports `__heap_ptr`).
+>
 > **2026-10-13: Go asyncify broken by a toolchain update (OPEN, loud).** The machine now has Go
 > 1.27.2 + TinyGo 0.43.0 (testing.md records Go 1.26.7 + TinyGo 0.41.1 green, and that TinyGo 0.42
 > was the first to support Go 1.27). `go_asyncify_tests` 9 / 12: WaitGroup+Mutex, pipeline and
@@ -30,11 +40,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > **D6 BUILT 2026-10-13** (`src/diagnostics.ts`; design-decisions.md § "The compile-error report").
 > **sw62 FIXED 2026-10-13** (any console line over 128 bytes corrupted memory; the line is built in
 > a growable heap buffer now). **sw66 + sw67 FIXED 2026-10-13** (an array prints as Deno prints
-> it, `$__arr_inspect`; found with them sw69, sw70 silent and ld37 loud). **binaryang 1.12.0 is
-> LIVE on JSR (owner, 2026-10-13): bump the pin from 1.8.1 straight to 1.12.0 NEXT**, per
-> workflow.md's bump checklist (the optimizer moves every `.wasm`; golden should hold but for
-> pipeline entries merging modc-built libraries; `go_asyncify` should go 9 → 12 / 12, and
-> binaryang gets the count). **Then, in order:** sw69 (static array literal elements), sw70 (a
+> it, `$__arr_inspect`; found with them sw69, sw70 silent and ld37 loud). **binaryang 1.12.0
+> PINNED** (above). **Next, in order:** sw69 (static array literal elements), sw70 (a
 > local array shadowing a module one), sw68 (a nested console.log in an argument), the 21 loud
 > rows (ld34, ld37), then the rest of the binaryang items. The next release is MAJOR (3.0.0) and
 > waits on the owner's word.
@@ -240,7 +247,7 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   - **Their ask:** once wasic marks its addresses, bundle `18_bundle`, `sharedheap_bundle` and
     `relocfix_bundle` through `wasm-bundle` and report what runs.
   - **Ours to do:**
-    1. Bump the pin 1.8.1 → 1.10.0 (the optimizer changed, so the full gate).
+    1. ~~Bump the pin 1.8.1 → 1.10.0~~ DONE 2026-10-13 as 1.8.1 → 1.12.0.
     2. wasic emits `(@reloc data)` on every data address: strings, arrays, structs,
        string-array pointer words, `$__heap_ptr`'s initial value.
     3. Bundle the three projects UNOPTIMISED and report.

@@ -112,8 +112,20 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
+## Current pass counts (2026-10-13, binaryang **1.12.0**; latest release v2.0.3)
 
+> **2026-10-13, binaryang 1.8.1 → 1.12.0 pinned, gate green except `go_asyncify_tests` 11 / 12
+> (nested: binaryang's Asyncify, KNOWN, letter drafted).** Predictions written first: every
+> `.wasm` moves, outputs do not (held: wasi **455/455**); golden holds but for pipeline entries
+> merging modc libraries (held, but 35 of them had become FAILED compiles until the two merge fixes:
+> block types by index, `$__malloc` inlined); `go_asyncify` → 12 (missed: 11, a second Asyncify
+> bug); wast unmoved (held: 64,506 / 0 / 16, ALL CLEAN); `deno check` clean (held). Golden **512**,
+> 53 re-recorded against a copy of the 1.8.1 snapshot (43 bundles: the libraries' optimized code;
+> 10 libraries: the `__heap_ptr` export), 0 failed entries, no private 131072 heaps · bindgen 142 ·
+> bundle 4 · merge 1 · mod 55 · varscope 12 · jstyper 73 · dync 3 + 3 · typed_decl 37 · engine 11 ·
+> wast_runner 8 · wasmath_lower 199 exact · hybrid + guard **17** (+2 merge cases) · go_bindgen 7 ·
+> go_merge 7 · engine cross-check 1152 on baseline · `-Oz` guard 42 / 42 · api-surface matches.
+>
 > **2026-10-13, sw66 + sw67 (arrays print as Deno prints them), gate green except the known
 > `go_asyncify_tests` 9 / 12.** wasi **455/455** (+`7d_ConsoleArrays`) · golden-WAT **512**: 5
 > entries changed (the new test; `12_InterfaceTypes` and three `31_*` typed-array programs, their
