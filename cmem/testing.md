@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-13, D6 (the located compile-error report), gate green except the known
+> `go_asyncify_tests` 9 / 12.** wasi **453/453** · golden-WAT 510: 4 entries changed, the
+> refused-by-design programs' recorded summary (`N error(s) in <file>; no .wasm was written.`);
+> re-recorded · typed_decl **37** (locations asserted as `--> file:line:col`, +2: the
+> wasMath-import line, the report's notes) · every other suite as below · wast 64,506 / 0 / 16 ·
+> engine cross-check on baseline · api-surface: `BundleResult.files` added (minor), re-baselined.
+>
 > **2026-10-13, later, D3 (a float stored into an integer is refused; ld35, ld36 fixed), gate
 > green except the known `go_asyncify_tests` 9 / 12 (binaryang, report SENT).** wasi **453/453** ·
 > golden-WAT 510: 42 entries changed, none a refused compile (35 dynrt pipelines merge the

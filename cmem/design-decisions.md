@@ -549,6 +549,29 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
   Do NOT revert to `i32.and`/`i32.or` emission. The table entries stay (they drive operator
   *detection*); only emission changed. `switch` on `f64`/`number` must use `f64.eq`/`f64.const`.
 
+## The compile-error report (owner decision D6, built 2026-10-13)
+
+"We should show compile time notes when issues that stop the compile are thrown." When `wasic` or
+`modc` refuses a program, `abortWithReport` (`src/wasic.ts`) prints `formatReport`
+(`src/diagnostics.ts`) to stderr and returns `error` = `N error(s) in <file>; no .wasm was
+written.`, which the CLI prints as its `❌` line. Invariants:
+- **The compiler's diagnostics stay strings.** The report READS them: the code from the wording
+  (`classify`), the location by finding the code the message QUOTES (`'…'`, or what follows
+  "Unsupported …: ") in the user's ORIGINAL files (the bundler's `files`, entry first, read from
+  disk), the notes from the message's own lines. So a new diagnostic should quote the user's code
+  exactly as written, and may add `TypeScript: …` / `wasm: …` / `help: …` lines after its first
+  line; a one-line message `… '<quote>'. <explanation>` gets its explanation as `help:`.
+- **Locations come from the files as written, never from the bundled source**: the bundler drops
+  and renames (a wasMath import vanished, and every line after it was reported one too early).
+  `__wm_<ns>_<member>` is mapped back to `ns.member` before searching. A quote that cannot be
+  found leaves the error unlocated (printed last, never dropped). Repeated quotes take successive
+  occurrences; errors are printed in source order.
+- **Codes** (README table): `int-division`, `float-to-int`, `untyped-declaration`,
+  `loop-counter`, `bigint-in-math`, `bigint-unsigned-shift`, `undefined-name`,
+  `console-argument`, `unsupported`. Only the last two (and an undefined name) are the static
+  subset's limits, so only they get the `wasmtk dync` hint (`isSourceError`).
+- Pure module: `src/diagnostics.ts` uses no runtime API (seam rule); the caller reads files.
+
 ## Merge (wasmmerge) invariants
 
 - **`detectBumpAllocator`** identifies `$__malloc` semantically: `(param i32)(result i32)`, touches
