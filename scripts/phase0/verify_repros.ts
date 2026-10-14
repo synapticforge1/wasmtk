@@ -55,9 +55,10 @@ for (const f of files) {
   const native = await run(Deno.execPath(), ["run", "-A", f]);
   const comp = await run("wasmtk", ["wasic", f], 120_000);
   if (comp.code !== 0) {
-    const diag = (comp.out + comp.err).split("\n").find((l) =>
-      /⚠️|❌/.test(l)
-    )?.trim().slice(0, 110) ?? "";
+    // the first report headline (`error[code]: …`, D6), else the first ⚠️ / ❌ line
+    const lines = (comp.out + comp.err).split("\n");
+    const diag = (lines.find((l) => /^error\[/.test(l)) ?? lines.find((l) => /⚠️|❌/.test(l)))
+      ?.trim().slice(0, 110) ?? "";
     console.log(`COMPILE-FAIL  ${f}  :: ${diag}`);
     continue;
   }

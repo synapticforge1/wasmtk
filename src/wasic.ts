@@ -122,6 +122,7 @@ import { basename, dirname } from "@std/path";
 import { rt } from "./rt.ts";
 import { emitWitBeside } from "./witgen.ts";
 import { bundleImportsEx } from "./tsbundler.ts";
+import { classify, formatReport, isSourceError, type SourceFile } from "./diagnostics.ts";
 import { type ExternalFuncDef, mergeWasmWat, type WasmWatType } from "./wasmmerge.ts";
 import { gateVarToLet, maskCode } from "./varscope.ts";
 import { findUntypedDeclarations } from "./decltypes.ts";
@@ -2086,17 +2087,12 @@ class WasicTranspiler {
   private usedExternalMethods: Map<string, { params: WatType[]; result: WatType | null }> =
     new Map();
 
-  // The source before `stripComments`, which drops block comments WITH their newlines: a diagnostic
-  // that reports a line number has to find its statement here, not count lines in `this.src`.
-  private sourceAsGiven = "";
-
   constructor(
     source: string,
     mode: "wasi" | "library" = "wasi",
     externalFuncs: ExternalFuncDef[] = [],
   ) {
     this.src = stripComments(source);
-    this.sourceAsGiven = source;
     this.mode = mode;
     // Register imported WASM functions so call-site type inference works correctly.
     for (const ef of externalFuncs) {
@@ -21031,27 +21027,14 @@ ${sum}
    * strings and comments masked.
    */
   private checkDeclarationTypes(src: string): void {
-    // ` (line N)` in the file AS GIVEN. `src` has lost block comments with their newlines, so the
-    // statement's line is looked up there instead: the nth identical line in `src` is the nth line
-    // in the given source that starts with the same text (a trailing `//` comment was stripped).
-    // No match (import-merged renames) → no line number, and the snippet still names the statement.
-    const givenLines = this.sourceAsGiven.split("\n").map((l) => l.trim());
-    const lineOf = (idx: number): string => {
-      const start = src.lastIndexOf("\n", idx - 1) + 1;
-      const end = src.indexOf("\n", idx);
-      const text = src.slice(start, end === -1 ? undefined : end).trim();
-      const nth = src.slice(0, start).split("\n").filter((l) => l.trim() === text).length;
-      let seen = 0;
-      for (let i = 0; i < givenLines.length; i++) {
-        if (givenLines[i].startsWith(text) && seen++ === nth) return ` (line ${i + 1})`;
-      }
-      return "";
-    };
     const snippet = (idx: number) =>
       src.slice(idx, src.indexOf("\n", idx) === -1 ? undefined : src.indexOf("\n", idx)).trim()
         .slice(0, 60);
+    // The D6 report (2026-10-13) locates the statement in the files as written and prints
+    // `--> file:line:col`; the old ` (line N)` here counted lines in the BUNDLED source, which an
+    // import (wasMath's) shifts, so it is no longer part of the message.
     for (const d of findUntypedDeclarations(src)) {
-      const head = `Declaration needs a type${lineOf(d.index)}: '${snippet(d.index)}'. `;
+      const head = `Declaration needs a type: '${snippet(d.index)}'. `;
       this.diagnostics.push(
         d.kind === "name"
           ? head +
@@ -22510,18 +22493,9 @@ export async function compileWasiTs(
     };
   }
 
-  // Report any unsupported-feature diagnostics collected during transpilation
-  for (const msg of transpiler.warnings) {
-    console.warn(`  ⚠️  ${msg}`);
-  }
+  // The compile-error report (D6): what, where, why, and the fix.
   if (transpiler.warnings.length > 0) {
-    return {
-      success: false,
-      aborted: true,
-      diagnostics: [...transpiler.warnings],
-      error:
-        `Compilation aborted: ${transpiler.warnings.length} unsupported feature(s) — see warnings above`,
-    };
+    return await abortWithReport("wasic", tsPath, bundleResult.files, transpiler.warnings);
   }
 
   // Phase 18: merge each imported .wasm module into the WAT
@@ -22701,17 +22675,8 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
     };
   }
 
-  for (const msg of transpiler.warnings) {
-    console.warn(`  ⚠️  ${msg}`);
-  }
   if (transpiler.warnings.length > 0) {
-    return {
-      success: false,
-      aborted: true,
-      diagnostics: [...transpiler.warnings],
-      error:
-        `Compilation aborted: ${transpiler.warnings.length} unsupported feature(s) — see warnings above`,
-    };
+    return await abortWithReport("modc", tsPath, bundleResult2.files, transpiler.warnings);
   }
 
   let dataOffset2 = transpiler.dataEnd;
@@ -22811,6 +22776,38 @@ export async function compileWasi(path: string, outPath?: string): Promise<void>
 }
 
 /**
+ * A refused compile (D6, owner 2026-10-13): prints the located report to stderr and returns the
+ * aborted result, whose `error` is the summary line the CLI prints after it. The program's files
+ * are read as the user wrote them (the bundler's list, entry first), so every location is in the
+ * user's own file and line numbering.
+ */
+async function abortWithReport(
+  tool: "wasic" | "modc",
+  entry: string,
+  files: string[] | undefined,
+  warnings: readonly string[],
+): Promise<WasicResult> {
+  const sources: SourceFile[] = [];
+  let entryReal = entry;
+  try {
+    entryReal = await rt.realPath(entry);
+  } catch { /* keep the path as given */ }
+  for (const f of files?.length ? files : [entry]) {
+    try {
+      sources.push({ path: f === entryReal ? entry : f, text: await rt.readTextFile(f) });
+    } catch { /* an unreadable file just cannot be pointed into */ }
+  }
+  console.error(formatReport(warnings, sources));
+  const n = warnings.length;
+  return {
+    success: false,
+    aborted: true,
+    diagnostics: [...warnings],
+    error: `${n} error${n === 1 ? "" : "s"} in ${entry}; no .wasm was written.`,
+  };
+}
+
+/**
  * After `wasmtk wasic` aborts on unsupported feature(s), tell the user which way to go: recompile
  * with the dynamic runtime (`wasmtk dync`) when the program is simply too dynamic for wasic's
  * static subset, OR fix a genuine error first when one of the diagnostics is an undefined-name error
@@ -22823,24 +22820,13 @@ function suggestNextStepOnAbort(path: string, diagnostics: readonly string[]): v
   // or a missing declaration (which the dynamic runtime would also fail on, as a ReferenceError),
   // OR legitimate dynamic dispatch wasic can't resolve statically. Flag it for the user to verify
   // rather than asserting either way. Every other diagnostic is a wasic-only static-subset limit.
-  const errorLike = diagnostics.filter((d) => /Unknown function .* not declared/.test(d));
-  // Missing types (owner rule 2026-09-28) and for-counter violations are the user's to fix in the
-  // source; the dynamic runtime is NOT the answer to them.
-  const typeLike = diagnostics.filter((d) =>
-    /^Declaration needs a type|^for-loop counter '/.test(d)
-  );
-  const featureLike = diagnostics.filter((d) => !errorLike.includes(d) && !typeLike.includes(d));
+  // By code (D6, 2026-10-13; src/diagnostics.ts): the source errors (missing types, loop counters,
+  // integer division, a float stored into an integer, a bigint where JavaScript refuses one) carry
+  // their own `help:` in the report, and the dynamic runtime is NOT the answer to them.
+  const errorLike = diagnostics.filter((d) => classify(d) === "undefined-name");
+  const featureLike = diagnostics.filter((d) => !isSourceError(classify(d)) && !errorLike.includes(d));
 
   console.error("");
-  if (typeLike.length > 0) {
-    console.error(
-      "   Every let/const/var must state its type on its first definition (TypeScript numbers are",
-    );
-    console.error(
-      "   64-bit floats: write ': number', or ': i32' for an integer). Add the types above and recompile.",
-    );
-    console.error("");
-  }
   if (errorLike.length > 0) {
     console.error(
       "   Some item(s) above look like undefined names, not just unsupported features:",

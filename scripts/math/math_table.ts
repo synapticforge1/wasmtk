@@ -81,8 +81,10 @@ const cell = async (j: Job): Promise<string> => {
   const c = await run("wasmtk", ["wasic", j.file]);
   let wasm: string;
   if (c.code !== 0) {
-    const why = (c.out + "\n" + c.err).split("\n").find((l) => /⚠️|❌/.test(l)) ?? "";
-    wasm = `COMPILE ERROR (${why.replace(/^\s*(⚠️|❌)\s*/, "").replace(/^wasic:\s*/, "").slice(0, 60)})`;
+    const why = (c.out + "\n" + c.err).split("\n").find((l) => /^error\[|⚠️|❌/.test(l)) ?? "";
+    wasm = `COMPILE ERROR (${
+      why.replace(/^error\[[\w-]+\]:\s*/, "").replace(/^\s*(⚠️|❌)\s*/, "").replace(/^wasic:\s*/, "").slice(0, 60)
+    })`;
   } else {
     const w = await run("wasmtk", ["run", j.file.replace(/\.ts$/, ".wasm")]);
     wasm = w.code === 0 ? w.out : `CRASH (${(w.out + w.err).match(/(RuntimeError|CompileError)[^@\n]*/)?.[0]?.slice(0, 60) ?? "exit " + w.code})`;
