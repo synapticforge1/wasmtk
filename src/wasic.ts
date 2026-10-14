@@ -126,7 +126,7 @@ import { type ExternalFuncDef, mergeWasmWat, type WasmWatType } from "./wasmmerg
 import { gateVarToLet, maskCode } from "./varscope.ts";
 import { findUntypedDeclarations } from "./decltypes.ts";
 import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
-import { intDivisionDiagnostic, type WmHelper, WM_WAT } from "./wasmath_lower.ts";
+import { implicitTruncDiagnostic, intDivisionDiagnostic, type WmHelper, WM_WAT } from "./wasmath_lower.ts";
 import {
   type ClosureVarLookup,
   type DataAllocator,
@@ -1934,6 +1934,12 @@ class WasicTranspiler {
   // top level. `u64` lowers to i64 like `bigint`; only printing reads the difference (unsigned).
   private u64Vars: Set<string> = new Set();
   private u64Globals: Set<string> = new Set();
+  // D3 (2026-10-13): the statement being emitted (for the diagnostic); per statement being emitted,
+  // the WAT of the statements nested in it (checked already, so subtracted from its own check); the
+  // truncations a refused cast already reported.
+  private d3Stmt = "";
+  private d3Nested: string[][] = [];
+  private d3Reported: Set<string> = new Set();
   // Tracks variable names declared with a function type (e.g. let f: (a: i32) => i32)
   // Stored as Map<name, signature> — the i32 local holds the funcref table index.
   private funcTypeVars: Map<string, { params: WatType[]; result: WatType | null }> = new Map();
@@ -9083,9 +9089,16 @@ ${prefixed}
             return this.emitExpr(`dynrt_dynToBool(${inner})`, locals, "i32");
           }
           if (tt === "i32" || tt === "i64" || tt === "int") {
-            return `(i32.trunc_f64_s ${
+            // D3 (owner, 2026-10-13): an `any` number is a float, and `as i32` does not say which
+            // conversion; refused like `f as i32`. `x as f64` unboxes, wasMath converts.
+            const w = `(i32.trunc_f64_s ${
               this.emitExpr(`dynrt_dynNumberValue(${inner})`, locals, "f64")
             })`;
+            this.d3Reported.add(w);
+            this.diagnostics.push(
+              implicitTruncDiagnostic(this.d3Stmt || expr, `'as ${tt}' on an 'any': unbox with 'as f64'`),
+            );
+            return w;
           }
           // other targets (incl. string) fall through to the normal cast path (documented gap)
         }
@@ -9093,6 +9106,9 @@ ${prefixed}
         let srcType: WatType;
         if (/^\w+$/.test(inner) && locals.has(inner)) {
           srcType = locals.get(inner)!;
+        } else if (/^\w+$/.test(inner) && this.moduleGlobals.has(inner)) {
+          // a module global (D3, 2026-10-13: `f as i32` of an f64 global was typed i32 here)
+          srcType = this.moduleGlobals.get(inner)!.type;
         } else {
           const sfM = inner.match(/^(\w+)\.(\w+)$/);
           if (sfM) {
@@ -11240,7 +11256,14 @@ ${prefixed}
             return this.convertWat(w, "i64", defaultType);
           }
         }
-        const lhsType: WatType = alwaysI32 ? "i32" : (_lhsIsStrSlice ? "string" : (_dotFieldType ??
+        // A cast operand, `(x as T)` or `x as T`, has type T (2026-10-13). The leading `(` hid it,
+        // so `(n as f64) === 13` compared as i32 over an f64, an invalid module (dynrt-design.md's
+        // "inline `(x as f64) === lit`" gap; D3 made `as f64` the way to unbox an `any`).
+        const _lhsCastM = lhs.match(/^\(?\s*[\w.]+\s+as\s+(\w+)\s*\)?$/);
+        const _lhsCastType: WatType | null = _lhsCastM && /^(i32|i64|f32|f64|number|bigint|bool|boolean)$/.test(_lhsCastM[1])
+          ? mapType(_lhsCastM[1] === "number" ? "f64" : _lhsCastM[1])
+          : null;
+        const lhsType: WatType = alwaysI32 ? "i32" : (_lhsIsStrSlice ? "string" : (_lhsCastType ?? _dotFieldType ??
           (/^\w+$/.test(lhs) && locals.has(lhs)
             ? locals.get(lhs)!
             : /^\w+$/.test(lhs) && this.moduleGlobals.has(lhs)
@@ -11925,6 +11948,15 @@ ${prefixed}
     // Integer literal: emit directly with target type to avoid redundant trunc
     if (/^-?\d+$/.test(inner.trim())) return `(${tgtBase}.const ${inner.trim()})`;
     const innerWat = this.emitExpr(inner, locals, src);
+    // D3 (owner, 2026-10-13): `f as i32` on a float names the TYPE, not the conversion (truncate
+    // and stop, clamp, or wrap), so it is refused like any implicit store; the WAT below is still
+    // returned so the compile can report every error in one pass.
+    if ((tgtBase === "i32" || tgtBase === "i64") && (srcBase === "f64" || srcBase === "f32")) {
+      const w = `(${tgtBase}.trunc_${srcBase}_s ${innerWat})`;
+      this.d3Reported.add(w);
+      this.diagnostics.push(implicitTruncDiagnostic(this.d3Stmt || inner, `'as ${tgtBase}' on a float`));
+      return w;
+    }
     if (tgtBase === "i32" && srcBase === "f64") return `(i32.trunc_f64_s ${innerWat})`;
     if (tgtBase === "i32" && srcBase === "f32") return `(i32.trunc_f32_s ${innerWat})`;
     if (tgtBase === "i32" && srcBase === "i64") return `(i32.wrap_i64 ${innerWat})`;
@@ -11973,7 +12005,115 @@ ${prefixed}
   // -------------------------------------------------------------------------
   // Statement emitter
   // -------------------------------------------------------------------------
+  /** Every statement, with the D3 check on its WAT (owner, 2026-10-13; see checkImplicitTrunc). */
   private emitStatement(
+    line: string,
+    locals: Map<string, WatType>,
+    funcResult: WatType | null,
+  ): string {
+    const outer = this.d3Stmt;
+    const depth = this.d3Nested.length;
+    this.d3Stmt = line;
+    this.d3Nested.push([]);
+    try {
+      const wat = this.emitStatementCore(line, locals, funcResult);
+      const nested = this.d3Nested[depth];
+      // Check only what THIS statement added: the WAT of the statements nested in it (a block's
+      // body) was checked when each of them was emitted, under its own source line.
+      let own = wat;
+      for (const n of nested) {
+        const at = own.indexOf(n);
+        if (at >= 0) own = own.slice(0, at) + own.slice(at + n.length);
+      }
+      this.checkImplicitTrunc(own, line);
+      if (depth > 0) this.d3Nested[depth - 1].push(wat);
+      return wat;
+    } finally {
+      this.d3Nested.length = depth; // drop this statement's frame, also on an exception
+      this.d3Stmt = outer;
+    }
+  }
+
+  /**
+   * D3 (owner, 2026-10-13): a float STORED into a declared integer is a compile error. TypeScript
+   * stores the float as it is (`const x: i32 = 3.7` is 3.7 under Deno); wasm cannot, and which
+   * conversion it should be (truncate and stop on NaN / out of range, clamp, or wrap) is the
+   * program's to say, with wasMath's `f64.toI32` / `toI32Sat` / `toI32Wrap`.
+   *
+   * Read from the statement's WAT, after emission: a `trunc_f32_s` / `trunc_f64_s` (to i32 or i64)
+   * that is the stored VALUE of a `local.set` / `local.tee` / `global.set` of a user variable, of a
+   * memory store (a field, an element), of a `return`, or an argument of a user function. A
+   * truncation inside an address, or handed to wasic's own `$__…` helpers (an index, a string
+   * position: JavaScript converts those itself), is kept, as the owner decided. Each conversion is
+   * reported once, by the innermost statement that contains it (emitStatement subtracts nested
+   * statements' WAT before calling this).
+   */
+  private checkImplicitTrunc(wat: string, line: string): void {
+    if (!wat.includes(".trunc_f")) return;
+    const TRUNC = /^(i32|i64)\.trunc_f(32|64)_s$/;
+    const STORE = /^(i32|i64|f32|f64)\.store(8|16|32)?$/;
+    type Node = { head: string; arg: string; start: number; lastTrunc: string | null };
+    const stack: Node[] = [];
+    // A cast refused at its own site (`f as i32`, `x as i32` of an `any`) is not reported twice.
+    const report = (truncText: string, where: string) => {
+      if (this.d3Reported.has(truncText)) return;
+      this.diagnostics.push(implicitTruncDiagnostic(line, where));
+    };
+    let i = 0;
+    while (i < wat.length) {
+      const ch = wat[i];
+      if (ch === "(" && wat[i + 1] === ";") { // block comment
+        const e = wat.indexOf(";)", i + 2);
+        i = e < 0 ? wat.length : e + 2;
+        continue;
+      }
+      if (ch === ";" && wat[i + 1] === ";") { // line comment
+        const e = wat.indexOf("\n", i);
+        i = e < 0 ? wat.length : e;
+        continue;
+      }
+      if (ch === "(") {
+        const m = wat.slice(i + 1).match(/^\s*([\w.]+)(?:\s+(\$[\w.$]+))?/);
+        // a new child of the parent: it is no longer the parent's LAST child candidate
+        if (stack.length) stack[stack.length - 1].lastTrunc = null;
+        stack.push({ head: m?.[1] ?? "", arg: m?.[2] ?? "", start: i, lastTrunc: null });
+        i++;
+        continue;
+      }
+      if (ch === ")") {
+        const node = stack.pop();
+        if (node) {
+          const parent = stack[stack.length - 1];
+          if (node.head && TRUNC.test(node.head) && parent) {
+            const text = wat.slice(node.start, i + 1);
+            // wasic's own `$__…` helpers take positions and counts (kept); a wasMath function
+            // (`$__wm_<ns>_<member>`) is the user's call, so a float into its integer parameter is
+            // a store like any other (its TypeScript body would apply `| 0`, wasm would truncate).
+            const wm = parent.arg.match(/^\$__wm_([a-z0-9]+)_(\w+)$/);
+            const userName = parent.arg && (!!wm || !/^\$(__|mathlib_|dynrt_)/.test(parent.arg));
+            const shown = wm ? `${wm[1]}.${wm[2]}` : parent.arg.slice(1);
+            if ((parent.head === "local.set" || parent.head === "local.tee" || parent.head === "global.set") && userName) {
+              report(text, `stored into '${shown}'`);
+            } else if (parent.head === "return") {
+              report(text, "returned from an integer function");
+            } else if (parent.head === "call" && userName) {
+              report(text, `passed to '${shown}'`);
+            } else if (STORE.test(parent.head)) {
+              parent.lastTrunc = text; // a store's VALUE is its last operand
+            }
+          }
+          if (node.head && STORE.test(node.head) && node.lastTrunc) {
+            report(node.lastTrunc, "stored into a field or element");
+          }
+        }
+        i++;
+        continue;
+      }
+      i++;
+    }
+  }
+
+  private emitStatementCore(
     line: string,
     locals: Map<string, WatType>,
     funcResult: WatType | null,

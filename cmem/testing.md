@@ -114,6 +114,15 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-09-30, binaryang **1.8.1**; latest release v2.0.3)
 
+> **2026-10-13, later, D3 (a float stored into an integer is refused; ld35, ld36 fixed), gate
+> green except the known `go_asyncify_tests` 9 / 12 (binaryang, report SENT).** wasi **453/453** ·
+> golden-WAT 510: 42 entries changed, none a refused compile (35 dynrt pipelines merge the
+> library's `toI32Sat` helper; the 4 migrated corpus programs; 2 `vcap` bundles from the rebuilt
+> embedded capabilities; the `dynrt_any` bundle's comparisons now `f64.eq`); re-recorded ·
+> typed_decl **35** (+9 refused shapes, +1 accepted program) · `wasmath_lower_tests` 199 / 199,
+> 34,846 calls · `wasmath_tests` 151 / 151 · every other suite as below · wast 64,506 / 0 / 16 ·
+> engine cross-check on baseline · api-surface matches.
+>
 > **2026-10-13, wasMath L4 (ld29, ld30, ld31, sw64, u64 printed unsigned), gate green EXCEPT
 > `go_asyncify_tests`, which is out of L4's reach (below).** wasi **453/453**
 > (+`39_WasMathL4Operators`) · golden-WAT **510**: 3 existing entries changed, each by the intended

@@ -29,7 +29,7 @@
  *       (trailing zeros stripped). Precision beyond 6 digits is truncated.
  */
 
-import { intDivisionDiagnostic } from "./wasmath_lower.ts";
+import { implicitTruncDiagnostic, intDivisionDiagnostic } from "./wasmath_lower.ts";
 
 // ---------------------------------------------------------------------------
 // Memory layout constants
@@ -1344,18 +1344,17 @@ function parseSingleArg(
     // Phase 5g: closure-typed variable dispatch via trampoline (call_indirect)
     const closureSig = closureVarLookup?.(callee);
     if (closureSig) {
-      const watArgsList = argList.map((a, idx) =>
-        exprToWat(
-          a.trim(),
+      const watArgsList = argList.map((a, idx) => {
+        const pt = (closureSig.params[idx] ?? "i32") as string;
+        return intArgWat(
+          exprToWat(a.trim(), locals, pt, funcLookup, allocString, arrayLookup, structLookup, globals),
+          a,
+          callee,
+          pt,
           locals,
-          (closureSig.params[idx] ?? "i32") as string,
-          funcLookup,
-          allocString,
-          arrayLookup,
-          structLookup,
           globals,
-        )
-      );
+        );
+      });
       const argsPart = watArgsList.length > 0 ? ` ${watArgsList.join(" ")}` : "";
       const wat =
         `(call_indirect (type ${closureSig.funcType}) (local.get $${callee})${argsPart} (i32.load (local.get $${callee})))`;
@@ -1406,14 +1405,12 @@ function parseSingleArg(
         return [`(i32.const ${_structLiteralAlloc(structName, initFields)})`];
       }
       return [
-        exprToWat(
-          a.trim(),
-          locals,
+        intArgWat(
+          exprToWat(a.trim(), locals, ptype, funcLookup, allocString, arrayLookup, structLookup, globals),
+          a,
+          callee,
           ptype,
-          funcLookup,
-          allocString,
-          arrayLookup,
-          structLookup,
+          locals,
           globals,
         ),
       ];
@@ -2020,6 +2017,35 @@ function parseTemplateLiteral(
  * untouched; an f64 / f32 value (read from the emitted WAT's outermost form), or a float wrapped in
  * a TRAPPING `trunc_f64_s`, goes through `$__i32_toint32`. A bigint is left as is.
  */
+/** The numeric type of emitted WAT, read from its outermost form (wasic's `watResultType` twin),
+ *  or undefined when it cannot be told. */
+function watOuterType(
+  w: string,
+  locals: Map<string, string>,
+  globals?: Map<string, string>,
+): string | undefined {
+  const m = w.trimStart().match(/^\(([\w.]+)(?:\s+\$([\w.$]+))?/);
+  const typed = m?.[1].match(/^(i32|i64|f32|f64)\.(\w+)/);
+  return typed
+    ? (/^(eqz?|ne|lt|gt|le|ge)(_[su])?$/.test(typed[2]) ? "i32" : typed[1])
+    : m?.[1] === "local.get" && m[2]
+    ? locals.get(m[2])
+    : m?.[1] === "global.get" && m[2]
+    ? globals?.get(m[2])
+    : undefined;
+}
+
+/** An argument for an integer parameter: a float there is the owner's D3 refusal (2026-10-13), the
+ *  console twin of wasic's checkImplicitTrunc (it passed the f64 raw, an invalid module). */
+function intArgWat(w: string, arg: string, callee: string, ptype: string, locals: Map<string, string>, globals?: Map<string, string>): string {
+  const t = watOuterType(w, locals, globals);
+  const isInt = ptype === "i32" || ptype === "i64";
+  if (isInt && (t === "f64" || t === "f32" || /^\((i32|i64)\.trunc_f(32|64)_s /.test(w.trimStart()))) {
+    _diagnosticSink?.(implicitTruncDiagnostic(`${callee}(… ${arg.trim().slice(0, 30)} …)`, `passed to '${callee}'`));
+  }
+  return w;
+}
+
 function toInt32Wat(
   e: string,
   locals: Map<string, string>,
@@ -2032,15 +2058,7 @@ function toInt32Wat(
   const lit = e.trim();
   if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
   const w = exprToWat(e, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals);
-  const m = w.trimStart().match(/^\(([\w.]+)(?:\s+\$([\w.$]+))?/);
-  const typed = m?.[1].match(/^(i32|i64|f32|f64)\.(\w+)/);
-  const have = typed
-    ? (/^(eqz?|ne|lt|gt|le|ge)(_[su])?$/.test(typed[2]) ? "i32" : typed[1])
-    : m?.[1] === "local.get" && m[2]
-    ? locals.get(m[2])
-    : m?.[1] === "global.get" && m[2]
-    ? globals?.get(m[2])
-    : undefined;
+  const have = watOuterType(w, locals, globals);
   if (have === "i64") return w;
   const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
   if (have !== "f64" && have !== "f32" && !truncated) return w;
@@ -2649,14 +2667,12 @@ function exprToWat(
         return [`(i32.const ${_structLiteralAlloc(structName2, initFields2)})`];
       }
       return [
-        exprToWat(
-          a.trim(),
-          locals,
+        intArgWat(
+          exprToWat(a.trim(), locals, ptype, funcLookup, allocString, arrayLookup, structLookup, globals),
+          a,
+          callee,
           ptype,
-          funcLookup,
-          allocString,
-          arrayLookup,
-          structLookup,
+          locals,
           globals,
         ),
       ];

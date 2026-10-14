@@ -357,8 +357,9 @@ collectively as "14.3"):
   be **pre-prefixed `dynrt_`** to resolve against the merged module. **Gaps (follow-ups):** any-PARAM
   unboxing (FuncParam doesn't retain the raw `any` annotation — needs an `isAny` flag from
   parseFunctions); `as string` unboxing (needs ptr+len in the string-assign path, not single-value
-  emitExpr); inline `(x as f64) === lit` mis-infers the comparison as i32 (use an intermediate typed
-  local — the common form); non-literal typed RHS boxing (`const x: any = someI32`).
+  emitExpr); ~~inline `(x as f64) === lit` mis-infers the comparison as i32~~ FIXED 2026-10-13
+  (ld36); non-literal typed RHS boxing (`const x: any = someI32`). **Since D3 (2026-10-13) `x as i32`
+  on an `any` is refused**: unbox with `x as f64`, then `f64.toI32(…)` / `toI32Sat` / `toI32Wrap`.
 - **3.2 — operators on `any`. ✅ SHIPPED 2026-06-22** (extends `18q`). In `emitExpr`'s binary-op loop,
   right after `lhs`/`rhs` are split, a guarded block fires **only when an operand is a simple `any`
   var** (`anyVars.has`) — otherwise the existing typed paths run **untouched** (the safety invariant

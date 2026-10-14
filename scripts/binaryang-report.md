@@ -8,7 +8,7 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-13: `Asyncify` fails on TinyGo 0.43 output, upstream Binaryen does not (measured)
+## SENT 2026-10-13 — 2026-10-13: `Asyncify` fails on TinyGo 0.43 output, upstream Binaryen does not (measured)
 
 **Short version:** binaryang's `Asyncify` pass throws `Flatten: unresolved call target
 "$asyncify_stop_unwind"` on a module TinyGo 0.43.0 builds for goroutines, in **1.8.1 (our pin)

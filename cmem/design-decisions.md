@@ -346,11 +346,25 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     it a float division; a `Math` argument is an f64 context.
   - **A `Math` result in an integer or f32 context is converted like any f64 there** (2026-10-06):
     `trunc_f64_s` into i32 / i64 (it traps out of range or on NaN), `demote` into f32. One
-    convention for every site; changing it is decision D3 in wasm-math-plan.md. **D3 DECIDED
-    2026-10-09 (owner): this silent conversion is to be REFUSED** — an f64 meeting an i32 (or
-    i64) destination becomes a compile error naming wasMath's `f64.toI32` / `toI32Sat` /
-    `toI32Wrap`, as integer `/` is refused. Not built yet (plan in next-work.md); until it lands,
-    the trunc convention above is what the compiler does.
+    convention for every site; changing it is decision D3 in wasm-math-plan.md.
+  - **D3, BUILT 2026-10-13 (owner's scope, measured first): a float STORED into a declared
+    integer is a compile error** naming wasMath's `f64.toI32` (truncate; stops on NaN / out of
+    range) / `toI32Sat` (clamps) / `toI32Wrap` (wraps; `x | 0` is the same and stays allowed).
+    Stores: a declaration, an assignment, an argument to an integer parameter (a user function
+    or a wasMath `i32.*` / `i64.*` function), a `return` from an integer function, a field or
+    element store. **Also refused: `x as i32` / `as i64` on a float, and on an `any`** (unbox
+    with `as f64`, then convert): `as` names the type, not the conversion. **Kept (owner): a float
+    used as an INDEX or POSITION** (`arr[i]`, `s[i]`, `s.indexOf(x, pos)`, `splice(i, 1)` with
+    `i: number`), which JavaScript converts itself; 115 such conversions in 26 corpus programs.
+    How: `checkImplicitTrunc` reads each statement's WAT after emission (`emitStatement` wraps
+    `emitStatementCore`, subtracting nested statements' WAT, already checked) and refuses a
+    `trunc_f32_s` / `trunc_f64_s` that is the stored VALUE of `local.set` / `local.tee` /
+    `global.set` of a user variable, of a memory store, of a `return`, or a direct argument of a
+    user or wasMath call; wasic's own `$__…` helpers (positions, counts) are exempt. The cast
+    sites refuse `as` directly. The console twin, `intArgWat`, refuses a float argument to an
+    integer parameter (it passed the f64 RAW before: ld35). One message for all,
+    `implicitTruncDiagnostic` (`src/wasmath_lower.ts`). The trunc convention above remains for the
+    kept cases only.
   - **An f32 is converted at every f32 boundary, by ONE rule** (2026-10-06, ld18 / sw43):
     `emitExpr` wraps the emitter, reads the emitted WAT's result type from its outermost form
     (`watResultType`) and converts when exactly one side is f32. A new leaf path need not know
@@ -365,6 +379,12 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     (`setMathHelperNeededCallback`; a console path that writes `call $__x` must REQUEST `$__x`).
   - Functions that TypeScript's `Math` lacks, for the wasm operations with no JS spelling, are
     being scoped. The plan, open questions and bugs: [wasm-math-plan.md](wasm-math-plan.md).
+  - D3 corpus consequence (2026-10-13): `38_MathExactSemantics` (`f64.toI32(Math.floor(y))` ×7),
+    `9_F32Containers`, `18_Multi-Scope…` and the `dynrt_any` bundle (`f64.toI32(num as f64)`)
+    say `f64.toI32`; the SHIPPED dynrt library's 14 float positions and counts say
+    `f64.toI32Sat` (NaN → 0, ±Infinity clamped, as JavaScript's ToIntegerOrInfinity), and the
+    six embedded capability libraries (`src/wasm/caps_bytes.ts`) were rebuilt with the current
+    compiler (they dated from the `pow` CR commit).
   - Test corpus consequence (2026-10-09): an integer quotient is written `i32.div(a, b)`, a
     fraction `f64.div(a, b)` or f64 operands. The 10 corpus programs that divided i32s were
     rewritten that way, printing what wasm printed before (golden: only those entries changed).
