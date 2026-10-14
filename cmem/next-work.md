@@ -45,7 +45,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > a growable heap buffer now). **sw66 + sw67 FIXED 2026-10-13** (an array prints as Deno prints
 > it, `$__arr_inspect`; found with them sw69, sw70 silent and ld37 loud). **binaryang 1.12.0
 > PINNED** (above). **sw69 FIXED 2026-10-13** (array and struct literal values; compiler-bugs.md).
-> **sw70 FIXED 2026-10-13** (a local array shadowing a module one). **Next, in order:** sw68 (a nested console.log in an argument), the 21 loud
+> **sw70 FIXED 2026-10-13** (a local array shadowing a module one). **sw68 FIXED 2026-10-13**
+> (a nested console.log in an argument): **no silent-wrong row is open.** **Next, in order:** the 21 loud
 > rows (ld34, ld37), then the rest of the binaryang items. The next release is MAJOR (3.0.0) and
 > waits on the owner's word.
 >
@@ -162,9 +163,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   open loud** (2026-10-13: L4 closed sw64, ld29–ld31; 2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
   wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33; earlier the same day
   sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 and friends).
-  - Open silent (2026-10-13, after sw66 + sw67): sw68 (a nested console.log inside a gathered
-    argument overwrites the outer line). sw69, sw70 FIXED 2026-10-13.
-  - NEXT: sw68, the 21 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
+  - Open silent: NONE (2026-10-13: sw68, sw69, sw70 fixed).
+  - NEXT: the 21 loud rows, then Phase 0b audit round 2. The owner's order (2026-10-09): these
     compiler bugs BEFORE the binaryang 1.10.0 items below.
   - Nullable gaps left by sw51's option A (no corpus use; design-decisions.md § "Nullable FIELDS
     carry a flag word"): class-embedded tuple destructuring, union-variant / `Record` fields,

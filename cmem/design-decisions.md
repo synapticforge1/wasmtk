@@ -557,6 +557,18 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
   Do NOT revert to `i32.and`/`i32.or` emission. The table entries stay (they drive operator
   *detection*); only emission changed. `switch` on `f64`/`number` must use `f64.eq`/`f64.const`.
 
+## console.log evaluates its arguments BEFORE it builds the line (sw68, 2026-10-13)
+
+The line is built in shared state: the cursor at `iovBase + 4`, `$__cbuf`, the fixed scratch,
+the iov area. A nested console.log reached through an argument writes the same state. So when
+any argument calls a user function or makes an indirect call, `hoistCallingArgs` evaluates every
+expression argument, left to right, into a `$__clt_<type>_<n>` temporary first (a string-returning
+call runs, then its `$__str_ret_*` pair is captured), and the line is built from temporaries.
+Variables are not captured: a callee cannot change this function's locals. The rule is
+deliberately "any user call", not "a call that prints": helpers share the scratch area too, and
+`-Oz` folds the temporaries. Every function emitter must declare the temporaries it finds
+(`consoleTempLocals`; `_start` does the same); a new emitter that skips it gets an invalid module.
+
 ## The compile-error report (owner decision D6, built 2026-10-13)
 
 "We should show compile time notes when issues that stop the compile are thrown." When `wasic` or
