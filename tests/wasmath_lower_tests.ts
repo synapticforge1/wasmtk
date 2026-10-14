@@ -116,7 +116,9 @@ const runProgram = async (file: string, src: string) => {
   const nat = await run("deno", ["run", "-A", file]);
   const c = await run("wasmtk", ["wasic", file], 120_000);
   if (c.code !== 0) {
-    const why = (c.out + c.err).split("\n").find((l) => /⚠️|❌|HANG/.test(l))?.trim() ?? `exit ${c.code}`;
+    const lines = (c.out + c.err).split("\n"); // the first `error[code]: …` headline (D6) first
+    const why = (lines.find((l) => /^error\[/.test(l)) ?? lines.find((l) => /⚠️|❌|HANG/.test(l)))?.trim() ??
+      `exit ${c.code}`;
     return { nat, wasm: null, compileError: why.slice(0, 120) };
   }
   const wasm = await run("wasmtk", ["run", file.replace(/\.ts$/, ".wasm")]);

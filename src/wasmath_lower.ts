@@ -31,9 +31,25 @@
  *  the two can never agree. The program states which one it means with wasMath; running it under
  *  Deno is unchanged. Both emitters (wasic's emitExpr and `/=`, console_log's exprToWat) raise it. */
 export function intDivisionDiagnostic(expr: string): string {
-  return `integer division '${expr.trim().slice(0, 60)}': TypeScript gives a fraction (7 / 2 is 3.5) ` +
-    `but wasm truncates (3). Say which you mean with wasMath: i32.div(a, b) for the truncated ` +
-    `quotient, f64.div(a, b) for the fraction`;
+  // The help names the program's own operands: split at the last top-level `/` (or `/=`).
+  const e = expr.trim();
+  let a = "a", b = "b", depth = 0;
+  for (let i = e.length - 1; i >= 0; i--) {
+    const c = e[i];
+    if (c === ")" || c === "]") depth++;
+    else if (c === "(" || c === "[") depth--;
+    else if (c === "/" && depth === 0) {
+      a = e.slice(0, i).trim();
+      b = e.slice(e[i + 1] === "=" ? i + 2 : i + 1).trim();
+      break;
+    }
+  }
+  // (The D6 report reads the lines after the first as notes.)
+  return `integer division '${e.slice(0, 60)}'\n` +
+    `TypeScript: divides as floats (7 / 2 is 3.5)\n` +
+    `wasm: i32.div_s truncates (7 / 2 is 3)\n` +
+    `help: say which with wasMath: i32.div(${a}, ${b}) for the truncated quotient, ` +
+    `f64.div(${a}, ${b}) for the fraction`;
 }
 
 /** The diagnostic for a float stored into a declared integer (owner decision D3, 2026-10-13):
@@ -41,9 +57,11 @@ export function intDivisionDiagnostic(expr: string): string {
  *  so the program says which conversion it means. Raised by wasic's `checkImplicitTrunc` and its
  *  `as i32` / `as i64` cast. */
 export function implicitTruncDiagnostic(stmt: string, where: string): string {
-  return `float stored as an integer in '${stmt.trim().slice(0, 60)}' (${where}): TypeScript keeps ` +
-    `the float, wasm needs an integer. Say which conversion with wasMath: f64.toI32(x) truncates ` +
-    `and stops on NaN or out of range, f64.toI32Sat(x) clamps, f64.toI32Wrap(x) (or x | 0) wraps`;
+  return `float stored as an integer in '${stmt.trim().slice(0, 60)}' (${where})\n` +
+    `TypeScript: keeps the float as it is\n` +
+    `wasm: needs an integer, and which conversion is the program's to say\n` +
+    `help: with wasMath: f64.toI32(x) truncates and stops on NaN or out of range, ` +
+    `f64.toI32Sat(x) clamps, f64.toI32Wrap(x) (or x | 0) wraps`;
 }
 
 /** True for an import specifier that names the wasMath module. */

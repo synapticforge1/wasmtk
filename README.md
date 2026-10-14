@@ -67,7 +67,7 @@ const a: f64 = f64.acosh(2);             // 1.3169578969248168 in both (correctl
   compiled). Use `f64.sin` when the two must agree.
 - **Checked:** every function with a WebAssembly instruction (151) matches that instruction,
   bit for bit, on 69,318 test calls; and every function (199), called from real programs compiled
-  by `wasmtk wasic` (34,626 calls), prints the same as Deno. `sin` / `cos` / `tan` are correctly
+  by `wasmtk wasic` (34,846 calls), prints the same as Deno. `sin` / `cos` / `tan` are correctly
   rounded across the whole double range, huge arguments included.
 - **`u64`** values print unsigned in wasm as in Deno (`18446744073709551615n`), for variables,
   parameters and results declared `u64`. **Not yet:** a `u64` struct field or array element
@@ -75,6 +75,36 @@ const a: f64 = f64.acosh(2);             // 1.3169578969248168 in both (correctl
 
 Plain operators on declared types keep working as before (`a + b` on two `i32`s is an `i32.add`);
 `wasMath` is how you make Deno agree with that.
+
+### When `wasic` or `modc` refuses a program
+
+Every error says what it is, where it is in your own file, and how to fix it, and nothing is
+written:
+
+```
+error[int-division]: integer division 'total / count'
+  --> app.ts:4:11
+   |
+4  |   return (total / count) | 0;
+   |           ^^^^^^^^^^^^^
+   = TypeScript: divides as floats (7 / 2 is 3.5)
+   = wasm: i32.div_s truncates (7 / 2 is 3)
+   = help: say which with wasMath: i32.div(total, count) for the truncated quotient, f64.div(total, count) for the fraction
+
+❌ wasic: 1 error in app.ts; no .wasm was written.
+```
+
+| code | meaning |
+| --- | --- |
+| `int-division` | a plain `/` between integers |
+| `float-to-int` | a float stored into an integer, or `x as i32` on a float |
+| `untyped-declaration` | a `let` / `const` / `var` without a type |
+| `loop-counter` | a `for` counter that could become a fraction |
+| `bigint-in-math` | a `bigint` passed to `Math.*` (a `TypeError` in JavaScript) |
+| `bigint-unsigned-shift` | `>>>` on a `bigint` (a `TypeError` in JavaScript) |
+| `undefined-name` | a call to something never declared |
+| `console-argument` | a `console.log` argument wasic cannot print yet |
+| `unsupported` | a TypeScript feature outside wasic's static subset (the report then suggests `wasmtk dync`) |
 
 ## 🌟 Why wasmtk?
 

@@ -50,27 +50,31 @@ async function run(args: string[], cwd: string): Promise<{ code: number; text: s
 
 const H = "type i32 = number;\ntype f64 = number;\n";
 
-// [name, source, expected diagnostic fragment]. The source is ONE fault, so the fragment is its cause.
-const REFUSED: [string, string, string][] = [
+// [name, source, expected fragment(s)]. The source is ONE fault, so the fragments are its cause and,
+// since the D6 report (2026-10-13), where it is: `--> <file>:<line>:<col>` in the file as written
+// (the header H is lines 1–2, so the body starts on line 3).
+const at = (name: string, line: number, col = 1) =>
+  `--> r_${name.replace(/\W+/g, "_")}.ts:${line}:${col}`;
+const REFUSED: [string, string, string | string[]][] = [
   [
     "untyped number",
     `let a = 100000;\nconsole.log(a);`,
-    "Declaration needs a type (line 3): 'let a = 100000;'",
+    ["error[untyped-declaration]: Declaration needs a type: 'let a = 100000;'", at("untyped number", 3)],
   ],
   [
     "untyped string",
     `const s = "hi";\nconsole.log(s);`,
-    "Declaration needs a type (line 3): 'const s = \"hi\";'",
+    ["Declaration needs a type: 'const s = \"hi\";'", at("untyped string", 3)],
   ],
   [
     "untyped new",
     `const m = new Map<string, i32>();\nconsole.log(m.size);`,
-    "Declaration needs a type (line 3)",
+    ["Declaration needs a type", at("untyped new", 3)],
   ],
   [
     "untyped call result",
     `function f(): i32 { return 1; }\nconst v = f();\nconsole.log(v);`,
-    "Declaration needs a type (line 4): 'const v = f();'",
+    ["Declaration needs a type: 'const v = f();'", at("untyped call result", 4)],
   ],
   [
     "untyped array pattern",
@@ -85,12 +89,12 @@ const REFUSED: [string, string, string][] = [
   [
     "arrow without return type",
     `const k: i32 = 3;\nconst f = (x: i32) => x + k;\nconsole.log(f(1));`,
-    "Declaration needs a type (line 4)",
+    ["Declaration needs a type", at("arrow without return type", 4)],
   ],
   [
     "arrow with untyped param",
     `const g = (x): i32 => x;\nconsole.log(g(1));`,
-    "Declaration needs a type (line 3)",
+    ["Declaration needs a type", at("arrow with untyped param", 3)],
   ],
   [
     "counter starts fractional",
@@ -139,7 +143,24 @@ const REFUSED: [string, string, string][] = [
   [
     "line number counts a block comment",
     `/**\n * four\n * lines\n */\nconst ok: i32 = 1;\nlet n = 5; // the fault\nconsole.log(ok + n);`,
-    "Declaration needs a type (line 8): 'let n = 5;'",
+    ["Declaration needs a type: 'let n = 5;'", at("line number counts a block comment", 8)],
+  ],
+  [
+    // the off-by-one D6 fixed: an import the bundler drops must not shift the line
+    "line number after a wasMath import",
+    `import { i32 } from "${new URL("../src/wasmath.ts", import.meta.url).href}";\nconst ok: i32 = 1;\nlet n = 5;\nconsole.log(ok + n);`,
+    ["Declaration needs a type: 'let n = 5;'", at("line number after a wasMath import", 3)],
+  ],
+  [
+    "the report: notes and a column inside the line",
+    `function avg(t: i32, c: i32): i32 {\n  return (t / c) | 0;\n}\nconsole.log(avg(7, 2));`,
+    [
+      "error[int-division]: integer division 't / c'",
+      at("the report: notes and a column inside the line", 4, 11),
+      "= TypeScript: divides as floats",
+      "= help: say which with wasMath: i32.div(t, c)",
+      "1 error in r_the_report_notes_and_a_column_inside_the_line.ts; no .wasm was written.",
+    ],
   ],
 ];
 
@@ -239,8 +260,8 @@ try {
     const r = await run(["wasic", file], dir);
     ok(
       `${name}`,
-      r.code !== 0 && r.text.includes(frag),
-      `    exit ${r.code}; wanted: ${frag}\n${r.text}`,
+      r.code !== 0 && [frag].flat().every((f) => r.text.includes(f)),
+      `    exit ${r.code}; wanted: ${[frag].flat().join(" + ")}\n${r.text}`,
     );
   }
   console.log("\n  accepted, and correct when run:");

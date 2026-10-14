@@ -94,6 +94,9 @@ export interface BundleResult {
   source: string;
   /** .wasm imports discovered during bundling, in discovery order. */
   wasmImports: WasmImportEntry[];
+  /** The TypeScript files read, entry first (real paths): where a compile error is located
+   *  (D6, 2026-10-13). */
+  files?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +706,11 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
     [...result.source.matchAll(/\b__wm_f32_(\w+)\b/g)].map((m) => m[1]).filter((m) => m in WM_F32_TS),
   );
   const helpers = [...f32Used].map((m) => WM_F32_TS[m]).join("\n");
-  return { source: helpers ? `${result.source}\n${helpers}\n` : result.source, wasmImports };
+  return {
+    source: helpers ? `${result.source}\n${helpers}\n` : result.source,
+    wasmImports,
+    files: [...visited],
+  };
 }
 
 /**

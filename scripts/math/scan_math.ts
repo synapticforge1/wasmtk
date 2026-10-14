@@ -50,7 +50,7 @@ for (const [name, exprs] of progs) {
   const nat = await run("deno", ["run", file]);
   const c = await run("wasmtk", ["wasic", file]);
   if (c.code !== 0) {
-    const why = (c.out + c.err).split("\n").find((l) => /⚠️|❌/.test(l))?.trim().slice(0, 90) ?? "";
+    const why = (c.out + c.err).split("\n").find((l) => /^error\[|⚠️|❌/.test(l))?.trim().slice(0, 90) ?? "";
     rows.push(`${name}\tCOMPILE-FAIL\t${why}`);
     continue;
   }
