@@ -11,8 +11,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > 1.11.0). `go_asyncify_tests` **9 → 11 / 12**: binaryang's Flatten fix holds; the NESTED goroutine
 > program now builds but TRAPS (`uninitialized element` during a rewind into `$main.main$1`), while
 > upstream `wasm-opt` 133 `--asyncify` on the same bytes runs it: a second binaryang Asyncify bug.
-> Reproducer `scripts/repros/tinygo043_nested_pre_asyncify.wasm`; letter **DRAFT** in
-> `scripts/binaryang-report.md`, for the owner to send. The gate carries nested as KNOWN (11 / 12).
+> Reproducer `scripts/repros/tinygo043_nested_pre_asyncify.wasm`; letter **SENT 2026-10-13**
+> (owner; `scripts/binaryang-report.md`); awaiting binaryang's reply. The gate carries nested as KNOWN (11 / 12).
 > The new optimizer also broke two merge assumptions, fixed with the bump (design-decisions.md §
 > "Merge (wasmmerge) invariants"): block types printed by index, and `$__malloc` inlined away
 > (a wasic library now exports `__heap_ptr`).
