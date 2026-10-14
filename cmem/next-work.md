@@ -19,8 +19,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > `scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm`. **binaryang replied the same day: fixed
 > on their main (their analysis did not stop propagation at the bottom-most runtime, as
 > upstream's does), UNRELEASED; it ships in 1.11.0, their owner's timing.** Our reply with
-> upstream's `asyncify-verbose` set (25 functions; `…paniccatch` not instrumented) is DRAFTED in
-> `scripts/binaryang-report.md` for the owner to send. On 1.11.0: bump the pin (a binaryang bump
+> upstream's `asyncify-verbose` set (25 functions; `…paniccatch` not instrumented) was SENT
+> 2026-10-13 (`scripts/binaryang-report.md`). On 1.11.0: bump the pin (a binaryang bump
 > is a full gate; the optimizer moves too), re-run `go_asyncify_tests`, send binaryang the count. **Owner, 2026-10-13:
 > wait for binaryang** (no workaround in wasmtk): `go_asyncify_tests` 9 / 12 is EXPECTED on this
 > machine until binaryang's fix and a pin bump; the gate treats those 3 as known, any other change
