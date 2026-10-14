@@ -11,9 +11,13 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > 1.27.2 + TinyGo 0.43.0 (testing.md records Go 1.26.7 + TinyGo 0.41.1 green, and that TinyGo 0.42
 > was the first to support Go 1.27). `go_asyncify_tests` 9 / 12: WaitGroup+Mutex, pipeline and
 > nested fail in the in-house asyncify step, `Flatten: unresolved call target
-> "$asyncify_stop_unwind"`; identical on `main`. To do: find what TinyGo 0.43 emits differently
-> around `asyncify_*` (an import now, a renamed / removed export?), fix the in-house path, re-run
-> all three Go suites; update the recorded toolchain pair.
+> "$asyncify_stop_unwind"`; identical on `main`. **Diagnosed the same day: a binaryang bug.**
+> TinyGo 0.43 still imports the four `asyncify.*` functions, but now also calls `stop_unwind` from
+> a new panic-catch wrapper (`…asyncifysuspendcatch.0.paniccatch`). binaryang's `Asyncify` fails on
+> it in 1.8.1 AND 1.10.0; upstream binaryen.js 123 succeeds and the result runs (`wg-counter: 45`).
+> Report DRAFTED in `scripts/binaryang-report.md` (2026-10-13), reproducer
+> `scripts/repros/tinygo043_waitgroup_pre_asyncify.wasm`; the owner sends it. Meanwhile, owner's
+> call: pin TinyGo 0.41.1 for the gate, or upstream binaryen.js for this one pass.
 >
 > **2026-10-13: wasMath L4 DONE** (ld29, ld30, ld31, sw64, the u64 printer; wasm-number-types.md).
 > **Next, in order:** the D3 refusal and the D6 report (both below), sw62 (console line
