@@ -47,7 +47,7 @@ pin."* The premature `-Oz` skip removal on 2026-08-25 is what that sentence is p
 `git config --global --add safe.directory <abs-path-to>/upstream/binaryang`. The symptom is a silent
 `unknown` where `upstream:link` should print the checkout revision.
 
-## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, and 1.8.1 → 1.12.0)
+## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, and 1.12.0 → 1.12.1)
 
 Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full text before the
 2026-09-30 rewrite: `git show ab5d1273644:cmem/next-work.md`). Each step has cost time when skipped.
@@ -230,7 +230,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 #    go_bindgen go_merge go_asyncify
 
 # 4. wast_tests   → expect 288 files / 64506 assertions / 0 failures / 16 skipped / 0 unrunnable, "of which 33 passed on 23 module(s) lowered"
-#    (as of 2026-09-30, binaryang 1.8.1; unchanged on 1.12.0, 2026-10-13) → "✅ ALL CLEAN". Should a known failure ever be pinned
+#    (as of 2026-09-30, binaryang 1.8.1; unchanged on 1.12.0, 2026-10-13, and 1.12.1, 2026-10-15) → "✅ ALL CLEAN". Should a known failure ever be pinned
 #    again, "✅ ON BASELINE — N known failure(s) still standing" is the pass condition.
 #    The known failures print in red every run by design; the gate fails only if a count MOVES.
 
