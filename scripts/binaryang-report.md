@@ -8,6 +8,21 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## SENT 2026-10-15 — 2026-10-15: 1.12.1 pinned; `go_asyncify` 12 / 12
+
+**Short version:** we bumped wasmtk's pin from 1.12.0 to **1.12.1** and ran the full gate. Your
+rewind fix holds: the NESTED goroutine program (`scripts/repros/tinygo043_nested_pre_asyncify.wasm`,
+TinyGo 0.43.0, Go 1.27.2) now prints `nested-sum: 36` through our in-house asyncify path, and
+`go_asyncify_tests` is **12 / 12** (from 11). Nothing in wasmtk is carried as known-failing any
+more.
+
+Predicted from your changelog (Asyncify only): that one count moves, nothing else. It held
+exactly: wasi 458 / 458, golden-WAT 515 byte-identical (nothing re-recorded, so the optimizer's
+output did not move on any of them), wast 64,506 / 0 / 16, the five-engine cross-check on its
+baseline, the `-Oz` try_table guard 42 / 42, and every other suite at its previous count.
+
+Thank you for both fixes. Nothing of ours is open with you on Asyncify.
+
 ## SENT 2026-10-13 — 2026-10-13: 1.12.0 pinned; `go_asyncify` 9 → 11 / 12; a second Asyncify case (measured)
 
 > **Your reply (2026-10-13):** reproduced on our bytes. The cause was the SAVE SET, not the

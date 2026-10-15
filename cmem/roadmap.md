@@ -181,8 +181,8 @@
     `9_LocalArrayShadowsModule`. No silent-wrong compiler row is open after it.
 32. **Backend → binaryang 1.12.0 (2026-10-13; 1.11.0 skipped).** Its optimizer broke two merge
     assumptions, fixed (block types by index; `$__malloc` inlined — a wasic library now EXPORTS
-    `__heap_ptr`, additive). `go_asyncify` 11 / 12: the nested case waits on binaryang's next
-    release (polyglot-producers.md).
+    `__heap_ptr`, additive). **Then 1.12.1 (2026-10-15)**: TinyGo 0.43's nested goroutines run
+    (binaryang's Asyncify fix); `go_asyncify` 12 / 12 (polyglot-producers.md).
 33. **Additive API:** `./console_log` exports `arrInspectKind`, `consoleTempLocals`;
     `./tsbundler`'s `BundleResult.files` (D6).
 

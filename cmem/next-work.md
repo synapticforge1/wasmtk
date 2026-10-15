@@ -7,6 +7,12 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **2026-10-15: binaryang PINNED at 1.12.1** (from 1.12.0; its one change restores a paused
+> call's operands on an Asyncify rewind). **`go_asyncify_tests` 12 / 12**: the nested goroutine
+> program runs; nothing is KNOWN-failing any more. Full gate green, every other number unchanged
+> (testing.md). Reply with the count SENT 2026-10-15 (owner; `scripts/binaryang-report.md`).
+> Next, unchanged: the 21 loud rows.
+>
 > **PAUSED 2026-10-13, end of day (owner).** `main` is clean and green on binaryang 1.12.0 (wasi
 > 458/458, golden 515, wast 64,506 / 0 / 16; `go_asyncify` 11 / 12 KNOWN). **No silent-wrong row is
 > open.** Resume with: the 21 loud rows (compiler-bugs.md; ld34 a float index into a string in
@@ -139,8 +145,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     policy section, which is the owner's to trim.
   - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
 - ⏳ **Wasm types in TypeScript** (wasm-math-plan.md). **All decisions D1–D6 settled 2026-10-09**
-  (owner): integer `/` is a compile error (built); D3, refuse an implicit f64 → i32 (NOT built);
-  D6, a located compile-error report (NOT built); both planned in the note at the top. Before that: the owner
+  (owner): integer `/` is a compile error (built); D3, refuse an implicit f64 → i32 (BUILT
+  2026-10-13); D6, a located compile-error report (BUILT 2026-10-13); both recorded in the note at
+  the top and in design-decisions.md. Before that: the owner
   ruled (2026-09-30): the declared
   type decides; `i32 / i32` truncates; an explicit `f64` destination or a `Math` argument divides
   as floats. **Phase 1 DONE 2026-10-06** (sw38–sw40, ld15, ld04). Phase 2 (sw36, sw37), Phase 3
@@ -168,8 +175,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
     (ld29, ld30, ld31, sw64, u64 printed unsigned). The library's track is complete; its one known
     gap (an out-of-range f64 into an `i32.*` argument trapped) is CLOSED by D3 (2026-10-13): a
     float into a wasMath integer parameter is now a compile error.
-- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **1 open silent-wrong (sw62), 19
-  open loud** (2026-10-13: L4 closed sw64, ld29–ld31; 2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
+- ⏳ **H12 compiler bugs** (compiler-bugs.md, the round-1 table): **0 open silent-wrong, 21 open
+  loud** (2026-10-13: sw62, sw66–sw70 fixed; ld34, ld37 found; L4 closed sw64, ld29–ld31; 2026-10-09, night: sw36, sw37 closed by the owner's division decision; before that,
   wasMath L3: the `Math` rows sw57–sw61, sw63 and loud ld27, ld28, ld33; earlier the same day
   sw06–sw09, sw19, sw28, sw48, sw49, sw51–sw53 and friends).
   - Open silent: NONE (2026-10-13: sw68, sw69, sw70 fixed).
@@ -291,9 +298,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
     SENT 2026-10-06; binaryang's response is above. Nothing of ours is open on it; they build next.
 
-- **H10** (generated opcode / feature tables) waits on **H9**: binaryang 1.8.1 exports no
-  `./definitions`. Our exact request (D2 + D3 first, then D1; field lists; a pinned subpath) was
-  SENT 2026-09-30, and is in `scripts/binaryang-report.md`.
+- ~~**H10** waits on **H9**~~: UNBLOCKED. binaryang 1.9.0 published `./definitions` (D1, D2, D3;
+  § "binaryang caught up" above), and our pin (1.12.x) carries it. H10 is ours to start, after the
+  compiler bugs (the owner's order, 2026-10-09). Our original request (SENT 2026-09-30) is in
+  `scripts/binaryang-report.md`.
 - **H4 and H11** are answered here (H4 re-verified item by item 2026-09-30); the workspace closes
   them in `../cmem/handoffs.md`.
 - **binaryang: nothing of ours is open.** Every report and reply is marked SENT in

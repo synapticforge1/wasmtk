@@ -112,8 +112,18 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-13, binaryang **1.12.0**; latest release v2.0.3)
+## Current pass counts (2026-10-15, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-15, binaryang 1.12.0 → 1.12.1 pinned, gate GREEN, nothing known-failing.** Predicted
+> from the changelog (Asyncify only: operands restored on a rewind): `go_asyncify` 11 → 12, every
+> other number still. Held exactly: `go_asyncify_tests` **12 / 12** (nested prints
+> `nested-sum: 36`) · wasi **458/458** · golden-WAT **515, 0 diverged** (no re-record) · bindgen
+> 142 · bundle 4 · merge 1 · mod 55 · varscope 12 · jstyper 73 · dync 3 + 3 · typed_decl 40 ·
+> engine 11 · wast_runner 8 · wasmath 151 exact · wasmath_lower 199 exact · wasic_seam 10 · witgen
+> 23 · hybrid + guard 17 · go_bindgen 7 · go_merge 7 · wast 64,506 / 0 / 16 · engine cross-check
+> 1152 on baseline (87 pairs not in it: the `36_*` five plus the programs added since) · `-Oz`
+> guard 42 / 42.
+>
 > **2026-10-13, sw68 (arguments evaluated before the console line), gate green except the known
 > `go_asyncify_tests` 11 / 12. No silent-wrong row is open.** wasi **458/458**
 > (+`7e_ConsoleNestedLog`; the 198 programs whose WAT moved print exactly as before) · golden-WAT
