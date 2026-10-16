@@ -11,10 +11,14 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > the open list: the loud rows, audit round 2, the binaryang 1.10.0 items, H10, the nullable gaps).
 > Closed: sw26, sw30, sw31, ld01, ld03, ld05–ld09, ld11–ld13, ld19, ld20, ld22, ld23, ld34; found
 > and fixed sw72 (a function-typed declaration emitted nothing), sw73 (a function's local array
-> made a same-named top-level one read zeros), ld39, ld40. **Open now: 1 silent (sw71, an
-> out-of-range string index gives `""`), 7 loud: ld10, ld14, ld37 (left from the 21) and ld38
-> (`toFixed`), ld41, ld42, ld43 (found).** **For the owner:** `s[1.5]` gives `e` (JavaScript
-> `undefined`) under D3's index rule: keep, or refuse? **Next:** ld10, ld14, ld37, then items 2–5.
+> made a same-named top-level one read zeros), ld39, ld40. **Batch 2 (the same day): ld10, ld14,
+> ld37 closed, sw74 (a struct array printed addresses) and ld44 found and fixed: ALL 21 loud rows
+> of 2026-10-13 are closed.** **Open now: 1 silent (sw71, an out-of-range string index gives
+> `""`), 5 loud, all found 2026-10-15: ld38 (`toFixed`), ld41 (top-level 2D array in a function),
+> ld42 (top-level boolean in a function), ld43 (`(…).length` in console.log), ld45 (printing a
+> struct array).** **For the owner:** `s[1.5]` gives `e` (JavaScript `undefined`) under D3's index
+> rule: keep, or refuse? **Next:** items 2–5 (audit round 2, the binaryang 1.10.0 items, H10, the
+> nullable gaps).
 >
 > **2026-10-15: binaryang PINNED at 1.12.1** (from 1.12.0; its one change restores a paused
 > call's operands on an Asyncify rewind). **`go_asyncify_tests` 12 / 12**: the nested goroutine
