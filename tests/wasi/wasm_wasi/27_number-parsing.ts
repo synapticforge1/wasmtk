@@ -1,9 +1,13 @@
+// A string index is an integer (owner, 2026-10-15): the counters were `number`, so `s[i]` indexed
+// with a float, now a compile error.
+import { i32 } from "../../../src/wasmath.ts";
+
 function parseFloat_(s: string): number {
     let result: number = 0;
     let decimal: boolean = false;
     let factor: number = 0.1;
     let neg: boolean = false;
-    let i: number = 0;
+    let i: i32 = 0;
     if (s[0] === "-") { neg = true; i = 1; }
     for (; i < s.length; i++) {
         const c: string = s[i];
@@ -18,7 +22,7 @@ function parseFloat_(s: string): number {
 function parseInt_(s: string, base: number): number {
     let result: number = 0;
     const chars: string = "0123456789abcdef";
-    for (let i: number = 0; i < s.length; i++) {
+    for (let i: i32 = 0; i < s.length; i++) {
         const c: string = s[i].toLowerCase();
         const d: number = chars.indexOf(c);
         if (d < 0 || d >= base) return NaN;

@@ -41,6 +41,7 @@ export interface SourceFile {
 export type DiagnosticCode =
   | "int-division"
   | "float-to-int"
+  | "float-index"
   | "untyped-declaration"
   | "loop-counter"
   | "bigint-in-math"
@@ -65,6 +66,7 @@ export interface Located {
 export function classify(msg: string): DiagnosticCode {
   if (/^integer division /.test(msg)) return "int-division";
   if (/^float stored as an integer /.test(msg)) return "float-to-int";
+  if (/^float string index /.test(msg)) return "float-index";
   if (/^Declaration needs a type/.test(msg)) return "untyped-declaration";
   if (/^for-loop counter '/.test(msg)) return "loop-counter";
   if (/^Math\.\w+: a bigint argument/.test(msg)) return "bigint-in-math";
