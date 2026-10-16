@@ -7,6 +7,21 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **2026-10-15: Phase 0b audit round 2 DONE (item 2 of the owner's list)** — compiler-bugs.md §
+> "audit round 2". Four parallel auditors, every row RUN; repros in `scripts/phase0/round2/`.
+> **Found: 33 silent-wrong compiler bugs (sw76–sw108), 10 silent tool defects (sw109–sw118),
+> 34 loud compiler rows (ld47–ld80), 10 loud tool rows (ld81–ld90)**, and a grep-verified dead-code
+> list. **Proposed fix order** (silent first, the owner's standing order): (1) sw113, the CLI
+> overwriting its INPUT file (destructive); (2) sw109 / sw110 / sw112, merges and bundles that
+> mis-seat data or rename wrongly; (3) the compiler silent rows grouped by root: array / string
+> helper index normalisation (sw80–sw85, sw81, sw91, sw92), spread (sw77–sw79), string-array
+> paths (sw76, sw107), finally (sw106), block scoping (sw104, sw105), console unary / boolean /
+> pointer printing (sw96, sw98, sw102, sw103), then the rest; (4) the loud rows. **Owner's
+> questions:** sw95 (array out-of-range reads: refuse, or undefined like the string ruling?),
+> sw87 (a bare numeric `sort()`: implement string order, or refuse?), ld88 (`wast` exits 0 on
+> unbuilt modules: intended?), and i32 overflow wrapping (the contract?). Items 3–5 (the
+> binaryang 1.10.0 items, H10, the nullable gaps) wait behind this unless the owner reorders.
+>
 > **2026-10-15: H12 loud rows, batch 1 DONE** (compiler-bugs.md; the owner asked for items 1–5 of
 > the open list: the loud rows, audit round 2, the binaryang 1.10.0 items, H10, the nullable gaps).
 > Closed: sw26, sw30, sw31, ld01, ld03, ld05–ld09, ld11–ld13, ld19, ld20, ld22, ld23, ld34; found
