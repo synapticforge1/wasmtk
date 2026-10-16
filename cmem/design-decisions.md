@@ -373,6 +373,18 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     integer parameter (it passed the f64 RAW before: ld35). One message for all,
     `implicitTruncDiagnostic` (`src/wasmath_lower.ts`). The trunc convention above remains for the
     kept cases only.
+  - **A STRING index is an integer (owner, 2026-10-15; narrows D3's "kept" list for `s[i]`).**
+    `s[pos]` with a float `pos` is a compile error, `error[float-index]`
+    (`floatStringIndexDiagnostic`, naming `f64.toI32(pos)` or an `i32` index): JavaScript gives
+    `undefined` for a fractional index and wasm would truncate it, and a run-time value cannot be
+    told fractional at compile time, so the owner chose "refuse float index" over a run-time check.
+    Judged by the EMITTED index (`checkStringIndex`: truncated at i32 = a float), at every string
+    subscript (declaration, value, concat, the `s[i] === "c"` fast path). Array indices, `charAt`,
+    `indexOf(x, pos)`, `splice` keep D3's conversion. **An out-of-range `s[i]` is `undefined`**, as
+    JavaScript: `$__str_index` returns a static "undefined" text (printed / concatenated as
+    JavaScript does), and a string compared with `undefined` / `null` calls `$__str_is_nullish`
+    (no text, or that marker). Edges kept, documented in sw71: `.length` of it is 9, and it equals
+    the string "undefined". `charAt` out of range stays `""`. 3 corpus programs migrated.
   - **An f32 is converted at every f32 boundary, by ONE rule** (2026-10-06, ld18 / sw43):
     `emitExpr` wraps the emitter, reads the emitted WAT's result type from its outermost form
     (`watResultType`) and converts when exactly one side is f32. A new leaf path need not know
