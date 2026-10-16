@@ -114,6 +114,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-15, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-15, H12 loud rows batch 2 (ld10, ld14, ld37; sw74, ld44 found and fixed), gate GREEN.**
+> wasi **466/466** (+`7h_ConsoleWholeArrays`, `9b_InlineStructArrays`) · golden-WAT **523**, 7 moved
+> entries checked function by function (`golden_diff.ts` with `BY_FUNC=1`): only `$__arr_elem_str`
+> / `$__arr_inspect` grew (+106 lines), failed compiles 6 · wast 64,506 / 0 / 16 · engine
+> cross-check 1152 on baseline (111 not in it) · go 7 / 7 / 12 · api-surface re-baselined
+> (`./console_log` `ArrayLookup` gained an optional `structTypeName`; a review was refused as not a
+> change since v2.0.3; the floor since v2.0.3 was already MAJOR).
+>
 > **2026-10-15, H12 loud rows batch 1 (18 rows closed; sw72, sw73 found and fixed), gate GREEN.**
 > wasi **464/464** (+6: `7f_ConsoleStringIndex`, `7g_ConsoleConcatAndCompare`,
 > `11c_StringBuildingChains`, `6d_Array2DAliases`, `9_ArrayLiteralArgsAndTuples`,

@@ -192,7 +192,10 @@
     from a ternary. Two silent fixes: sw72 (a function-typed declaration emitted nothing), sw73 (a
     local array shadowing a top-level one zeroed it). No API change. README rows under 5e, 5f, 5h,
     6d, 7b, 11, 23. Tests `7f`, `7g`, `11c`, `6d_Array2DAliases`, `9_ArrayLiteralArgsAndTuples`,
-    `5h_ClosureFieldsAndReturns`.
+    `5h_ClosureFieldsAndReturns`. **Batch 2:** whole string / boolean / bigint arrays print in
+    console.log; top-level `Array<{ … }>` arrays work; a whole struct array, which printed its
+    element addresses (sw74), is refused. `./console_log`'s `ArrayLookup` gained an optional
+    `structTypeName` (additive). Tests `7h_ConsoleWholeArrays`, `9b_InlineStructArrays`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
