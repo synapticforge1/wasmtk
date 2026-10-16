@@ -185,6 +185,14 @@
     (binaryang's Asyncify fix); `go_asyncify` 12 / 12 (polyglot-producers.md).
 33. **Additive API:** `./console_log` exports `arrInspectKind`, `consoleTempLocals`;
     `./tsbundler`'s `BundleResult.files` (D6).
+34. **H12 loud rows, batch 1 (2026-10-15).** Programs that were refused now compile: string
+    indexing, parenthesised operands, string comparisons and boolean equalities in console.log;
+    `s + n + 1`, `x.toString()`; 2D arrays from a name, call or parameter; closures stored in a
+    returned object by name; returned block arrows; tuples from a ternary; function-typed variables
+    from a ternary. Two silent fixes: sw72 (a function-typed declaration emitted nothing), sw73 (a
+    local array shadowing a top-level one zeroed it). No API change. README rows under 5e, 5f, 5h,
+    6d, 7b, 11, 23. Tests `7f`, `7g`, `11c`, `6d_Array2DAliases`, `9_ArrayLiteralArgsAndTuples`,
+    `5h_ClosureFieldsAndReturns`.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
