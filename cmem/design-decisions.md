@@ -1139,6 +1139,12 @@ silently break (all `src/wasic.ts`):
       bytes, because `wasmValidate` pools decode and validation errors; (2) every module the spec
       asserts VALID is validated too, and the gate FAILS if binaryang rejects one
       (`validatorRejectedValid`). Take `allFeatures` from binaryang, never a hand-written list (H10).
+      The verdict is `r.result`, not `r.errors`. **Through 1.12.1 the two could disagree**
+      (binaryang's letter, 2026-10-15): `result` was `Ok` with an error in `errors` for a block type
+      naming a non-function type. For us that could only turn a pass into a SKIP; it could not
+      manufacture one, and the guard was not affected. Fixed in binaryang's release after 1.12.1
+      (`result` is `Error` whenever an error-level diagnostic exists). On that bump, expect
+      `assert_invalid` passes up and skips down, and explain each moved file.
     - **Custom-page-sizes LOWERING in the wast runner (2026-09-30)**, `binaryenLowerCustomPageSizes`
       in `src/binaryen.ts`, driven by `WastOptions.lowerCustomPageSizes` in `src/wast.ts`. Four
       rules, each tested in `tests/wast_runner_tests.ts` and inversion-checked: (1) **gate-only**,
