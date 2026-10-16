@@ -64,6 +64,17 @@ export function implicitTruncDiagnostic(stmt: string, where: string): string {
     `f64.toI32Sat(x) clamps, f64.toI32Wrap(x) (or x | 0) wraps`;
 }
 
+/** The diagnostic for a FLOAT index into a string, `s[pos]` with `pos: f64` (owner, 2026-10-15,
+ *  narrowing D3's "indices keep the conversion" for strings): JavaScript gives `undefined` for a
+ *  fractional index and wasm would truncate it, so the index must be an integer. */
+export function floatStringIndexDiagnostic(expr: string, idx: string): string {
+  return `float string index '${expr.trim().slice(0, 60)}'\n` +
+    `TypeScript: a fractional index (s[1.5]) gives undefined\n` +
+    `wasm: the index would be truncated (s[1.5] would be s[1])\n` +
+    `help: index with an integer: declare '${idx.trim().slice(0, 30)}' as i32, ` +
+    `or convert it with wasMath's f64.toI32(${idx.trim().slice(0, 30)})`;
+}
+
 /** True for an import specifier that names the wasMath module. */
 export function isWasMathSpecifier(spec: string): boolean {
   return /(^|[/:])wasMath$/.test(spec) || /(^|[/])wasmath\.ts$/i.test(spec);

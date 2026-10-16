@@ -1332,11 +1332,12 @@ function parseSingleArg(
   // Receiver may be a var, string literal ("12".padStart), or a call (toFixed(..).padStart) — the
   // resolver delegates to emitStringPtrLen and returns undefined for anything it can't resolve, so a
   // permissive receiver pattern is safe (non-string tokens fall through to the handlers below).
-  if (
-    _stringExprResolver &&
-    /^.+\.(toUpperCase|toLowerCase|trim|trimStart|trimEnd|trimLeft|trimRight|slice|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat|toString)\s*\(/
-      .test(token)
-  ) {
+  // The WHOLE argument must be that one call: `s.charAt(i) === ""` started like one and printed
+  // the comparison as a number, `1` (sw75, 2026-10-15; the same on main).
+  const strMethodWhole = token.match(
+    /^.+\.(toUpperCase|toLowerCase|trim|trimStart|trimEnd|trimLeft|trimRight|slice|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat|toString)\s*\(([\s\S]*)\)$/,
+  );
+  if (_stringExprResolver && strMethodWhole && parenDepthNeverNegative(strMethodWhole[2]!)) {
     const r = _stringExprResolver(token, locals);
     if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
   }
@@ -3118,6 +3119,13 @@ function exprToWat(
     const rStr = looksLikeString(strRhs, locals, arrayLookup);
     const isEquality = !/^[<>]/.test(strOp);
     if (isEquality ? !lStr && !rStr : !(lStr && rStr)) break;
+    // A string against `undefined` / `null` is wasic's (`$__str_is_nullish`: no text, or an
+    // out-of-range `s[i]`'s "undefined", sw71); compared as text it was false.
+    if (isEquality && [strLhs, strRhs].some((x) => x === "undefined" || x === "null") && _exprFallbackResolver) {
+      const r = _exprFallbackResolver(expr, locals);
+      const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
+      if (widened !== null) return widened;
+    }
     // Helper: get ptr+len WAT for a string expression
     const getStrPL = (e: string): [string, string] => {
       if (/^\w+$/.test(e) && locals.get(e) === "string") {
