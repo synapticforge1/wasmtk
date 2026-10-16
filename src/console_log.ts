@@ -466,6 +466,10 @@ export function arrInspectKind(elemType: string): number | undefined {
   const t = elemType.trim().toLowerCase();
   if (t === "i32" || t === "int") return 0;
   if (t === "f64" || t === "number" || t === "u32") return 1;
+  // ld37 (2026-10-15): booleans, bigints and strings have writers too
+  if (t === "bool" || t === "boolean") return 8;
+  if (t === "i64" || t === "bigint") return 9;
+  if (t === "string") return 10;
   return undefined;
 }
 
@@ -558,6 +562,8 @@ export type ArrayLookup = (name: string) => {
   isStringArr?: boolean;
   /** Phase 6d: true when this is a 2D array (outer stores i32 row pointers). */
   is2D?: boolean;
+  /** The element struct of a struct array: its elements are pointers, never printed as numbers. */
+  structTypeName?: string;
 } | undefined;
 
 /**
@@ -664,6 +670,14 @@ function f32AsExpected(wat: string, from: string | undefined, to: string): strin
   if (to === "i32") return `(i32.trunc_f32_s ${wat})`;
   if (to === "i64") return `(i64.trunc_f32_s ${wat})`;
   return `(f64.promote_f32 ${wat})`;
+}
+
+/** A struct FIELD's load at the type asked: f32 as `f32AsExpected`, and a lossless widening
+ *  (`t.a` of an i32 field in an f64 sum, `t.a + t.b`, was a raw i32 under f64.add: found with
+ *  ld10, 2026-10-15). A lossy request keeps the raw load, as before. */
+function fieldAsExpected(wat: string, from: string | undefined, to: string): string {
+  if (from === "f32") return f32AsExpected(wat, from, to);
+  return (from && widenNumeric(wat, from, to)) ?? wat;
 }
 
 /** An f32 value at the f64 printer: promoted. Every producer of an `f64expr` segment whose
@@ -780,6 +794,18 @@ function looksLikeString(
   if (bm && arrayLookup) {
     const ai = arrayLookup(bm[1]);
     if (ai?.elemType === "string") return true; // string array element
+  }
+  return false;
+}
+
+/** Does `s` read an f64 / f32 struct FIELD (`t.b`, `qs[i].x`)? Such a field makes an i32-led sum a
+ *  float, as a float variable does (sw15): `t.a + t.b` was `i32.add` over an f64 (found with
+ *  ld10, 2026-10-15). */
+function hasFloatField(s: string, structLookup?: StructFieldLookup): boolean {
+  if (!structLookup) return false;
+  for (const m of s.matchAll(/(?<![\w.])(\w+(?:\[[^\]]*\])?)\.(\w+)\b(?!\s*\()/g)) {
+    const t = structLookup(m[1]!, m[2]!)?.type;
+    if (t === "f64" || t === "f32") return true;
   }
   return false;
 }
@@ -1134,14 +1160,16 @@ function parseSingleArg(
     // Every array has the [length, capacity] header; its pointer is built as `arr.join` builds it.
     const arrInfo = arrayLookup?.(token);
     if (arrInfo) {
-      const shown = arrInfo.elemType === "i64" ? "bigint" : arrInfo.elemType === "bool" ? "boolean" : arrInfo.elemType;
+      // A string array's elements are [ptr, len] pairs: the string writer (ld37, 2026-10-15).
+      const elemName = arrInfo.isStringArr ? "string" : arrInfo.elemType;
+      const shown = elemName === "i64" ? "bigint" : elemName === "bool" ? "boolean" : elemName;
       const what = arrInfo.is2D
         ? "2D array"
         : arrInfo.customLoadOp
         ? "typed array beside other arguments"
-        : arrInfo.isStringArr
-        ? "string[] array"
-        : arrInspectKind(arrInfo.elemType) === undefined
+        : arrInfo.structTypeName
+        ? "struct array" // its elements are pointers: printed as numbers they would be addresses
+        : arrInspectKind(elemName) === undefined
         ? `${shown}[] array`
         : undefined;
       if (what) {
@@ -1155,7 +1183,7 @@ function parseSingleArg(
         : (arrInfo.ptr === -1 || arrInfo.ptr === -2 || arrInfo.dynamic)
         ? `(local.get $${token})`
         : `(i32.const ${arrInfo.ptr})`;
-      return [{ kind: "arrptr" as const, wat, elemType: arrInfo.elemType }];
+      return [{ kind: "arrptr" as const, wat, elemType: elemName }];
     }
     // Module-level globals: emit global.get instead of local.get
     if (globals?.has(token)) {
@@ -2137,7 +2165,7 @@ function parseSingleArg(
   // An i32-led expression with a KNOWN float in it (`i + f`, `i * 0.5`) is a float (sw15's console
   // twin, 2026-10-06); printing an integral value as f64 gives the same text, so this is safe.
   const hasKnownFloat = [...token.matchAll(/(?<![\w.])(-?\d+\.\d*(?:[eE][+-]?\d+)?|[A-Za-z_]\w*)/g)]
-    .some((m) => isKnownFloat(m[1]!, locals, globals));
+    .some((m) => isKnownFloat(m[1]!, locals, globals)) || hasFloatField(token, structLookup);
   if ((leadType === "i32" || leadType === "bool") && !hasKnownFloat) {
     return [{
       kind: "i32expr",
@@ -2474,7 +2502,7 @@ function exprToWat(
   // Phase 23: tuple element access t[N] → struct field _N
   if (bracketM && structLookup && /^\d+$/.test(bracketM[2])) {
     const fi = structLookup(bracketM[1], `_${bracketM[2]}`);
-    if (fi) return f32AsExpected(fi.watLoad, fi.type, expectedType);
+    if (fi) return fieldAsExpected(fi.watLoad, fi.type, expectedType);
   }
   if (bracketM && arrayLookup) {
     const ai = arrayLookup(bracketM[1]);
@@ -2537,14 +2565,14 @@ function exprToWat(
   const sfDotM = expr.match(/^(\w+)\.(\w+)$/);
   if (sfDotM && structLookup) {
     const fi = structLookup(sfDotM[1], sfDotM[2]);
-    if (fi) return f32AsExpected(fi.watLoad, fi.type, expectedType); // ld18: f32 fields
+    if (fi) return fieldAsExpected(fi.watLoad, fi.type, expectedType); // ld18: f32 fields
   }
 
   // Phase 42: three-part chained struct field access: a.b.c
   const sfChainedDotM = expr.match(/^(\w+)\.(\w+)\.(\w+)$/);
   if (sfChainedDotM && structLookup) {
     const fi = structLookup(`${sfChainedDotM[1]}.${sfChainedDotM[2]}`, sfChainedDotM[3]);
-    if (fi) return f32AsExpected(fi.watLoad, fi.type, expectedType);
+    if (fi) return fieldAsExpected(fi.watLoad, fi.type, expectedType);
   }
 
   // Global isNaN(x) → f64.ne x x
@@ -3363,7 +3391,8 @@ function exprToWat(
       ? "i32"
       : effLhsType === "i64"
       ? "i64"
-      : (effLhsType === "i32" || effLhsType === "bool") && !isKnownFloat(rhs, locals, globals)
+      : (effLhsType === "i32" || effLhsType === "bool") && !isKnownFloat(rhs, locals, globals) &&
+          !hasFloatField(rhs, structLookup)
       ? "i32"
       : (effLhsType === "i32" || effLhsType === "bool")
       ? "f64"
@@ -4854,10 +4883,83 @@ export function getArrPrintHelperWat(): string {
   ;; per line. name_len is 0 for an array, else a typed array's name length: its opening is then
   ;; "Int32Array(3) [" (name, "(", the length's digits, ") [").
   ;; Element i's text, at dest; returns its length. kind is the element layout (arrInspectKind):
-  ;; 0 i32, 1 f64, 2 i8, 3 u8, 4 i16, 5 u16, 6 u32, 7 f32. An f64 -0 prints "-0", as inspect does.
+  ;; 0 i32, 1 f64, 2 i8, 3 u8, 4 i16, 5 u16, 6 u32, 7 f32, 8 boolean, 9 bigint (i64, with its n),
+  ;; 10 string (8-byte ptr,len pairs; quoted as inspect quotes: the first of " ' \` the text does not
+  ;; hold, else ", with \\ \\n \\t \\r \\b \\f \\v and \\xNN escapes; ld37). An f64 -0 prints "-0".
   (func $__arr_elem_str (param $arr i32) (param $i i32) (param $kind i32) (param $dest i32) (result i32)
     (local $v f64) (local $a i32)
+    (local $sp i32) (local $sl i32) (local $k i32) (local $ch i32) (local $has i32) (local $qc i32) (local $o i32)
     (local.set $a (i32.add (local.get $arr) (i32.const 8)))
+    (if (i32.eq (local.get $kind) (i32.const 8))
+      (then
+        (if (i32.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 2))))
+          (then (i32.store (local.get $dest) (i32.const 0x65757274)) (return (i32.const 4)))) ;; "true"
+        (i32.store (local.get $dest) (i32.const 0x736c6166)) ;; "fals"
+        (i32.store8 offset=4 (local.get $dest) (i32.const 101)) ;; "e"
+        (return (i32.const 5))))
+    (if (i32.eq (local.get $kind) (i32.const 9))
+      (then (return (call $__i64_to_str
+        (i64.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 3)))) (local.get $dest)))))
+    (if (i32.eq (local.get $kind) (i32.const 10))
+      (then
+        (local.set $sp (i32.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 3)))))
+        (local.set $sl (i32.load offset=4 (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 3)))))
+        ;; which quote characters the text holds: bit 0 ", bit 1 ', bit 2 \`
+        (block $s_done
+          (loop $scan
+            (br_if $s_done (i32.ge_u (local.get $k) (local.get $sl)))
+            (local.set $ch (i32.load8_u (i32.add (local.get $sp) (local.get $k))))
+            (if (i32.eq (local.get $ch) (i32.const 34)) (then (local.set $has (i32.or (local.get $has) (i32.const 1)))))
+            (if (i32.eq (local.get $ch) (i32.const 39)) (then (local.set $has (i32.or (local.get $has) (i32.const 2)))))
+            (if (i32.eq (local.get $ch) (i32.const 96)) (then (local.set $has (i32.or (local.get $has) (i32.const 4)))))
+            (local.set $k (i32.add (local.get $k) (i32.const 1)))
+            (br $scan)))
+        (local.set $qc (select (i32.const 34)
+          (select (i32.const 39)
+            (select (i32.const 96) (i32.const 34) (i32.eqz (i32.and (local.get $has) (i32.const 4))))
+            (i32.eqz (i32.and (local.get $has) (i32.const 2))))
+          (i32.eqz (i32.and (local.get $has) (i32.const 1)))))
+        (i32.store8 (local.get $dest) (local.get $qc))
+        (local.set $o (i32.add (local.get $dest) (i32.const 1)))
+        (local.set $k (i32.const 0))
+        (block $w_done
+          (loop $write
+            (br_if $w_done (i32.ge_u (local.get $k) (local.get $sl)))
+            (local.set $ch (i32.load8_u (i32.add (local.get $sp) (local.get $k))))
+            ;; $has (the quote mask) is free from here: it holds an escape's letter
+            (if (i32.or (i32.eq (local.get $ch) (local.get $qc)) (i32.eq (local.get $ch) (i32.const 92)))
+              (then
+                (i32.store8 (local.get $o) (i32.const 92))
+                (i32.store8 offset=1 (local.get $o) (local.get $ch))
+                (local.set $o (i32.add (local.get $o) (i32.const 2))))
+              (else (if (i32.or (i32.lt_u (local.get $ch) (i32.const 32)) (i32.eq (local.get $ch) (i32.const 127)))
+                (then
+                  (i32.store8 (local.get $o) (i32.const 92))
+                  ;; \\n \\t \\r \\b \\f \\v by name, else \\xNN (upper-case hex)
+                  (local.set $has (select (i32.const 110) (i32.const 0) (i32.eq (local.get $ch) (i32.const 10))))
+                  (if (i32.eq (local.get $ch) (i32.const 9)) (then (local.set $has (i32.const 116))))
+                  (if (i32.eq (local.get $ch) (i32.const 13)) (then (local.set $has (i32.const 114))))
+                  (if (i32.eq (local.get $ch) (i32.const 8)) (then (local.set $has (i32.const 98))))
+                  (if (i32.eq (local.get $ch) (i32.const 12)) (then (local.set $has (i32.const 102))))
+                  (if (i32.eq (local.get $ch) (i32.const 11)) (then (local.set $has (i32.const 118))))
+                  (if (local.get $has)
+                    (then
+                      (i32.store8 offset=1 (local.get $o) (local.get $has))
+                      (local.set $o (i32.add (local.get $o) (i32.const 2))))
+                    (else
+                      (i32.store8 offset=1 (local.get $o) (i32.const 120)) ;; "x"
+                      (i32.store8 offset=2 (local.get $o) (i32.add (i32.shr_u (local.get $ch) (i32.const 4))
+                        (select (i32.const 48) (i32.const 55) (i32.lt_u (i32.shr_u (local.get $ch) (i32.const 4)) (i32.const 10)))))
+                      (i32.store8 offset=3 (local.get $o) (i32.add (i32.and (local.get $ch) (i32.const 15))
+                        (select (i32.const 48) (i32.const 55) (i32.lt_u (i32.and (local.get $ch) (i32.const 15)) (i32.const 10)))))
+                      (local.set $o (i32.add (local.get $o) (i32.const 4))))))
+                (else
+                  (i32.store8 (local.get $o) (local.get $ch))
+                  (local.set $o (i32.add (local.get $o) (i32.const 1)))))))
+            (local.set $k (i32.add (local.get $k) (i32.const 1)))
+            (br $write)))
+        (i32.store8 (local.get $o) (local.get $qc))
+        (return (i32.sub (i32.add (local.get $o) (i32.const 1)) (local.get $dest)))))
     (if (i32.eqz (local.get $kind))
       (then (return (call $__i32_to_str
         (i32.load (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 2)))) (local.get $dest)))))
@@ -4900,30 +5002,57 @@ export function getArrPrintHelperWat(): string {
     (local $p i32) (local $q i32) (local $lens i32) (local $cw i32) (local $i i32) (local $j i32)
     (local $l i32) (local $total i32) (local $maxl i32) (local $amax i32) (local $cols i32)
     (local $c i32) (local $w i32) (local $more_len i32) (local $one i32) (local $t i32)
-    (local $bias f64) (local $bmax f64)
+    (local $bias f64) (local $bmax f64) (local $extra i32) (local $left i32) (local $b i32)
     (local.set $len (i32.load (local.get $arr)))
     (local.set $cur (i32.load (local.get $cursor_addr)))
     (local.set $shown (select (i32.const 100) (local.get $len) (i32.gt_u (local.get $len) (i32.const 100))))
     (local.set $more (i32.sub (local.get $len) (local.get $shown)))
+    ;; booleans and strings align LEFT in columns (padEnd); numbers and bigints right (padStart)
+    (local.set $left (i32.or (i32.eq (local.get $kind) (i32.const 8)) (i32.eq (local.get $kind) (i32.const 10))))
+    ;; a string's text: at most 4 bytes per byte (an \\xNN escape) and its two quotes
+    (if (i32.eq (local.get $kind) (i32.const 10))
+      (then
+        (local.set $i (i32.const 0))
+        (block $x_done
+          (loop $extra_l
+            (br_if $x_done (i32.ge_u (local.get $i) (local.get $shown)))
+            (local.set $extra (i32.add (local.get $extra) (i32.add (i32.const 2) (i32.shl
+              (i32.load offset=12 (i32.add (local.get $arr) (i32.shl (local.get $i) (i32.const 3)))) (i32.const 2)))))
+            (local.set $i (i32.add (local.get $i) (i32.const 1)))
+            (br $extra_l)))))
     ;; room: an element <= 24 bytes, with its padding and separators <= 30; the "more" entry and
-    ;; the brackets <= 64; then the length table (4 per element) and the column widths (12 x 4)
+    ;; the brackets <= 64; a string array's text; then the length table (4 per element) and the
+    ;; column widths (12 x 4)
     (call $__cbuf_need (i32.add (local.get $cur)
-      (i32.add (i32.mul (local.get $shown) (i32.const 34)) (i32.const 128))))
+      (i32.add (i32.add (i32.mul (local.get $shown) (i32.const 34)) (i32.const 128)) (local.get $extra))))
     (local.set $p (i32.add (global.get $__cbuf) (local.get $cur)))
     (if (i32.eqz (local.get $len))
       (then
         (i32.store16 (local.get $p) (i32.const 0x5d5b)) ;; "[]"
         (i32.store (local.get $cursor_addr) (i32.add (local.get $cur) (i32.const 2)))
         (return)))
-    (local.set $lens (i32.and (i32.add (i32.add (local.get $p)
-      (i32.add (i32.mul (local.get $shown) (i32.const 30)) (i32.const 64))) (i32.const 3)) (i32.const -4)))
+    (local.set $lens (i32.and (i32.add (i32.add (i32.add (local.get $p)
+      (i32.add (i32.mul (local.get $shown) (i32.const 30)) (i32.const 64))) (local.get $extra)) (i32.const 3)) (i32.const -4)))
     (local.set $cw (i32.add (local.get $lens) (i32.shl (local.get $shown) (i32.const 2))))
-    ;; pass 1: each element's length (its text is written at p and overwritten below)
+    ;; pass 1: each element's WIDTH (its text is written at p and overwritten below); a string's
+    ;; width counts characters, not UTF-8 bytes, as inspect's does for these
     (local.set $i (i32.const 0))
     (block $m_done
       (loop $measure
         (br_if $m_done (i32.ge_u (local.get $i) (local.get $shown)))
         (local.set $l (call $__arr_elem_str (local.get $arr) (local.get $i) (local.get $kind) (local.get $p)))
+        (if (i32.eq (local.get $kind) (i32.const 10))
+          (then
+            (local.set $t (i32.const 0))
+            (local.set $b (i32.const 0))
+            (block $u_done
+              (loop $utf8
+                (br_if $u_done (i32.ge_u (local.get $b) (local.get $l)))
+                (if (i32.ne (i32.and (i32.load8_u (i32.add (local.get $p) (local.get $b))) (i32.const 0xc0)) (i32.const 0x80))
+                  (then (local.set $t (i32.add (local.get $t) (i32.const 1)))))
+                (local.set $b (i32.add (local.get $b) (i32.const 1)))
+                (br $utf8)))
+            (local.set $l (local.get $t))))
         (i32.store (i32.add (local.get $lens) (i32.shl (local.get $i) (i32.const 2))) (local.get $l))
         (local.set $total (i32.add (local.get $total) (i32.add (local.get $l) (i32.const 2))))
         (if (i32.gt_u (local.get $l) (local.get $maxl)) (then (local.set $maxl (local.get $l))))
@@ -5000,13 +5129,19 @@ export function getArrPrintHelperWat(): string {
             (local.set $w (i32.load (i32.add (local.get $cw) (i32.shl (local.get $c) (i32.const 2)))))
             (if (i32.and (i32.eqz (local.get $c)) (i32.ne (local.get $i) (i32.const 0)))
               (then (i32.store (local.get $q) (i32.const 0x20200a2c)) (local.set $q (i32.add (local.get $q) (i32.const 4))))) ;; ",\\n  "
-            ;; padStart: every cell but a row's last is "elem, " padded to the column width
-            (local.set $q (call $__arr_spaces (local.get $q) (i32.sub (i32.sub (local.get $w) (i32.const 2)) (local.get $l))))
+            ;; padStart: every cell but a row's last is "elem, " padded to the column width, and
+            ;; the row's last is padded to the width less the separator. padEnd ($left): the
+            ;; padding follows "elem, ", and a row's last cell has none.
+            (if (i32.eqz (local.get $left))
+              (then (local.set $q (call $__arr_spaces (local.get $q) (i32.sub (i32.sub (local.get $w) (i32.const 2)) (local.get $l))))))
             (local.set $q (i32.add (local.get $q)
               (call $__arr_elem_str (local.get $arr) (local.get $i) (local.get $kind) (local.get $q))))
             (if (i32.and (i32.ne (local.get $c) (i32.sub (local.get $cols) (i32.const 1)))
                          (i32.ne (local.get $i) (i32.sub (local.get $shown) (i32.const 1))))
-              (then (i32.store16 (local.get $q) (i32.const 0x202c)) (local.set $q (i32.add (local.get $q) (i32.const 2)))))) ;; ", "
+              (then
+                (i32.store16 (local.get $q) (i32.const 0x202c)) (local.set $q (i32.add (local.get $q) (i32.const 2))) ;; ", "
+                (if (local.get $left)
+                  (then (local.set $q (call $__arr_spaces (local.get $q) (i32.sub (i32.sub (local.get $w) (i32.const 2)) (local.get $l)))))))))
           (else
             (if (local.get $i)
               (then
