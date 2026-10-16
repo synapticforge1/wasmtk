@@ -1,3 +1,7 @@
+// A string index is an integer (owner, 2026-10-15): `h[v % 16]` indexed with a float (v is a
+// number), now a compile error; the conversion is said with wasMath's f64.toI32.
+import { f64 } from "../../../src/wasmath.ts";
+
 interface Point {
     x: number;
     y: number;
@@ -21,7 +25,7 @@ function toHex(n: number): string {
     let r: string = "";
     let v: number = n;
     while (v > 0) {
-        r = h[v % 16] + r;
+        r = h[f64.toI32(v % 16)] + r;
         v = Math.floor(v / 16);
     }
     return r;

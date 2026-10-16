@@ -127,7 +127,13 @@ import { type ExternalFuncDef, mergeWasmWat, type WasmWatType } from "./wasmmerg
 import { gateVarToLet, maskCode } from "./varscope.ts";
 import { findUntypedDeclarations } from "./decltypes.ts";
 import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
-import { implicitTruncDiagnostic, intDivisionDiagnostic, type WmHelper, WM_WAT } from "./wasmath_lower.ts";
+import {
+  floatStringIndexDiagnostic,
+  implicitTruncDiagnostic,
+  intDivisionDiagnostic,
+  type WmHelper,
+  WM_WAT,
+} from "./wasmath_lower.ts";
 import {
   arrInspectKind,
   type ClosureVarLookup,
@@ -2033,6 +2039,10 @@ class WasicTranspiler {
   // emitting 0 / the empty string). Use the quietEmit() wrapper to scope a suppression.
   private emitDiagSuppressDepth = 0;
   /** Runs `fn` with terminal emit diagnostics suppressed (for speculative/guarded probes). */
+  /** `$__str_index` and its "undefined" text are needed (sw71). */
+  private needsStrIndex = false;
+  /** `$__str_is_nullish` is called: a string compared with null / undefined (sw71). */
+  private needsStrNullish = false;
   private quietEmit<T>(fn: () => T): T {
     this.emitDiagSuppressDepth++;
     try {
@@ -7602,6 +7612,7 @@ class WasicTranspiler {
       /^(\w+)\[([^\]]+)\]\.(toLowerCase|toUpperCase)\s*\(\s*\)$/,
     );
     if (strSubCaseMatch && locals.get(strSubCaseMatch[1]) === "string") {
+      this.checkStringIndex(initExpr, strSubCaseMatch[2], locals);
       this.needsStringExtHelpers = true;
       const idxWat = this.emitExpr(strSubCaseMatch[2].trim(), locals, "i32");
       const caseHelper = strSubCaseMatch[3] === "toLowerCase"
@@ -7619,10 +7630,12 @@ class WasicTranspiler {
     // str[idx] — single-character substring (same as charAt)
     const strSubscriptMatch = initExpr.match(/^(\w+)\[([^\]]+)\]$/);
     if (strSubscriptMatch && locals.get(strSubscriptMatch[1]) === "string") {
+      this.checkStringIndex(initExpr, strSubscriptMatch[2], locals);
       this.needsStringExtHelpers = true;
+      this.needsStrIndex = true;
       const idxWat = this.emitExpr(strSubscriptMatch[2].trim(), locals, "i32");
       return [
-        `(call $__str_char_at (local.get $${strSubscriptMatch[1]}_ptr) (local.get $${
+        `(call $__str_index (local.get $${strSubscriptMatch[1]}_ptr) (local.get $${
           strSubscriptMatch[1]
         }_len) ${idxWat})`,
         `${ind}(local.set $${varName}_len)`,
@@ -8008,25 +8021,26 @@ class WasicTranspiler {
             return;
           }
         }
-        // str[idx] in concat (string char subscript) — equivalent to charAt(idx). Build a 1-char
-        // string via $__str_char_code_at + malloc + store8 (same shape as fromCharCode), which
-        // avoids a multi-value capture so the concat accumulator stays well-formed.
+        // str[idx] in concat (string char subscript): the character, or out of range "undefined"
+        // (sw71, 2026-10-15), through $__str_index captured into the $__str_op pair as charAt's
+        // path below does. It stored $__str_char_code_at's byte, a garbage character out of range.
         const charSubCP = part.match(/^(\w+)\[(.+)\]$/);
         if (
           charSubCP && parenDepthNeverNegative(charSubCP[2]) &&
           (locals.get(charSubCP[1]) === "string" || this.moduleStringConsts.has(charSubCP[1])) &&
           !this.arrayVars.has(charSubCP[1])
         ) {
+          this.checkStringIndex(part, charSubCP[2], locals);
           this.needsStringExtHelpers = true;
+          this.needsStrIndex = true;
           const idxWat = this.emitArrayIndex(charSubCP[2].trim(), locals);
           const sc = this.moduleStringConsts.get(charSubCP[1]);
           const ptrW = sc ? `(i32.const ${sc[0]})` : `(local.get $${charSubCP[1]}_ptr)`;
           const lenW = sc ? `(i32.const ${sc[1]})` : `(local.get $${charSubCP[1]}_len)`;
-          stmts.push(`(local.set $__str_op_ptr (call $__malloc (i32.const 1)))`);
-          stmts.push(
-            `(i32.store8 (local.get $__str_op_ptr) (call $__str_char_code_at ${ptrW} ${lenW} ${idxWat}))`,
-          );
-          concatAppend(`(local.get $__str_op_ptr)`, `(i32.const 1)`);
+          stmts.push(`(call $__str_index ${ptrW} ${lenW} ${idxWat})`);
+          stmts.push(`(local.set $__str_op_len)`);
+          stmts.push(`(local.set $__str_op_ptr)`);
+          concatAppend(`(local.get $__str_op_ptr)`, `(local.get $__str_op_len)`);
           return;
         }
         // str.slice(start[, end]) in concat — capture multi-value return into temp pair
@@ -8500,6 +8514,21 @@ ${prefixed}
     return null;
   }
 
+  /** A string index must be an integer (owner, 2026-10-15): a float one, `s[pos]` with `pos: f64`,
+   *  is a compile error, since JavaScript gives `undefined` for a fractional index and wasm would
+   *  truncate it. Narrows D3, which keeps the conversion for ARRAY indices and positions. */
+  private checkStringIndex(expr: string, idx: string, locals: Map<string, WatType>): void {
+    // Judged by what the index EMITS at i32: a float arrives truncated. inferExprType alone called
+    // `i + 1` of an i32 `i` an f64.
+    const mark = this.diagnostics.length;
+    const w = this.quietEmit(() => this.emitExpr(idx.trim(), locals, "i32")).trim();
+    this.diagnostics.length = mark;
+    if (/^\(i32\.trunc_(?:sat_)?f(?:64|32)_[su]\b/.test(w)) {
+      const msg = floatStringIndexDiagnostic(expr, idx);
+      if (!this.diagnostics.includes(msg)) this.diagnostics.push(msg);
+    }
+  }
+
   private emitStringPtrLen(expr: string, locals: Map<string, WatType>): string {
     expr = expr.trim();
     // `n.toString()` of a number or boolean is `String(n)` (ld08's value form: as an argument or in
@@ -8670,12 +8699,14 @@ ${prefixed}
       (locals.get(strCharSub[1]) === "string" || this.moduleStringConsts.has(strCharSub[1])) &&
       !this.arrayVars.has(strCharSub[1])
     ) {
+      this.checkStringIndex(expr, strCharSub[2], locals);
       this.needsStringExtHelpers = true;
+      this.needsStrIndex = true;
       const idxWat = this.emitArrayIndex(strCharSub[2].trim(), locals);
       const sc = this.moduleStringConsts.get(strCharSub[1]);
       const ptrW = sc ? `(i32.const ${sc[0]})` : `(local.get $${strCharSub[1]}_ptr)`;
       const lenW = sc ? `(i32.const ${sc[1]})` : `(local.get $${strCharSub[1]}_len)`;
-      return `(call $__str_char_at ${ptrW} ${lenW} ${idxWat})`;
+      return `(call $__str_index ${ptrW} ${lenW} ${idxWat})`; // out of range: "undefined" (sw71)
     }
     // String array element access: arr[idx] where arr is string[] (isStringArr or elemType=string)
     const strArrBracket = expr.match(/^(\w+)\[([^\]]+)\]$/);
@@ -11506,12 +11537,13 @@ ${prefixed}
           if (nullFlag && varName !== "null" && varName !== "undefined") {
             return (op === "===" || op === "==") ? nullFlag : `(i32.eqz ${nullFlag})`;
           }
-          // String type: check ptr == 0
+          // String type: no text (ptr 0), or an out-of-range `s[i]`'s "undefined" (sw71) when
+          // this module builds one ($__str_is_nullish; else the plain ptr test, as before)
           if (locals.get(varName) === "string") {
-            const ptrCk = `(i32.eqz (local.get $${varName}_ptr))`;
-            return (op === "===" || op === "==")
-              ? ptrCk
-              : `(i32.ne (local.get $${varName}_ptr) (i32.const 0))`;
+            this.needsStrNullish = true;
+            this.needsStringExtHelpers = true;
+            const ptrCk = `(call $__str_is_nullish (local.get $${varName}_ptr) (local.get $${varName}_len))`;
+            return (op === "===" || op === "==") ? ptrCk : `(i32.eqz ${ptrCk})`;
           }
           // Pointer types (i32): fall through to normal i32.eq/ne which compares with 0
         }
@@ -11628,11 +11660,24 @@ ${prefixed}
 
         // String comparison: route through $__str_cmp instead of string.eq / string.lt, etc.
         if (lhsType === "string" && STRING_CMP_OPS.has(op)) {
+          // A string against `undefined` / `null`: no text, or an out-of-range `s[i]`'s
+          // "undefined" (sw71, 2026-10-15). Compared as text, `s[10] === undefined` was false.
+          const nullishSide = [lhs, rhs].findIndex((x) => x.trim() === "undefined" || x.trim() === "null");
+          if (nullishSide !== -1 && /^(===|==|!==|!=)$/.test(op)) {
+            const other = nullishSide === 0 ? rhs : lhs;
+            this.needsStrNullish = true;
+            this.needsStringExtHelpers = true;
+            const t = `(call $__str_is_nullish ${this.emitStringPtrLen(other, locals)})`;
+            return op.startsWith("!") ? `(i32.eqz ${t})` : t;
+          }
           // Special case: str[idx] === "c" (single-char literal) → charCodeAt comparison
           const lhsSubM = lhs.match(/^(\w+)\[([^\]]+)\]$/);
           const rhsLit1 = rhs.match(/^["'](.*)["']$/);
           const lhsLit1 = lhs.match(/^["'](.*)["']$/);
           const rhsSubM = rhs.match(/^(\w+)\[([^\]]+)\]$/);
+          // a float index refused here too (the owner's rule; checkStringIndex)
+          if (lhsSubM && locals.get(lhsSubM[1]) === "string") this.checkStringIndex(lhs, lhsSubM[2], locals);
+          if (rhsSubM && locals.get(rhsSubM[1]) === "string") this.checkStringIndex(rhs, rhsSubM[2], locals);
           if (
             lhsSubM && locals.get(lhsSubM[1]) === "string" && rhsLit1 && rhsLit1[1].length === 1
           ) {
@@ -19059,6 +19104,34 @@ ${sum}
   // Phase 27: Extended string helpers — trim, charCodeAt, charAt, case conversion,
   // replace, replaceAll, padStart, padEnd, repeat, split.
   private getStringExtHelperWat(): string {
+    // `s[i]` out of range is `undefined` (sw71, 2026-10-15): a static "undefined" text, which
+    // prints and concatenates as JavaScript's does; `$__str_is_nullish` tells it from a real
+    // string. Allocated only when `$__str_index` is used, so no other module's data moves.
+    const undefOff = this.needsStrIndex ? this.allocString("undefined")[0] : undefined;
+    const index = undefOff === undefined ? "" : `
+  ;; ── str_index: s[i], one character; out of range, the string "undefined" (JavaScript's
+  ;; undefined, as printed and concatenated). charAt keeps "" ($__str_char_at). ──────────────
+  (func $__str_index (param $ptr i32) (param $len i32) (param $i i32) (result i32 i32)
+    (if (i32.ge_u (local.get $i) (local.get $len))
+      (then (return (i32.const ${undefOff}) (i32.const 9))))
+    (i32.add (local.get $ptr) (local.get $i))
+    (i32.const 1)
+  )`;
+    const nullish = !this.needsStrNullish && undefOff === undefined ? "" : `
+  ;; ── str_is_nullish: a string that is null / undefined: no text${
+      undefOff === undefined ? "" : `, or $__str_index's "undefined"`
+    }
+  (func $__str_is_nullish (param $ptr i32) (param $len i32) (result i32)
+    ${
+      undefOff === undefined
+        ? "(i32.eqz (local.get $ptr))"
+        : `(i32.or (i32.eqz (local.get $ptr)) (i32.eq (local.get $ptr) (i32.const ${undefOff})))`
+    }
+  )`;
+    return index + nullish + this.getStringExtHelperWatRest();
+  }
+
+  private getStringExtHelperWatRest(): string {
     return `
   ;; ── str_trim: remove leading and trailing ASCII whitespace ─────────────────
   ;; Whitespace = 0x09 (tab), 0x0a (LF), 0x0d (CR), 0x20 (space).

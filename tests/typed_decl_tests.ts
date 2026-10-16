@@ -145,6 +145,12 @@ const REFUSED: [string, string, string | string[]][] = [
   ],
   // `>>>` on a bigint is a TypeError in JavaScript (wasMath L4, 2026-10-13).
   ["bigint >>>", `const a: bigint = 7n;\nconst s: bigint = a >>> 1n;\nconsole.log(s);`, "'>>>' on a bigint is a TypeError"],
+  // A string index is an integer (owner, 2026-10-15): JavaScript gives undefined for s[1.5],
+  // wasm would truncate. Refused in console.log, a declaration, a concat and a comparison.
+  ["float string index in console.log", `const s: string = "hello";\nconst p: f64 = 1.5;\nconsole.log(s[p]);`, ["error[float-index]: float string index 's[p]'", "f64.toI32(p)"]],
+  ["float string index in a declaration", `const s: string = "hello";\nconst p: f64 = 1;\nconst c: string = s[p];\nconsole.log(c);`, "float string index 's[p]'"],
+  ["float string index in a concat", `const s: string = "hello";\nconst p: f64 = 1;\nconst c: string = "x" + s[p];\nconsole.log(c);`, "float string index 's[p]'"],
+  ["float string index in a comparison", `const s: string = "hello";\nconst p: f64 = 1;\nconst ok: boolean = s[p] === "e";\nconsole.log(ok);`, "float string index 's[p]'"],
   [
     "line number counts a block comment",
     `/**\n * four\n * lines\n */\nconst ok: i32 = 1;\nlet n = 5; // the fault\nconsole.log(ok + n);`,
@@ -171,6 +177,16 @@ const REFUSED: [string, string, string | string[]][] = [
 
 // [name, source, expected stdout]. Each is compiled and RUN, so acceptance is also correctness.
 const ACCEPTED: [string, string, string][] = [
+  [
+    // the float string index said as a conversion, and out of range undefined (2026-10-15)
+    "string index from f64.toI32, out of range undefined",
+    `import { f64 } from "${new URL("../src/wasmath.ts", import.meta.url).href}";
+const s: string = "hello";
+const p: f64 = 1.5;
+const far: i32 = 9;
+console.log(s[f64.toI32(p)], s[far], s[far] === undefined);`,
+    "e undefined true",
+  ],
   [
     "reassignment, loops, typed pattern, typed function values",
     `let total: number = 0;
@@ -250,7 +266,8 @@ const a: i32 = f64.toI32(Math.floor(y));
 const b: i32 = f64.toI32Sat(big);
 const c: i32 = f64.toI32Wrap(big);
 const d: i32 = big | 0;
-const ch: string = s[pos];
+// a STRING index is an integer since 2026-10-15 (the owner): said with wasMath, not converted
+const ch: string = s[f64.toI32(pos)];
 console.log(total, ch, s.indexOf("l", pos), a, b, c, d);`,
     "60 e 2 3 2147483647 1410065408 1410065408",
   ],
