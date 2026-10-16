@@ -13,12 +13,20 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > (testing.md). Reply with the count SENT 2026-10-15 (owner; `scripts/binaryang-report.md`).
 > Next, unchanged: the 21 loud rows.
 >
+> **2026-10-15, binaryang letter: `wasmValidate` could return `Ok` with an error in `errors`;
+> fixed on their `main`, in the release AFTER 1.12.1** (plus seven more shapes V8 refuses, now
+> refused). Ours reads `result`: `src/wast.ts` `binaryangInvalid`, the second `assert_invalid`
+> oracle and the `validatorRejectedValid` guard. The defect could only turn a pass into a skip;
+> the guard has read 0 throughout. **On that release:** bump the pin, run the wast gate, expect
+> `assert_invalid` passes up / skips (16) down, guard 0; explain each moved file; send the
+> numbers. Reply SENT 2026-10-15 (owner; `scripts/binaryang-report.md`).
+>
 > **PAUSED 2026-10-13, end of day (owner).** `main` is clean and green on binaryang 1.12.0 (wasi
 > 458/458, golden 515, wast 64,506 / 0 / 16; `go_asyncify` 11 / 12 KNOWN). **No silent-wrong row is
 > open.** Resume with: the 21 loud rows (compiler-bugs.md; ld34 a float index into a string in
 > console.log, ld37 a whole string / boolean / bigint array in console.log, the oracle for its
-> layout in `scripts/console/inspect_array_ref.ts`). Waiting on others: binaryang's release with
-> the nested-Asyncify fix (then bump, expect 12 / 12, send the count); the owner's word on the
+> layout in `scripts/console/inspect_array_ref.ts`). Waiting on others: ~~binaryang's release with
+> the nested-Asyncify fix~~ (1.12.1, pinned 2026-10-15, 12 / 12, count sent); the owner's word on the
 > Deno-exit plan (deno-exit-plan.md, P0–P8) and on releasing 3.0.0 (roadmap.md items 27–33;
 > nothing pushed, published or tagged).
 >
@@ -304,8 +312,11 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   `scripts/binaryang-report.md`.
 - **H4 and H11** are answered here (H4 re-verified item by item 2026-09-30); the workspace closes
   them in `../cmem/handoffs.md`.
+- **binaryang's release after 1.12.1** (the `wasmValidate` `result` fix and eight new refusals,
+  letter 2026-10-15; "Open now" above): bump, run the wast gate, explain each moved file, send the
+  numbers.
 - **binaryang: nothing of ours is open.** Every report and reply is marked SENT in
-  `scripts/binaryang-report.md` (last: 2026-09-30, the 1.8.1 skip count).
+  `scripts/binaryang-report.md` (last: 2026-10-15, the 1.12.1 count and the `wasmValidate` answer).
 
 ## Deferred (no consumer)
 
