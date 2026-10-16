@@ -784,6 +784,52 @@ function looksLikeString(
   return false;
 }
 
+/** Is `s` a boolean: `true` / `false`, a boolean variable, `!x`, or a top-level comparison? */
+function isBoolOperand(
+  s: string,
+  locals: Map<string, string>,
+  globals?: Map<string, string>,
+): boolean {
+  const t = s.trim();
+  if (t === "true" || t === "false") return true;
+  if (/^\w+$/.test(t)) return (locals.get(t) ?? globals?.get(t)) === "bool";
+  if (t.startsWith("!") && !t.startsWith("!=")) return true;
+  return ["===", "!==", "==", "!=", "<=", ">=", "<", ">"].some((o) => findTopLevelOp(t, o) > 0);
+}
+
+/** Is `p`, one side of a top-level `+`, a string, so that the `+` is a concatenation? A literal or
+ *  template, a string local, global or array element, a call to a string-returning function, a
+ *  string method of a string, `String(…)`, or itself a `+` with a string side (`+` groups from the
+ *  left, so `s + n + 1` is `(s + n) + 1`). It knew only literals and string locals: `tag() + 7`
+ *  was added as numbers, a stack mismatch (ld05, 2026-10-15). */
+function isConcatString(
+  p: string,
+  locals: Map<string, string>,
+  arrayLookup?: ArrayLookup,
+  funcLookup?: FuncLookup,
+  globals?: Map<string, string>,
+): boolean {
+  const t = p.trim();
+  if (/^["'`]/.test(t) || looksLikeString(t, locals, arrayLookup)) return true;
+  if (/^\w+$/.test(t)) {
+    const g = globals?.get(t);
+    return g === "string" || !!g?.startsWith("string:");
+  }
+  if (/^String\s*\(/.test(t)) return true;
+  const cm = t.match(/^(\w+)\s*\(([\s\S]*)\)$/);
+  if (cm && parenDepthNeverNegative(cm[2]!) && funcLookup?.(cm[1]!)?.result === "string") return true;
+  const mm = t.match(
+    /^(.+?)\.(toUpperCase|toLowerCase|trim|trimStart|trimEnd|slice|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat|join|toFixed|toString)\s*\(.*\)$/,
+  );
+  if (mm && (/^(join|toFixed|toString)$/.test(mm[2]!) || isConcatString(mm[1]!, locals, arrayLookup, funcLookup, globals))) {
+    return true;
+  }
+  const i = findTopLevelOp(t, "+");
+  return i > 0 &&
+    (isConcatString(t.slice(0, i), locals, arrayLookup, funcLookup, globals) ||
+      isConcatString(t.slice(i + 1), locals, arrayLookup, funcLookup, globals));
+}
+
 /** Parses a single argument token into LogSegments. */
 function parseSingleArg(
   token: string,
@@ -871,6 +917,25 @@ function parseSingleArg(
   // ── Phase 24: null / undefined literals
   if (token === "null") return [{ kind: "literal", text: "null" }];
   if (token === "undefined") return [{ kind: "literal", text: "undefined" }];
+
+  // ── A parenthesised argument or concat operand is its inside, when the outer pair matches
+  // (`(a+1)*(a+2)` is a product, sw21). Without it `"x" + (a < b ? "lo" : "hi")` sent the
+  // parenthesised ternary down the numeric path, which refused its string branch (sw26).
+  if (token.startsWith("(") && token.endsWith(")") && parenDepthNeverNegative(token.slice(1, -1))) {
+    return parseSingleArg(
+      token.slice(1, -1).trim(),
+      locals,
+      funcLookup,
+      allocString,
+      enumLookup,
+      arrayLookup,
+      structLookup,
+      dotCallLookup,
+      globals,
+      enumStringLookup,
+      closureVarLookup,
+    );
+  }
 
   // ── String ternary: cond ? strExpr : strExpr → one strexpr (an `if`, one branch evaluated).
   // H12 sw03 (2026-09-29): decided BEFORE every operator handler below. The conditional binds
@@ -1000,8 +1065,8 @@ function parseSingleArg(
   if (concatIdx !== -1) {
     const lhs = token.slice(0, concatIdx).trim();
     const rhs = token.slice(concatIdx + 1).trim();
-    const lhsIsStr = /^["'`]/.test(lhs) || locals.get(lhs) === "string";
-    const rhsIsStr = /^["'`]/.test(rhs) || locals.get(rhs) === "string";
+    const lhsIsStr = isConcatString(lhs, locals, arrayLookup, funcLookup, globals);
+    const rhsIsStr = isConcatString(rhs, locals, arrayLookup, funcLookup, globals);
     if (lhsIsStr || rhsIsStr) {
       // An array operand of a string concat is string conversion, `.join(",")` (sw09).
       const asJoined = (p: string) => /^\w+$/.test(p) && arrayLookup?.(p) ? `${p}.join(",")` : p;
@@ -1492,6 +1557,15 @@ function parseSingleArg(
       return [{ kind: "i32expr", wat }];
     }
     const sig = funcLookup?.(callee);
+    // Not a function: a function-typed VARIABLE (`const op: (x: i32) => i32 = …`), which wasic
+    // calls through call_indirect. A direct `call $op` was an undefined function (ld01).
+    if (!sig && _exprFallbackResolver) {
+      const r = _exprFallbackResolver(token, locals);
+      if (r) {
+        const kind = r.type === "f64" ? "f64expr" as const : r.type === "i64" ? "i64expr" as const : "i32expr" as const;
+        return [{ kind, wat: r.wat }];
+      }
+    }
     // Phase 33 guard: struct args must be layout-compatible with the params they bind to
     _structArgLayoutCheck?.(callee, argList);
     // String params expand to two stack values (ptr + len); use allocString if available.
@@ -1642,6 +1716,18 @@ function parseSingleArg(
   }
   let bracketMatch = token.match(/^(\w+)\[(.+)\]$/);
   if (bracketMatch && !parenDepthNeverNegative(bracketMatch[2])) bracketMatch = null;
+  // A STRING indexed, `s[i]`: one character, built by wasic's string resolver (the path
+  // `const ch: string = s[i]` takes), whatever the index's type. The array handlers below never
+  // matched a string, so every `s[i]` here was refused, an f64 index (ld34) and an i32 one alike.
+  if (
+    bracketMatch && _stringExprResolver &&
+    (locals.get(bracketMatch[1]) ?? globals?.get(bracketMatch[1])) === "string"
+  ) {
+    const r = _stringExprResolver(token, locals);
+    if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+    _diagnosticSink?.(`console argument: cannot index the string '${token.slice(0, 60)}'.`);
+    return [{ kind: "literal", text: "" }];
+  }
   // Phase 23: tuple element access t[N] where N is a numeric index → struct field _N
   if (bracketMatch && structLookup && /^\d+$/.test(bracketMatch[2])) {
     const fi = structLookup(bracketMatch[1], `_${bracketMatch[2]}`);
@@ -1947,9 +2033,18 @@ function parseSingleArg(
   // ── Arithmetic / numeric expression
   // Phase 42: if expression starts with a struct field access, infer type from the field.
   // This handles cases like `a.x + b.x` where `a` is an i32 pointer but `a.x` is f64.
+  // A struct-array element's field leads the same way, `qs[0].x + qs[1].x` (ld19, 2026-10-15):
+  // its lead atom `qs` is the array, whose element type is not the field's.
   const leadDotM = token.match(/^(\w+)\.(\w+)\b/);
-  if (leadDotM && structLookup) {
-    const leadFi = structLookup(leadDotM[1], leadDotM[2]);
+  const leadElemDotM = token.match(/^(\w+)\[([^\]]*)\]\.(\w+)\b/);
+  const leadFi = !structLookup
+    ? undefined
+    : leadDotM
+    ? structLookup(leadDotM[1], leadDotM[2])
+    : leadElemDotM
+    ? structLookup(`${leadElemDotM[1]}[${leadElemDotM[2]}]`, leadElemDotM[3]!)
+    : undefined;
+  {
     if (leadFi) {
       if (leadFi.type === "f64" || leadFi.type === "f32") {
         return [{
@@ -1991,7 +2086,9 @@ function parseSingleArg(
   const leadArr = leadId ? arrayLookup?.(leadId) : undefined;
   // A lead atom may be a function-local OR a module GLOBAL (e.g. `const a: i32 = 1` at module scope
   // → `console.log(a + b)`); consult both, else `a + b` of i32 globals would default to f64.add.
-  let leadType = leadArr
+  let leadType = leadElemDotM && leadFi
+    ? leadFi.type
+    : leadArr
     ? leadArr.elemType
     : (leadId ? (locals.get(leadId) ?? globals?.get(leadId)) : undefined);
   // A leading INTEGER LITERAL or a leading PARENTHESIS has no declared type, so the expression was
@@ -2779,6 +2876,13 @@ function exprToWat(
     const rawArgs = callMatch[2]?.trim() ?? "";
     const argList = rawArgs ? splitTopLevelArgs(rawArgs) : [];
     const sig = funcLookup?.(callee);
+    // Not a function: a function-typed variable, called through call_indirect (ld01; the twin
+    // in parseSingleArg).
+    if (!sig && _exprFallbackResolver) {
+      const r = _exprFallbackResolver(expr, locals);
+      const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
+      if (widened !== null) return widened;
+    }
     // Phase 33 guard: struct args must be layout-compatible with the params they bind to
     _structArgLayoutCheck?.(callee, argList);
     // String params expand to two stack values
@@ -2973,15 +3077,19 @@ function exprToWat(
 
   // String comparison: arr[i] === "str", str === arr[i], arr[i] === arr[j]
   // Must be checked before the generic binOps loop to avoid f64.eq on i32 string pointers.
-  const STR_EQ_OPS = new Set(["===", "!==", "==", "!="]);
-  for (const strOp of STR_EQ_OPS) {
+  // Equality first (it binds looser), then the relational operators, which compare two STRINGS by
+  // code unit; with a number on either side JavaScript compares numbers, so both must be strings.
+  // `a < b` of two strings reached the numeric table and read `$a` as a number (ld03, 2026-10-15).
+  const STR_CMP_OPS = ["===", "!==", "==", "!=", "<=", ">=", "<", ">"];
+  for (const strOp of STR_CMP_OPS) {
     const strOpIdx = findTopLevelOp(expr, strOp);
     if (strOpIdx === -1) continue;
     const strLhs = expr.slice(0, strOpIdx).trim();
     const strRhs = expr.slice(strOpIdx + strOp.length).trim();
-    if (
-      !looksLikeString(strLhs, locals, arrayLookup) && !looksLikeString(strRhs, locals, arrayLookup)
-    ) break;
+    const lStr = looksLikeString(strLhs, locals, arrayLookup);
+    const rStr = looksLikeString(strRhs, locals, arrayLookup);
+    const isEquality = !/^[<>]/.test(strOp);
+    if (isEquality ? !lStr && !rStr : !(lStr && rStr)) break;
     // Helper: get ptr+len WAT for a string expression
     const getStrPL = (e: string): [string, string] => {
       if (/^\w+$/.test(e) && locals.get(e) === "string") {
@@ -3035,9 +3143,11 @@ function exprToWat(
     // (i32.eqz); `!==`/`!=` → 1 iff NOT equal (cmp ≠ 0). The old `!==` form was inverted — it
     // returned true for EQUAL strings.
     const cmpCall = `(call $__str_cmp ${lPtr} ${lLen} ${rPtr} ${rLen})`;
-    return (strOp === "===" || strOp === "==")
-      ? `(i32.eqz ${cmpCall})`
-      : `(i32.ne ${cmpCall} (i32.const 0))`;
+    if (strOp === "===" || strOp === "==") return `(i32.eqz ${cmpCall})`;
+    if (strOp === "!==" || strOp === "!=") return `(i32.ne ${cmpCall} (i32.const 0))`;
+    // negative / zero / positive, as wasic's STR_CMP table reads it
+    const rel = { "<": "lt_s", "<=": "le_s", ">": "gt_s", ">=": "ge_s" }[strOp]!;
+    return `(i32.${rel} ${cmpCall} (i32.const 0))`;
   }
 
   // Binary operators — ascending precedence order (lowest first = outermost grouping).
@@ -3168,11 +3278,15 @@ function exprToWat(
       : undefined;
     // A boolean element is an i32 (`flags[0] === false` was f64.eq over an i32 load: an invalid
     // module; found with sw69).
-    const lhsArrNumType =
-      (leadArrElem === "i32" || leadArrElem === "i64" || leadArrElem === "f64" ||
-          leadArrElem === "f32" || leadArrElem === "bool")
-        ? leadArrElem
-        : undefined;
+    // A struct-array element's FIELD, `qs[0].x + …`: the field's type. The lead atom `qs` is an
+    // i32 pointer, so an f64 field was asked for as i32 and refused (ld19, 2026-10-15).
+    const leadElemField = lhs.match(/^(\w+)\[([^\]]*)\]\.(\w+)(?![\w.([])/);
+    const leadFieldType = leadElemField && structLookup
+      ? structLookup(`${leadElemField[1]}[${leadElemField[2]}]`, leadElemField[3]!)?.type
+      : undefined;
+    const leadNum = (t: string | undefined) =>
+      t === "i32" || t === "i64" || t === "f64" || t === "f32" || t === "bool" ? t : undefined;
+    const lhsArrNumType = leadElemField ? leadNum(leadFieldType) : leadNum(leadArrElem);
     const lhsLocalType = lhsArrNumType
       ? lhsArrNumType
       : !leadIsSimpleAtom || !leadM
@@ -3188,6 +3302,18 @@ function exprToWat(
     // failed to instantiate (`a + 1` worked, `1 + a` did not). Take the type from the RHS lead atom
     // in that case. A FLOAT literal (`1.5 + n`) genuinely means f64, so it keeps the default.
     let effLhsType = lhsLocalType;
+    // A left operand that is a whole CALL has its result's type: a function's, or (a function-
+    // typed variable, `fa(2) + op(1)`) what wasic emits it as. It defaulted to f64 over two i32
+    // results (found with ld01, 2026-10-15).
+    const lhsCall = lhs.trim().match(/^(\w+)\s*\(([\s\S]*)\)$/);
+    if (effLhsType === undefined && lhsCall && parenDepthNeverNegative(lhsCall[2]!)) {
+      const fr = funcLookup?.(lhsCall[1]!)?.result;
+      effLhsType = fr === "i32" || fr === "i64" || fr === "f64" || fr === "f32" || fr === "bool"
+        ? fr
+        : !funcLookup?.(lhsCall[1]!)
+        ? _exprFallbackResolver?.(lhs.trim(), locals)?.type
+        : undefined;
+    }
     if (effLhsType === undefined) {
       // First typed atom in `s`, or undefined. Deliberately used ONLY for the two operand shapes
       // that carry no type of their own (below) — applying it to e.g. a call LHS would wrongly
@@ -3228,7 +3354,12 @@ function exprToWat(
         if (widened !== null) return widened;
       }
     }
-    const opType = alwaysI32
+    // An equality between BOOLEANS (a comparison, `!x`, `true` / `false`, a boolean variable) is
+    // an i32 compare: `2 < 3 === true` took f64 from its literal-led left side over two i32
+    // results, an invalid module (ld23, 2026-10-15).
+    const boolEquality = (op === "===" || op === "!==" || op === "==" || op === "!=") &&
+      (isBoolOperand(lhs, locals, globals) || isBoolOperand(rhs, locals, globals));
+    const opType = alwaysI32 || boolEquality
       ? "i32"
       : effLhsType === "i64"
       ? "i64"
