@@ -7,6 +7,14 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `33b3e0e` and green on binaryang
+> 1.12.1 (wasi 466/466, golden 523, typed_decl 45, wast 64,506 / 0 / 16, go 7 / 7 / 12; nothing
+> pushed, published or tagged). Done today: binaryang 1.12.1 pinned (`go_asyncify` 12 / 12, count
+> sent); the `wasmValidate` letter answered; all 21 loud rows of 2026-10-13 closed (two batches,
+> with sw72–sw74 found and fixed); the owner's string-index ruling built (sw71); audit round 2
+> (below). **Resume with:** the owner's answers to the four questions below, then the fix order
+> below (sw113 first), then items 3–5 (binaryang 1.10.0 items, H10, nullable gaps).
+>
 > **2026-10-15: Phase 0b audit round 2 DONE (item 2 of the owner's list)** — compiler-bugs.md §
 > "audit round 2". Four parallel auditors, every row RUN; repros in `scripts/phase0/round2/`.
 > **Found: 33 silent-wrong compiler bugs (sw76–sw108), 10 silent tool defects (sw109–sw118),
