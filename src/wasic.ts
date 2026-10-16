@@ -4091,6 +4091,38 @@ class WasicTranspiler {
    * and registers them as mutable i32 WASM globals so functions can read/write them.
    * Must run after parseModuleGlobals() and before emitFunction() calls.
    */
+  /** The struct of an INLINE element type, `Array<{ a: i32; b: i32 }>`: `__Anon_<fields>` (one per
+   *  shape), made on first use; undefined when the type has no fields. Shared by the function and _start
+   *  pre-scans (the top level parsed the type as a function signature: ld10, 2026-10-15). */
+  private inlineElementStruct(varName: string, typeArgStr: string): string | undefined {
+    // Named by its FIELDS, not the variable: a function's `recs: Array<{ a: i32; b: i32 }>` and a
+    // top-level `recs: Array<{ a: i32; b: f64 }>` shared `__Anon_recs`, whichever came first.
+    const shape = [...typeArgStr.matchAll(/(\w+)\s*:\s*([\w.]+)/g)].map((m) => `${m[1]}_${m[2]}`)
+      .join("_").replace(/\W/g, "_");
+    const synName = shape ? `__Anon_${shape}` : `__Anon_${varName}`;
+    if (!this.structDefs.has(synName)) {
+      const anonFields: { name: string; type: WatType; offset: number; size: number }[] = [];
+      let anonOffset = 0;
+      const anonRe = /(\w+)\s*:\s*([\w.]+)/g;
+      let anonM: RegExpExecArray | null;
+      while ((anonM = anonRe.exec(typeArgStr)) !== null) {
+        const fname = anonM[1];
+        // 'number' in anonymous struct type args maps to i32 (pointer/id semantics),
+        // not f64 — these fields are typically namePtr, typeId, scopeId, addr etc.
+        const rawFtype = anonM[2];
+        const ftype = (rawFtype === "number") ? "i32" : (mapType(rawFtype) as WatType);
+        const fsize = (ftype === "f64" || ftype === "i64") ? 8 : 4;
+        if (fsize === 8 && anonOffset % 8 !== 0) anonOffset += 4;
+        anonFields.push({ name: fname, type: ftype, offset: anonOffset, size: fsize });
+        anonOffset += fsize;
+      }
+      if (anonFields.length > 0) {
+        this.structDefs.set(synName, { name: synName, fields: anonFields, totalSize: anonOffset });
+      }
+    }
+    return this.structDefs.has(synName) ? synName : undefined;
+  }
+
   private detectModuleArrayGlobals(): void {
     // Collect all array names used as method receivers in any function body,
     // and whether they need dynamic (heap) layout (push/pop used in functions).
@@ -4132,15 +4164,18 @@ class WasicTranspiler {
         const varName = mFA[1];
         if (!usedInFunctions.has(varName)) continue;
         if (this.moduleGlobals.has(varName)) continue;
-        const funcSig = this.parseFuncTypeSig(mFA[2].trim());
         const isDynamic = needsDynamic.has(varName);
         this.moduleGlobals.set(varName, { type: "i32", mutable: true, initExpr: "0" });
+        // An inline OBJECT element type is a struct array, not a function-pointer one (ld10).
+        const synName = mFA[2].trim().startsWith("{")
+          ? this.inlineElementStruct(varName, mFA[2].trim())
+          : undefined;
         this.moduleArrayVars.set(varName, {
           elemType: "i32",
           ptr: -2,
           length: 0,
           dynamic: isDynamic,
-          isFuncPtrArr: funcSig,
+          ...(synName ? { structTypeName: synName } : { isFuncPtrArr: this.parseFuncTypeSig(mFA[2].trim()) }),
         });
         continue;
       }
@@ -20195,33 +20230,8 @@ ${sum}
           const typeArgStr = funcArrPreF[2].trim();
           // Check if the type arg is an inline object type { field: type; ... }
           if (typeArgStr.startsWith("{")) {
-            const synName = `__Anon_${varName}`;
-            if (!this.structDefs.has(synName)) {
-              const anonFields: { name: string; type: WatType; offset: number; size: number }[] =
-                [];
-              let anonOffset = 0;
-              const anonRe = /(\w+)\s*:\s*([\w.]+)/g;
-              let anonM: RegExpExecArray | null;
-              while ((anonM = anonRe.exec(typeArgStr)) !== null) {
-                const fname = anonM[1];
-                // 'number' in anonymous struct type args maps to i32 (pointer/id semantics),
-                // not f64 — these fields are typically namePtr, typeId, scopeId, addr etc.
-                const rawFtype = anonM[2];
-                const ftype = (rawFtype === "number") ? "i32" : (mapType(rawFtype) as WatType);
-                const fsize = (ftype === "f64" || ftype === "i64") ? 8 : 4;
-                if (fsize === 8 && anonOffset % 8 !== 0) anonOffset += 4;
-                anonFields.push({ name: fname, type: ftype, offset: anonOffset, size: fsize });
-                anonOffset += fsize;
-              }
-              if (anonFields.length > 0) {
-                this.structDefs.set(synName, {
-                  name: synName,
-                  fields: anonFields,
-                  totalSize: anonOffset,
-                });
-              }
-            }
-            if (this.structDefs.has(synName)) {
+            const synName = this.inlineElementStruct(varName, typeArgStr);
+            if (synName) {
               this.arrayVars.set(varName, {
                 elemType: "i32",
                 ptr: -2,
@@ -20813,10 +20823,11 @@ ${sum}
       /\$__str_op_(?:ptr|len)\b/.test(body) && !seenLocals.has("__str_op_ptr")
         ? `    (local $__str_op_ptr i32)\n    (local $__str_op_len i32)`
         : "",
-      // An array literal built inline (`f([1, 2])`) uses $__arr_tmp(2), and a tuple returned
-      // from a ternary's branch $__obj_ret; the pre-scan knows only `(` / `,` before `[` and a
-      // line starting `return [` (ld09, sw30, 2026-10-15).
-      ...["__arr_tmp", "__arr_tmp2", "__obj_ret"].filter((t) =>
+      // An array literal built inline (`f([1, 2])`) uses $__arr_tmp(2), a tuple returned from a
+      // ternary's branch $__obj_ret, and a string push in a one-line loop $__str_push_*; the
+      // pre-scan knows only `(` / `,` before `[`, a line starting `return [`, and a push that
+      // starts its line (ld09, sw30, ld44, 2026-10-15).
+      ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len"].filter((t) =>
         new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)
       ).map((t) => `    (local $${t} i32)`),
     ].filter((d) => d !== "").join("\n");
@@ -21829,6 +21840,19 @@ ${sum}
           startLocals.set(funcTypedDeclS[1], "i32");
           continue;
         }
+        // `const t = recs[i]` of a struct array: `t` is that struct (Phase 19 Fix C's twin; the
+        // top level had none, so `t.a` was refused: ld10, 2026-10-15).
+        {
+          const arrIdxPreS = line.match(/^(?:var|let|const)\s+(\w+)\s*=\s*(\w+)\[([^\]]+)\]\s*;?$/);
+          const aiS = arrIdxPreS ? this.arrayVars.get(arrIdxPreS[2]) : undefined;
+          const defS = aiS?.structTypeName ? this.structDefs.get(aiS.structTypeName) : undefined;
+          if (arrIdxPreS && defS && !startLocals.has(arrIdxPreS[1])) {
+            this.structVars.set(arrIdxPreS[1], { def: defS, ptr: -1 });
+            startDeclaredLocals.push([arrIdxPreS[1], "i32"]);
+            startLocals.set(arrIdxPreS[1], "i32");
+            continue;
+          }
+        }
         // Phase 23: tuple literal — const t: [i32, f64] = [1, 2.0] (mirrors emitFunction pre-scan)
         const tupleLitPre2 = line.match(
           /^(?:var|let|const)\s+(\w+)\s*:\s*(\[(?:[^[\]]|\[[^\]]*\])*\])\s*=\s*\[/,
@@ -22128,9 +22152,30 @@ ${sum}
           );
           if (funcArrPre2) {
             const varName2 = funcArrPre2[1];
-            const funcSig2 = this.parseFuncTypeSig(funcArrPre2[2].trim());
             const isGlobalArr2 = this.moduleArrayVars.has(varName2) &&
               this.moduleGlobals.has(varName2);
+            // An inline OBJECT element type, `Array<{ a: i32; b: i32 }>` (ld10): a struct array,
+            // not a function-pointer one (mirrors emitFunction's pre-scan).
+            const synName2 = funcArrPre2[2].trim().startsWith("{")
+              ? this.inlineElementStruct(varName2, funcArrPre2[2].trim())
+              : undefined;
+            if (synName2) {
+              const base2 = isGlobalArr2 ? this.moduleArrayVars.get(varName2)! : undefined;
+              this.arrayVars.set(varName2, {
+                ...(base2 ?? { elemType: "i32" as WatType, ptr: -2, length: 0, dynamic: true }),
+                structTypeName: synName2,
+              });
+              if (!isGlobalArr2) {
+                startLocals.set(varName2, "i32");
+                startDeclaredLocals.push([varName2, "i32"]);
+              }
+              if (!startLocals.has("__rt_struct_ptr")) {
+                startLocals.set("__rt_struct_ptr", "i32");
+                startDeclaredLocals.push(["__rt_struct_ptr", "i32"]);
+              }
+              continue;
+            }
+            const funcSig2 = this.parseFuncTypeSig(funcArrPre2[2].trim());
             if (isGlobalArr2) {
               // Module-level global: re-populate arrayVars with the registered metadata
               const existing2 = this.moduleArrayVars.get(varName2)!;
@@ -22600,8 +22645,9 @@ ${sum}
         declMap.set("__str_op_ptr", "i32");
         declMap.set("__str_op_len", "i32");
       }
-      // an array literal built inline, `f([1, 2])` (sw30; see emitFunction)
-      for (const t of ["__arr_tmp", "__arr_tmp2"]) {
+      // an array literal built inline, `f([1, 2])`, a string push in a one-line loop (sw30, ld44;
+      // see emitFunction)
+      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len"]) {
         if (new RegExp(`\\$${t}\\b`).test(bodyWat) && !declMap.has(t)) declMap.set(t, "i32");
       }
       // console.log's argument temporaries (sw68)
