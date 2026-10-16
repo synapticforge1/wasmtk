@@ -758,6 +758,7 @@ interface FuncParam {
   type: WatType;
   defaultValue?: string; // default expression, e.g. "0" or "42"
   arrayElemType?: WatType; // set when param is an array pointer (T[])
+  is2DArray?: boolean; // T[][]: arrayElemType is T, the rows are dynamic arrays (ld12)
   arrayStructElemType?: string; // struct type name when T[] is a struct array, e.g. "Person" for Person[]
   structType?: string; // set when param is a struct pointer (stores struct name, e.g. "Point")
   funcTypeInfo?: { params: WatType[]; result: WatType | null }; // set when param is a function type
@@ -1459,6 +1460,18 @@ function netSquareBracketDepth(s: string): number {
     if (mask[i]) continue;
     if (s[i] === "[") d++;
     else if (s[i] === "]") d--;
+  }
+  return d;
+}
+
+/** Net `{` minus `}` in `s`, outside string literals. */
+function braceDepthOf(s: string): number {
+  const mask = buildStringLiteralMask(s);
+  let d = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (mask[i]) continue;
+    if (s[i] === "{") d++;
+    else if (s[i] === "}") d--;
   }
   return d;
 }
@@ -2260,6 +2273,13 @@ class WasicTranspiler {
         if (m) bodyFuncTypes.set(m[1], this.parseFuncTypeSig(m[2]));
       }
       fn.bodyLines = fn.bodyLines.map((line) => {
+        // `const g: () => T = () => expr` → `const g = () => expr`, as the top-level pass does
+        // (liftStartBodyArrows); the type is in bodyFuncTypes. Unstripped, the TYPE's `=>` was
+        // found first and the arrow was never lifted, so the declaration emitted nothing and a
+        // call through `g` reached table slot 0 (sw72 / ld22, 2026-10-15).
+        if (/^(?:const|let|var)\s+\w+\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=\s*(?:async\s+)?\(/.test(line)) {
+          line = line.replace(/^((?:const|let|var)\s+\w+)\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=/, "$1 =");
+        }
         // Loop until stable — handles multiple arrows on one line (e.g. object literal returns)
         let prev = "";
         while (prev !== line) {
@@ -2296,7 +2316,18 @@ class WasicTranspiler {
       const m = line.match(/^(?:let|const|var)\s+(\w+)\s*:\s*(\([^)]*\)\s*=>\s*\w+)/);
       if (m) bodyFuncTypes.set(m[1], this.parseFuncTypeSig(m[2]));
     }
+    // A plain function's name, the value of a function-typed variable (not a closure factory).
+    const plainFn = (s: string) =>
+      this.functions.some((f) => f.name === s.trim() && !f.isClosureFactory && !f.returnedArrow);
     this.startBodyLines = this.startBodyLines.map((line) => {
+      // `const op: (x: i32) => i32 = dbl` / `= c ? tri : dbl` keeps its annotation: it is a
+      // table index called through call_indirect, which the annotation registers. Stripped, `op`
+      // was an f64 local and `op(5)` an unknown function (ld01, 2026-10-15).
+      const fnInit = line.match(/^(?:const|let|var)\s+\w+\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=\s*(.+?)\s*;?$/)?.[1];
+      if (fnInit) {
+        const tern = fnInit.match(/^.+\?\s*(\w+)\s*:\s*(\w+)$/);
+        if (plainFn(fnInit) || (tern && plainFn(tern[1]) && plainFn(tern[2]))) return line;
+      }
       // Strip function-type annotation so substituteOneArrow can find the actual arrow body.
       // "const name: () => T = () => expr" → "const name = () => expr"
       // The annotation type info is already captured in bodyFuncTypes above.
@@ -2588,7 +2619,17 @@ class WasicTranspiler {
         if (!ownParams.has(id) && !KWORDS.has(id) && outerScope.has(id)) captures.push(id);
       }
 
-      if (captures.length > 0) {
+      // A value of a RETURNED object literal is called through a closure pointer (the result
+      // struct's dispatch), so it needs a closure object even with nothing to capture: a bare table
+      // index there trapped, "function signature mismatch" (ld40, 2026-10-15). The same for a
+      // local the function returns in such a literal, `{ g: g }` / `{ g }`.
+      const returnObj = /^return\s*\{/.test(line.trim()) && preceding === ":";
+      const returnedLocal = preceding === "=" && assignTarget !== "" &&
+        enclosingFn.bodyLines.some((l) =>
+          /^return\s*\{/.test(l.trim()) &&
+          new RegExp(`[{,:]\\s*${assignTarget}\\s*[,}]`).test(l)
+        );
+      if (captures.length > 0 || returnObj || returnedLocal) {
         // Inject captures as extra params on the anon (inner) function
         anonDef.closureCaptures = captures;
         for (const cap of captures) anonDef.params.push({ name: cap, type: outerScope.get(cap)! });
@@ -2950,7 +2991,10 @@ class WasicTranspiler {
       }
       const paramType = mapType(typeAnnotation);
       // Detect array param: T[] → i32 pointer with element type T
-      const arrElemMatch = typeAnnotation.match(/^(\w+)\[\]$/);
+      // A 2D array param, T[][] (ld12, 2026-10-15): it was no array at all, so `rows[1][2]` was
+      // refused. Its element type is T; the param is the outer array's pointer.
+      const arr2DElemMatch = typeAnnotation.match(/^(\w+)\[\]\[\]$/);
+      const arrElemMatch = typeAnnotation.match(/^(\w+)\[\]$/) ?? arr2DElemMatch;
       const arrayElemType: WatType | undefined = arrElemMatch
         ? mapType(arrElemMatch[1]) as WatType
         : undefined;
@@ -2998,7 +3042,8 @@ class WasicTranspiler {
           isU64,
         };
       }
-      return { name, type: resolvedType, arrayElemType, arrayStructElemType, structType, isAny, isU64 };
+      const is2DArray = arr2DElemMatch ? true : undefined;
+      return { name, type: resolvedType, arrayElemType, is2DArray, arrayStructElemType, structType, isAny, isU64 };
     });
   }
 
@@ -3169,6 +3214,17 @@ class WasicTranspiler {
             }
           }
           bodyLines.push(joined.trim());
+        } else if (/^return\s+\([^)]*\)\s*(?::\s*[\w\[\]|]+\s*)?=>\s*\{/.test(l) && braceDepthOf(l) > 0) {
+          // A multi-line returned BLOCK arrow, `return () => {` … `};`: one line, newlines kept
+          // for parseReturnArrow, as `return function` below. Its body and `};` were left as the
+          // factory's own statements, "Unsupported statement: };" (ld20, 2026-10-15).
+          let depth = braceDepthOf(l), joined = l;
+          while (depth > 0 && li + 1 < rawLines.length) {
+            li++;
+            joined += "\n" + rawLines[li];
+            depth += braceDepthOf(rawLines[li]);
+          }
+          bodyLines.push(joined.trim());
         } else if (/^return\s+function\s*\(/.test(l)) {
           // Multi-line `return function(params): retType { body }` — join then rewrite to arrow
           let depth = 0, joined = l;
@@ -3239,7 +3295,34 @@ class WasicTranspiler {
             const objContent = returnObjLine.slice(objStart + 1, objEnd).trim();
             const arrowFieldRe = /(\w+)\s*:\s*\(([^)]*)\)(?:\s*:\s*([\w\[\]|]+))?\s*=>/g;
             const autoFields: StructField[] = [];
+            const fieldPos: number[] = []; // where each field sits in the literal, for its order
             let autoOffset = 0;
+            // A field whose value NAMES a local declared with a function type, `{ g: g }` or `{ g }`
+            // (`const g: () => i32 = () => …`): the local holds the closure pointer, as an inline
+            // arrow's factory call does. Only inline arrows were fields, so `rd.g()` was refused
+            // (ld22, 2026-10-15).
+            const fnLocalRe = /^(?:var|let|const)\s+(\w+)\s*:\s*\(([^)]*)\)\s*=>\s*([\w\[\]|]+)\s*=/;
+            const fnLocals = new Map<string, { params: WatType[]; result: WatType | null }>();
+            for (const bl of bodyLines) {
+              const fm = bl.match(fnLocalRe);
+              if (!fm) continue;
+              fnLocals.set(fm[1], {
+                params: fm[2].trim()
+                  ? fm[2].split(",").map((p) => {
+                    const ci = p.indexOf(":");
+                    return (ci !== -1 ? mapType(p.slice(ci + 1).trim()) : "i32") as WatType;
+                  })
+                  : [],
+                result: fm[3] === "void" ? null : mapType(fm[3]) as WatType,
+              });
+            }
+            for (const entry of splitTopLevelCommasStringAware(objContent)) {
+              const em = entry.match(/^(\w+)(?:\s*:\s*(\w+))?$/);
+              const fl = em ? fnLocals.get(em[2] ?? em[1]) : undefined;
+              if (!em || !fl) continue;
+              autoFields.push({ name: em[1], type: "i32", offset: 0, size: 4, funcType: fl });
+              fieldPos.push(objContent.indexOf(entry));
+            }
             let afm: RegExpExecArray | null;
             while ((afm = arrowFieldRe.exec(objContent)) !== null) {
               const fieldName = afm[1];
@@ -3307,10 +3390,18 @@ class WasicTranspiler {
               autoFields.push({
                 name: fieldName,
                 type: "i32",
-                offset: autoOffset,
+                offset: 0,
                 size: 4,
                 funcType: { params: mParams, result: mResult },
               });
+              fieldPos.push(afm.index ?? 0);
+            }
+            // Offsets in the literal's own field order.
+            const order = autoFields.map((_, k) => k).sort((a, b) => fieldPos[a] - fieldPos[b]);
+            const ordered = order.map((k) => autoFields[k]);
+            autoFields.length = 0;
+            for (const f of ordered) {
+              autoFields.push({ ...f, offset: autoOffset });
               autoOffset += 4;
             }
             if (autoFields.length > 0) {
@@ -3479,6 +3570,34 @@ class WasicTranspiler {
     let bodyStart = afterClose + restMatch[0].length;
     while (bodyStart < body.length && body[bodyStart] === " ") bodyStart++;
 
+    // Infer the result type when no explicit annotation was given (e.g. `(val: i32) => val * x`).
+    // A minimal locals map from the parsed params so inferInitType can resolve identifiers.
+    const inferenceScope = (): Map<string, WatType> => {
+      const paramLocals = new Map<string, WatType>();
+      for (const p of this.parseParams(rawParams)) paramLocals.set(p.name, p.type);
+      // Also include factory params (captures) so identifiers like `original` resolve correctly
+      if (factoryParams) {
+        for (const p of factoryParams) {
+          if (!paramLocals.has(p.name)) paramLocals.set(p.name, p.type);
+        }
+      }
+      // Also include variables declared in the factory body (e.g. `const inner = (x) => ...`)
+      // Arrow-assigned variables are i32 closure pointers; other vars use inferInitType.
+      for (const bl of bodyLines) {
+        const bm = bl.match(/^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+))?\s*(?:=\s*(.+?))?;?$/);
+        if (!bm || paramLocals.has(bm[1])) continue;
+        const initE = (bm[3] ?? "").trim();
+        if (/^\s*\([^)]*\)\s*(?::\s*\w+)?\s*=>/.test(initE)) paramLocals.set(bm[1], "i32");
+        else {
+          const t = bm[2]
+            ? mapType(bm[2])
+            : inferInitType(initE, paramLocals, this.enumValues, this.functions);
+          if (t !== "string") paramLocals.set(bm[1], t);
+        }
+      }
+      return paramLocals;
+    };
+
     let innerBodyLines: string[];
     if (body[bodyStart] === "{") {
       let depth = 1;
@@ -3490,34 +3609,26 @@ class WasicTranspiler {
       }
       const rawBody = body.slice(bodyStart + 1, ci - 1);
       innerBodyLines = rawBody.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+      // A one-line body, `return () => { c++; return c; }`, is several statements (ld20).
+      if (innerBodyLines.length === 1) innerBodyLines = WasicTranspiler.splitStmts(innerBodyLines[0]);
+      // An unannotated block arrow returns what its `return` returns, as the expression form
+      // infers (it was typed void, an invalid module: ld20). The body's own typed locals count.
+      if (result === null) {
+        const retLine = innerBodyLines.find((l) => /^return\s+\S/.test(l));
+        if (retLine) {
+          const scope = inferenceScope();
+          for (const bl of innerBodyLines) {
+            const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*:\s*(\w+)\s*=/);
+            if (vm) scope.set(vm[1], mapType(vm[2]) as WatType);
+          }
+          const retExpr = retLine.replace(/^return\s+/, "").replace(/;$/, "").trim();
+          result = inferInitType(retExpr, scope, this.enumValues, this.functions);
+        }
+      }
     } else {
       const rawExpr = body.slice(bodyStart).trim().replace(/;$/, "");
-      // Infer result type when no explicit annotation was given (e.g. `(val: i32) => val * x`).
-      // Build a minimal locals map from the parsed params so inferInitType can resolve identifiers.
       if (result === null) {
-        const paramLocals = new Map<string, WatType>();
-        for (const p of this.parseParams(rawParams)) paramLocals.set(p.name, p.type);
-        // Also include factory params (captures) so identifiers like `original` resolve correctly
-        if (factoryParams) {
-          for (const p of factoryParams) {
-            if (!paramLocals.has(p.name)) paramLocals.set(p.name, p.type);
-          }
-        }
-        // Also include variables declared in the factory body (e.g. `const inner = (x) => ...`)
-        // Arrow-assigned variables are i32 closure pointers; other vars use inferInitType.
-        for (const bl of bodyLines) {
-          const bm = bl.match(/^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+))?\s*(?:=\s*(.+?))?;?$/);
-          if (!bm || paramLocals.has(bm[1])) continue;
-          const initE = (bm[3] ?? "").trim();
-          if (/^\s*\([^)]*\)\s*(?::\s*\w+)?\s*=>/.test(initE)) paramLocals.set(bm[1], "i32");
-          else {
-            const t = bm[2]
-              ? mapType(bm[2])
-              : inferInitType(initE, paramLocals, this.enumValues, this.functions);
-            if (t !== "string") paramLocals.set(bm[1], t);
-          }
-        }
-        result = inferInitType(rawExpr, paramLocals, this.enumValues, this.functions);
+        result = inferInitType(rawExpr, inferenceScope(), this.enumValues, this.functions);
       }
       innerBodyLines = result !== null ? [`return ${rawExpr};`] : [`${rawExpr};`];
     }
@@ -3986,16 +4097,26 @@ class WasicTranspiler {
     const usedInFunctions = new Set<string>();
     const needsDynamic = new Set<string>();
     for (const fn of this.functions) {
+      // A name the function declares itself (a parameter, its own `const` / `let` / `var`) is ITS
+      // variable, not a use of the top-level one: a function's local `m` made a top-level 2D `m`
+      // a module global that _start then initialised as a local, so it read as zeros (sw73,
+      // 2026-10-15; sw70 is the same rule for reads, isModuleGlobalArr).
+      const own = new Set(fn.params.map((p) => p.name));
+      for (const line of fn.bodyLines) {
+        for (const d of line.matchAll(/\b(?:const|let|var)\s+([A-Za-z_]\w*)/g)) own.add(d[1]);
+      }
       for (const line of fn.bodyLines) {
         // Mutators make the array dynamic; EVERY one on the line (the first match only, before).
         for (
           const m of line.matchAll(/\b(\w+)\.(push|pop|shift|unshift|splice)\s*\(/g)
-        ) needsDynamic.add(m[1]);
+        ) if (!own.has(m[1])) needsDynamic.add(m[1]);
         // ANY mention of the name counts as a use: a bare `g` (`"g=" + g`, `${g}`, `f(g)`) was
         // missed, so a top-level array used that way inside a function was never registered as a
         // module global and was read as a nonexistent local (found with sw09, 2026-10-09). Only
         // names DECLARED as top-level arrays below are affected.
-        for (const m of line.matchAll(/\b([A-Za-z_]\w*)\b/g)) usedInFunctions.add(m[1]);
+        for (const m of line.matchAll(/\b([A-Za-z_]\w*)\b/g)) {
+          if (!own.has(m[1])) usedInFunctions.add(m[1]);
+        }
       }
     }
     // Also mark arrays as dynamic if startBodyLines uses push/pop on them.
@@ -7585,21 +7706,15 @@ class WasicTranspiler {
       }
     }
 
-    // n.toString() → malloc 32 bytes, call $__i32_to_str / $__f64_to_str
+    // n.toString() is String(n) for a number or a boolean (bigint without its `n`, a boolean as
+    // `true` / `false`). It had its own copy, which sent an i64 to `$__i32_to_str`: an invalid
+    // module (ld08, 2026-10-15).
     const toStrMatch = initExpr.match(/^(\w+)\.toString\s*\(\s*\)$/);
     if (toStrMatch) {
       const srcName = toStrMatch[1];
       const srcType = locals.get(srcName) ?? this.moduleGlobals.get(srcName)?.type;
-      if (srcType === "i32" || srcType === "f64" || srcType === "i64") {
-        this.needsNumericHelpers = true;
-        const helperName = srcType === "f64" ? "$__f64_to_str" : "$__i32_to_str";
-        const getOp = this.moduleGlobals.has(srcName)
-          ? `(global.get $${srcName})`
-          : `(local.get $${srcName})`;
-        return [
-          `(local.set $${varName}_ptr (call $__malloc (i32.const 32)))`,
-          `${ind}(local.set $${varName}_len (call ${helperName} ${getOp} (local.get $${varName}_ptr)))`,
-        ].join("\n");
+      if (srcType === "i32" || srcType === "f64" || srcType === "f32" || srcType === "i64" || srcType === "bool") {
+        return this.emitStringAssignInner(varName, `String(${srcName})`, locals);
       }
     }
 
@@ -7999,9 +8114,11 @@ class WasicTranspiler {
     if (plusIdx === -1) return null;
     const lhs = expr.slice(0, plusIdx).trim();
     const rhs = expr.slice(plusIdx + 1).trim();
-    if (!this.isStringExpr(lhs, locals) && !this.isStringExpr(rhs, locals)) return null;
-    const lhsParts = this.flattenStringConcat(lhs, locals) ?? [lhs];
-    return [...lhsParts, rhs];
+    // `+` groups from the left: a left side that is itself a string concatenation makes this one
+    // a string too. `s + n + 1` split as `s + n` / `1`, neither a string, and was refused (ld07).
+    const lhsFlat = this.flattenStringConcat(lhs, locals);
+    if (!lhsFlat && !this.isStringExpr(lhs, locals) && !this.isStringExpr(rhs, locals)) return null;
+    return [...(lhsFlat ?? [lhs]), rhs];
   }
 
   /** Returns true if expr is a string literal, a known string variable, a template literal,
@@ -8350,6 +8467,15 @@ ${prefixed}
 
   private emitStringPtrLen(expr: string, locals: Map<string, WatType>): string {
     expr = expr.trim();
+    // `n.toString()` of a number or boolean is `String(n)` (ld08's value form: as an argument or in
+    // console.log, where it was refused).
+    {
+      const ts = expr.match(/^(\w+)\.toString\s*\(\s*\)$/);
+      const tt = ts ? locals.get(ts[1]!) ?? this.moduleGlobals.get(ts[1]!)?.type : undefined;
+      if (ts && (tt === "i32" || tt === "f64" || tt === "f32" || tt === "i64" || tt === "bool")) {
+        return this.emitStringPtrLen(`String(${ts[1]})`, locals);
+      }
+    }
     // `String(x)` as a (ptr, len) pair, built by a `$__<type>_to_new_str` helper. Only
     // emitStringAssign knew it, so an ARGUMENT `s.indexOf(String(n))` searched for "" and gave 0
     // (sw08, 2026-10-09).
@@ -9575,8 +9701,13 @@ ${prefixed}
 
     // Phase 6d: 2D array element read: arr[rowIdx][colIdx]
     // Must come before the 1D check since the greedy 1D regex would swallow both brackets.
+    // Each index balanced: `d[1][0] + rows[0][1]` is a sum, not `d[1][…]` with the index
+    // `0] + rows[0][1` (found with ld12, 2026-10-15).
     const bracket2DMatch = expr.match(/^(\w+)\[(.+?)\]\[(.+)\]$/);
-    if (bracket2DMatch) {
+    if (
+      bracket2DMatch && parenDepthNeverNegative(bracket2DMatch[2]) &&
+      parenDepthNeverNegative(bracket2DMatch[3])
+    ) {
       const outerInfo = this.arrayVars.get(bracket2DMatch[1]);
       if (outerInfo?.is2D) {
         const rowIdxWat = this.emitExpr(bracket2DMatch[2], locals, "i32");
@@ -11428,7 +11559,14 @@ ${prefixed}
         const _lhsCastType: WatType | null = _lhsCastM && /^(i32|i64|f32|f64|number|bigint|bool|boolean)$/.test(_lhsCastM[1])
           ? mapType(_lhsCastM[1] === "number" ? "f64" : _lhsCastM[1])
           : null;
-        const lhsType: WatType = alwaysI32 ? "i32" : (_lhsIsStrSlice ? "string" : (_lhsCastType ?? _dotFieldType ??
+        // An equality between BOOLEANS is an i32 compare, whatever leads the left side:
+        // `x < 1 === ok` took f64 from `x` over two i32 results, an invalid module (ld23,
+        // 2026-10-15; the console twin is isBoolOperand).
+        // Not `a || b` / `a && b`: of two numbers that is a number (sw49).
+        const _isBoolSide = (s: string) => this.inferExprType(s, locals) === "bool" && !splitTopLogical(s);
+        const _boolEquality = (op === "===" || op === "!==" || op === "==" || op === "!=") &&
+          (_isBoolSide(lhs) || _isBoolSide(rhs));
+        const lhsType: WatType = alwaysI32 || _boolEquality ? "i32" : (_lhsIsStrSlice ? "string" : (_lhsCastType ?? _dotFieldType ??
           (/^\w+$/.test(lhs) && locals.has(lhs)
             ? locals.get(lhs)!
             : /^\w+$/.test(lhs) && this.moduleGlobals.has(lhs)
@@ -12455,6 +12593,17 @@ ${prefixed}
     if (line.startsWith("return")) {
       const expr = line.replace(/^return\s*/, "").replace(/;$/, "").trim();
       if (!expr || funcResult === null) return "(return)";
+      // `return c ? [a, b] : [b, a]` from a TUPLE-returning function: each branch is a tuple, so
+      // return each on its own path. As one value the branches were ARRAYS (length, capacity
+      // header), and `r[0]` read the length (ld09, 2026-10-15).
+      if (this.currentFuncResultTsName && this.structDefs.has(this.currentFuncResultTsName)) {
+        const tern = this.splitTernaryTop(expr);
+        if (tern && (tern[1].trim().startsWith("[") || tern[2].trim().startsWith("["))) {
+          return `(if ${this.emitCond(tern[0], locals)} (then ${
+            this.emitStatementCore(`return ${tern[1].trim()};`, locals, funcResult)
+          }) (else ${this.emitStatementCore(`return ${tern[2].trim()};`, locals, funcResult)}))\n      (unreachable)`;
+        }
+      }
       // Phase 13 (#13 async): inside a promise-returning async fn, `return expr` resolves the
       // promise — wrap the inner value in $__promise_resolve_<T>. funcResult is i32 (the promise
       // ptr). See cmem/async-design.md §3.4. (Rejection-on-throw is 13.3.)
@@ -12815,6 +12964,18 @@ ${prefixed}
             this.getFuncTableIdx(simpleNameM[1])
           }))`;
         }
+        // A choice of functions, `c ? tri : dbl`: each branch is a function's table index, which
+        // emitExpr gives a function NAME used as a value (ld01, 2026-10-15).
+        const fnTern = this.splitTernaryTop(fullInitExpr);
+        const isFnName = (s: string) => /^\w+$/.test(s.trim()) && this.functions.some((f) => f.name === s.trim());
+        if (fnTern && isFnName(fnTern[1]) && isFnName(fnTern[2])) {
+          return `(local.set $${funcTypeDecl[1]} ${this.emitExpr(fullInitExpr, locals, "i32")})`;
+        }
+        // Any other initialiser was DROPPED: the local stayed 0, and a call through it reached
+        // table slot 0, whatever function that was (sw72, 2026-10-15).
+        this.diagnostics.push(
+          `Unsupported function-typed initialiser: ${line.trim().slice(0, 80)} (init: ${fullInitExpr.slice(0, 60)})`,
+        );
       }
       return "";
     }
@@ -12956,6 +13117,11 @@ ${prefixed}
       if (info?.is2D && info.arrayFromExpr) {
         return this.emitArrayFromInit(arr2DLetMatch[1], info.elemType, info.arrayFromExpr, locals);
       }
+      // Not a literal: the pointer of the array the right side names or returns (`= m`,
+      // `= rows`, `= mk()`). It was laid out as a literal with no rows (ld11, ld12, sw31).
+      if (info?.is2D && !info.rows) {
+        return `(local.set $${arr2DLetMatch[1]} ${this.emitExpr(arr2DLetMatch[2]!.trim(), locals, "i32")})`;
+      }
     }
 
     // Array literal declaration: const arr: T[] = [...] or const arr = [...]
@@ -12984,7 +13150,8 @@ ${prefixed}
       const varName = arrCallDecl[1];
       const info = this.arrayVars.get(varName);
       if (info?.dynamic) {
-        const initWat = this.emitExpr(arrCallDecl[2].trim(), locals, "i32");
+        // without its `;`: `const b: string[] = a;` emitted `a;`, refused (ld13, 2026-10-15)
+        const initWat = this.emitExpr(arrCallDecl[2].trim().replace(/;$/, ""), locals, "i32");
         return `(local.set $${varName} ${initWat})`;
       }
     }
@@ -14726,7 +14893,8 @@ ${prefixed}
       setExprFallbackResolver((tok, locs) => {
         const l = locs as Map<string, WatType>;
         if (this.isStringExpr(tok, l)) return undefined;
-        const t = this.inferExprType(tok, l);
+        // An array literal (a call's argument, `t([1, 2, 3])`) is its i32 pointer (sw30, ld12).
+        const t = tok.trim().startsWith("[") ? "i32" : this.inferExprType(tok, l);
         const bt: WatType = t === "f64" || t === "f32" ? "f64" : t === "i64" ? "i64" : "i32";
         const mark = this.diagnostics.length;
         let wat = "";
@@ -15195,7 +15363,8 @@ ${prefixed}
       setExprFallbackResolver((tok, locs) => {
         const l = locs as Map<string, WatType>;
         if (this.isStringExpr(tok, l)) return undefined;
-        const t = this.inferExprType(tok, l);
+        // An array literal (a call's argument, `t([1, 2, 3])`) is its i32 pointer (sw30, ld12).
+        const t = tok.trim().startsWith("[") ? "i32" : this.inferExprType(tok, l);
         const bt: WatType = t === "f64" || t === "f32" ? "f64" : t === "i64" ? "i64" : "i32";
         const mark = this.diagnostics.length;
         let wat = "";
@@ -19481,6 +19650,15 @@ ${sum}
             isStringArr: isStrArr,
             structTypeName: p.arrayStructElemType,
           });
+        } else if (p.is2DArray) {
+          // T[][]: rows of dynamic arrays, read as `rows[i][j]` (ld12)
+          this.arrayVars.set(p.name, {
+            elemType: p.arrayElemType,
+            ptr: -1,
+            length: 0,
+            dynamic: true,
+            is2D: true,
+          });
         } else {
           // string[] params use dynamic layout (8-byte header + 8-byte ptr+len elements)
           this.arrayVars.set(p.name, {
@@ -19912,11 +20090,13 @@ ${sum}
             locals.set("__from_i", "i32");
           }
         } else {
-          const rows2D = parse2DArrayLiteral(rhs2D);
+          // A literal is laid out from its rows; anything else (`= rows`, `= mk()`) is the array
+          // it evaluates to, with no rows (ld11, ld12, sw31).
+          const rows2D = rhs2D.startsWith("[") ? parse2DArrayLiteral(rhs2D) : undefined;
           this.arrayVars.set(varName2D, {
             elemType: elemType2D,
             ptr: -2,
-            length: rows2D.length,
+            length: rows2D?.length ?? 0,
             dynamic: true,
             is2D: true,
             rows: rows2D,
@@ -19924,7 +20104,9 @@ ${sum}
         }
         declaredLocals.push([varName2D, "i32"]);
         locals.set(varName2D, "i32");
-        if (!locals.has("__2d_tmp")) {
+        // for the builders only: an alias (`= rows`, `= mk()`) builds nothing
+        const built2D = this.arrayVars.get(varName2D)!;
+        if (!locals.has("__2d_tmp") && (built2D.rows || built2D.arrayFromExpr)) {
           declaredLocals.push(["__2d_tmp", "i32"]);
           locals.set("__2d_tmp", "i32");
         }
@@ -20627,9 +20809,17 @@ ${sum}
       ? `    (local $__tmpl_num_ptr i32)\n    (local $__tmpl_num_len i32)`
       : "";
     // Likewise the $__str_op pair, when only emission knew it was needed (sw49's console rewrite).
-    const strOpTempDecls = /\$__str_op_(?:ptr|len)\b/.test(body) && !seenLocals.has("__str_op_ptr")
-      ? `    (local $__str_op_ptr i32)\n    (local $__str_op_len i32)`
-      : "";
+    const strOpTempDecls = [
+      /\$__str_op_(?:ptr|len)\b/.test(body) && !seenLocals.has("__str_op_ptr")
+        ? `    (local $__str_op_ptr i32)\n    (local $__str_op_len i32)`
+        : "",
+      // An array literal built inline (`f([1, 2])`) uses $__arr_tmp(2), and a tuple returned
+      // from a ternary's branch $__obj_ret; the pre-scan knows only `(` / `,` before `[` and a
+      // line starting `return [` (ld09, sw30, 2026-10-15).
+      ...["__arr_tmp", "__arr_tmp2", "__obj_ret"].filter((t) =>
+        new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)
+      ).map((t) => `    (local $${t} i32)`),
+    ].filter((d) => d !== "").join("\n");
     // console.log's argument temporaries (sw68), named by type: `$__clt_f64_1`
     const consoleTempDecls = consoleTempLocals(body, seenLocals).join("\n");
     this.scalarStrTempsUsed = savedScalarTemps;
@@ -21379,10 +21569,9 @@ ${sum}
       const t = members[0];
       if (/^(Promise|PromiseSettledResult)\s*</.test(t)) return true;
       if (t.startsWith("{") || t.startsWith("[")) return true;
-      // A 2D array from a name or a call: the annotated 2D handler builds a fresh array from a
-      // LITERAL and read `= rows` as an empty one (silent 0s). The inferred path aliases the
-      // pointer. 1D keeps its annotation: there the annotated path is the correct one.
-      if (/^[A-Za-z_$][\w$]*\s*\[\s*\]\s*\[\s*\]$/.test(t)) return true;
+      // A 2D array keeps its annotation (2026-10-15): the annotated handler now aliases the
+      // pointer of a name or a call, and registers the result as 2D, which the inferred path never
+      // did (`d[1][2]` was refused: ld11, ld12, sw31).
       const body = aliases.get(t);
       if (body === undefined) return false;
       const bm = nonNull(body);
@@ -21630,6 +21819,16 @@ ${sum}
       const startLocals = new Map<string, WatType>();
       const startDeclaredLocals: [string, WatType][] = [];
       for (const line of this.startBodyLines) {
+        // A function-typed variable, `const op: (x: i32) => i32 = dbl` (mirrors emitFunction's
+        // pre-scan): an i32 table index, called through call_indirect. Top level had no such
+        // clause, so it was an f64 local and `op(5)` a call to an undefined `$op` (ld01).
+        const funcTypedDeclS = line.match(/^(?:var|let|const)\s+(\w+)\s*:\s*(\([^)]*\)\s*=>\s*\w+)/);
+        if (funcTypedDeclS) {
+          this.funcTypeVars.set(funcTypedDeclS[1], this.parseFuncTypeSig(funcTypedDeclS[2]));
+          startDeclaredLocals.push([funcTypedDeclS[1], "i32"]);
+          startLocals.set(funcTypedDeclS[1], "i32");
+          continue;
+        }
         // Phase 23: tuple literal — const t: [i32, f64] = [1, 2.0] (mirrors emitFunction pre-scan)
         const tupleLitPre2 = line.match(
           /^(?:var|let|const)\s+(\w+)\s*:\s*(\[(?:[^[\]]|\[[^\]]*\])*\])\s*=\s*\[/,
@@ -21900,11 +22099,13 @@ ${sum}
               startLocals.set("__from_i", "i32");
             }
           } else {
-            const rows2D = parse2DArrayLiteral(rhs2Ds);
+            // A literal is laid out from its rows; anything else (`= m`, `= mk()`) is the array
+            // it evaluates to, with no rows (ld11, sw31).
+            const rows2D = rhs2Ds.startsWith("[") ? parse2DArrayLiteral(rhs2Ds) : undefined;
             this.arrayVars.set(varName2D, {
               elemType: elemType2D,
               ptr: -2,
-              length: rows2D.length,
+              length: rows2D?.length ?? 0,
               dynamic: true,
               is2D: true,
               rows: rows2D,
@@ -21912,7 +22113,9 @@ ${sum}
           }
           startLocals.set(varName2D, "i32");
           startDeclaredLocals.push([varName2D, "i32"]);
-          if (!startLocals.has("__2d_tmp")) {
+          // for the builders only: an alias (`= m`, `= mk()`) builds nothing
+          const built2Ds = this.arrayVars.get(varName2D)!;
+          if (!startLocals.has("__2d_tmp") && (built2Ds.rows || built2Ds.arrayFromExpr)) {
             startLocals.set("__2d_tmp", "i32");
             startDeclaredLocals.push(["__2d_tmp", "i32"]);
           }
@@ -22396,6 +22599,10 @@ ${sum}
       if (/\$__str_op_(?:ptr|len)\b/.test(bodyWat) && !declMap.has("__str_op_ptr")) {
         declMap.set("__str_op_ptr", "i32");
         declMap.set("__str_op_len", "i32");
+      }
+      // an array literal built inline, `f([1, 2])` (sw30; see emitFunction)
+      for (const t of ["__arr_tmp", "__arr_tmp2"]) {
+        if (new RegExp(`\\$${t}\\b`).test(bodyWat) && !declMap.has(t)) declMap.set(t, "i32");
       }
       // console.log's argument temporaries (sw68)
       for (const m of bodyWat.matchAll(/\$(__clt_(i32|i64|f64)_\d+)\b/g)) {
