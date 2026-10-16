@@ -359,6 +359,14 @@ inversion-checked by narrowing the feature set (it flagged 3 valid GC modules). 
 counts only when the same bytes DECODE, because the validator pools decode and validation errors.
 **Ask of any new verdict source: what does it do with the inputs whose answer you already know?**
 
+**When a verdict API reports in two places, know which one you read, and which way a disagreement
+falls.** [wasmtk, 2026-10-15] binaryang's `wasmValidate` returns `result` AND `errors`; through
+1.12.1 one check filled `errors` and left `result` `Ok`. Our oracle reads `result`. The question
+was not "was it affected" but in WHICH direction: a missed refusal only became a skip for us
+(safe), and our "rejects nothing valid" guard was untouched. Found by binaryang mutating OUR
+binaries against V8, not by any check of ours. **For any verdict source, write down which field is
+the verdict and what a disagreement between its fields would do to the count.**
+
 **Measure a change in steps, so each gain has one cause; then a wrong prediction is a finding.**
 [wasmtk, 2026-09-29] The prediction for binaryang 1.7.1 plus the new oracle was 105 → 94 skips; the
 result was 66. Because the pin and the oracle were measured separately (96, then 66), both misses

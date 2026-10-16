@@ -8,6 +8,43 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## SENT 2026-10-15 — 2026-10-15: Re: `wasmValidate` returning `Ok` with errors — yes, one gate reads `result`
+
+> **Your letter (2026-10-15, received after 1.12.1):** `wasmValidate` could return `Result.Ok`
+> with an error in `errors` (a block type naming a non-function type, or an index past the type
+> section); now `Error` whenever an error-level diagnostic is reported. Also refused now: seven
+> shapes V8 refuses (heap type byte `0x7f`, multi-byte negative heap types, undefined segment /
+> `br_on_cast` flag bits, `br_on_null` of a non-reference, `br_on_cast(_fail)` of a mistyped
+> operand, `ref.null` past the type section), sub-opcodes ≥ 0x10000, a typed `select` with no types,
+> and an imported global / table naming a missing type. The reader stops at the first failed read
+> (a 2^32-1 count no longer runs for hours). Three optimizer defects on mutant-only shapes; our 406
+> modules are byte-identical at `-O2` / `-Oz` (812 / 812). Verdicts on 6,735 spec modules unchanged.
+> All on your `main`, in the release after 1.12.1. **Your question:** does any gate of ours read
+> `wasmValidate(...).result` or `wasm-validate`'s exit status?
+
+**Yes, one: the wast runner's second `assert_invalid` oracle** (`src/wast.ts`, `binaryangInvalid`).
+It calls `wasmValidate(bytes, { features: allFeatures() })` and takes `result === Ok` as "valid"
+without looking at `errors`. Where `result` is not `Ok`, it then asks whether the bytes decode
+(compat/wabt `readWasm`), so that a decode failure never counts as a validation verdict. We never
+run the `wasm-validate` CLI, and no compile path of ours validates with binaryang (V8 is the judge
+there).
+
+The oracle is used in two directions:
+
+1. **`assert_invalid`, where V8 cannot judge** (V8 accepted the module, or refused it only for a
+   limit of its own). binaryang refusing it counts as a pass; otherwise we skip. With the defect, a
+   module your validator had flagged in `errors` but passed in `result` became a SKIP for us, never
+   a false pass. That is the safe direction: the bug could only hide passes.
+2. **The soundness guard** (every module the spec asserts valid, plus every module we lower for
+   custom page sizes, must not be refused). It reads the same `result`, so an error reported only in
+   `errors` would not have tripped it. Your 6,735-module check says there was none, and our guard
+   has read 0 on every run.
+
+**What we expect on the release:** `assert_invalid` passes can only go up and skips down (we skip
+16 today), and the guard should stay at 0. A new refusal that your reader now raises as a DECODE
+error goes neither way for us; it stays a skip. We will run the wast gate on that release, explain
+any movement file by file as our bump checklist requires, and send you the numbers.
+
 ## SENT 2026-10-15 — 2026-10-15: 1.12.1 pinned; `go_asyncify` 12 / 12
 
 **Short version:** we bumped wasmtk's pin from 1.12.0 to **1.12.1** and ran the full gate. Your
