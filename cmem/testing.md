@@ -114,6 +114,17 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-15, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-15, H12 loud rows batch 1 (18 rows closed; sw72, sw73 found and fixed), gate GREEN.**
+> wasi **464/464** (+6: `7f_ConsoleStringIndex`, `7g_ConsoleConcatAndCompare`,
+> `11c_StringBuildingChains`, `6d_Array2DAliases`, `9_ArrayLiteralArgsAndTuples`,
+> `5h_ClosureFieldsAndReturns`) · golden-WAT **521**, re-recorded after a whole-WAT diff of every
+> moved entry (scratchpad `golden_diff.ts`): 6 new; `4_OperatorSemantics`, `7b_ConsoleExprFallback`,
+> `7b_ConsoleOperatorSplit` (an i32 in a parenthesised concat operand printed by `$__i32_to_str`,
+> not via f64), `7b_ConsoleStringCallArg` (`count(a) + count(b)` an i32 add), `13_variadic-functions`
+> (`nums` a local, not a module global: sw73); failed compiles 6 before and after · wast 64,506 / 0
+> / 16 · engine cross-check 1152 on baseline (105 pairs not in it) · go_asyncify 12 / 12 · every
+> other suite at its count · api-surface matches.
+
 > **2026-10-15, binaryang 1.12.0 → 1.12.1 pinned, gate GREEN, nothing known-failing.** Predicted
 > from the changelog (Asyncify only: operands restored on a rewind): `go_asyncify` 11 → 12, every
 > other number still. Held exactly: `go_asyncify_tests` **12 / 12** (nested prints

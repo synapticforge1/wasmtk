@@ -424,8 +424,10 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     `stripInferableAnnotations`): pattern types, and pointer-shaped types the declaration handlers
     cannot read when the initialiser is a call / `await` / name / member access: `Promise<…>`,
     `PromiseSettledResult<…>`, an object type literal, a tuple, an alias to a union or tuple (each
-    optionally `| null`), and a 2D array `T[][]`. Those declarations then compile through the
-    inferred path exactly as before the rule (golden-WAT byte-identical). Scalars, 1D arrays,
+    optionally `| null`). Those declarations then compile through the inferred path exactly as
+    before the rule (golden-WAT byte-identical). **A 2D array `T[][]` was on this list until
+    2026-10-15 and is not now:** its annotated handler aliases a name's or a call's pointer and
+    registers the result as 2D, which the inferred path never did (ld11, ld12, sw31). Scalars, 1D arrays,
     classes and interfaces keep their annotation: it carries meaning there (i32 vs f64, an upcast
     `const s: Shape = c`). Retiring the drop list means teaching the typed handlers those shapes;
     that belongs with the H12 front-end work, not here.
@@ -630,7 +632,11 @@ written.`, which the CLI prints as its `❌` line. Invariants:
 - **`isModuleGlobalArr` also excludes `fnShadowedGlobals`** (sw70, 2026-10-13): the module globals
   the function being emitted declares itself (a local or a param of the same name). The name alone
   made a local array's init `global.set` the module's. Every global-vs-local choice asks "does
-  THIS scope declare it", never "is there a global called that".
+  THIS scope declare it", never "is there a global called that". **The same rule decides which
+  top-level arrays BECOME module globals** (sw73, 2026-10-15): `detectModuleArrayGlobals` counts a
+  function's mention of a name only when the function does not declare it (param, `const` / `let`
+  / `var`). Counting the function's own `m` made a top-level `m` a global that _start initialised
+  as a local.
 - **`isModuleGlobalArr`** checks `arrayVars.get(name)?.ptr === -2` (the module-global sentinel),
   NOT `moduleArrayVars.has()` — so a rest-param shadowing a global array (`ptr === -1`) emits
   `local.get`, not `global.get`. Spread calls `fn(...arr)` likewise pick `global.get` vs
