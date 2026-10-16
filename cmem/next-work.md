@@ -16,9 +16,12 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > of 2026-10-13 are closed.** **Open now: 1 silent (sw71, an out-of-range string index gives
 > `""`), 5 loud, all found 2026-10-15: ld38 (`toFixed`), ld41 (top-level 2D array in a function),
 > ld42 (top-level boolean in a function), ld43 (`(…).length` in console.log), ld45 (printing a
-> struct array).** **For the owner:** `s[1.5]` gives `e` (JavaScript `undefined`) under D3's index
-> rule: keep, or refuse? **Next:** items 2–5 (audit round 2, the binaryang 1.10.0 items, H10, the
-> nullable gaps).
+> struct array).** **Owner's ruling (2026-10-15): a float string index is a compile error, and an
+> out-of-range `s[i]` is `undefined`, as JavaScript** — BUILT the same day (sw71 fixed;
+> design-decisions.md § "A STRING index is an integer"; README Breaking Changes row; 3 corpus
+> programs migrated). Found with it: sw75 (silent), ld46. **Open: 1 silent (sw75), 6 loud (ld38,
+> ld41–ld43, ld45, ld46).** **Next:** items 2–5 (audit round 2, the binaryang 1.10.0 items, H10,
+> the nullable gaps).
 >
 > **2026-10-15: binaryang PINNED at 1.12.1** (from 1.12.0; its one change restores a paused
 > call's operands on an Asyncify rewind). **`go_asyncify_tests` 12 / 12**: the nested goroutine
