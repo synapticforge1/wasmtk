@@ -1,0 +1,13 @@
+type i32 = number; type f64 = number;
+const xs: i32[] = [5, 1, 4, 2, 3];
+xs.sort((a: i32, b: i32): i32 => a - b);
+const s0: i32 = xs[0];
+const s4: i32 = xs[4];
+xs.reverse();
+const r0: i32 = xs[0];
+const removed: i32[] = xs.splice(1, 2);
+const rl: i32 = removed.length;
+const rm0: i32 = removed[0];
+const xl: i32 = xs.length;
+const x1: i32 = xs[1];
+console.log(s0, s4, r0, rl, rm0, xl, x1);

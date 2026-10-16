@@ -1,0 +1,12 @@
+type i32 = number; type f64 = number;
+const s: string = "Hello, World";
+const a: i32 = s.indexOf("o");
+const c: i32 = s.indexOf("zz");
+const d: string = s.slice(-5);
+const e: string = s.substring(7, 3);
+const g: boolean = s.startsWith("Hell");
+const h: boolean = s.endsWith("ld");
+const k: boolean = s.includes(", W");
+const m: string = s.charAt(4);
+const n: i32 = s.charCodeAt(1);
+console.log(a, c, d, e, g, h, k, m, n);

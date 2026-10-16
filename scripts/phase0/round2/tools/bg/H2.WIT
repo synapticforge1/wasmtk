@@ -1,0 +1,10 @@
+// sw113 repro input (upper-case extension): `wasmtk bindgen H2.WIT` wrote its TypeScript over
+// this file (the default output path replaces a lower-case ".wit" only).
+package local:hostlib;
+
+world hostlib {
+  import display-show-value: func(p0: s32);
+
+  export go: func(n: s32);
+  export big: func() -> s32;
+}

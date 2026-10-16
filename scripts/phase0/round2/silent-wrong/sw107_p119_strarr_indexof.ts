@@ -1,0 +1,11 @@
+type i32 = number; type f64 = number;
+const ws: string[] = ["pear", "apple", "fig", "apple"];
+const k: string = "apple";
+const f: string = "fig";
+const p: string = "pear";
+const z: string = "zzz";
+const a: i32 = ws.indexOf(k);
+const b: i32 = ws.indexOf(f);
+const c: i32 = ws.indexOf(p);
+const d: i32 = ws.indexOf(z);
+console.log(a, b, c, d);

@@ -1,0 +1,14 @@
+type i32 = number; type f64 = number;
+const xs: i32[] = [5, 1, 4, 1, 3];
+const a: i32 = xs.indexOf(1);
+const b: i32 = xs.lastIndexOf(1);
+const c: i32 = xs.indexOf(9);
+const d: boolean = xs.includes(4);
+const sl: i32[] = xs.slice(-2);
+const sl0: i32 = sl[0];
+const sll: i32 = sl.length;
+const cc: i32[] = xs.concat([7, 8]);
+const ccl: i32 = cc.length;
+const cc6: i32 = cc[6];
+const j: string = xs.join("-");
+console.log(a, b, c, d, sl0, sll, ccl, cc6, j);

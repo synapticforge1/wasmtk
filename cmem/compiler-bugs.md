@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 1 | 100 | 0 | 17 |
-| LOUD | 6 | 57 | 1 | 8 |
+| SILENT-WRONG | 34 | 100 | 10 | 17 |
+| LOUD | 40 | 57 | 11 | 8 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 1** (2026-10-15, later: sw71 fixed under the owner's
+**Open silent-wrong in the compiler: 34** (2026-10-15, audit round 2: sw76–sw108 found, and sw75;
+plus 10 silent TOOL defects sw109–sw118; loud 40 in the compiler (ld47–ld80 found) and 11 in the
+tools; the round-2 section below). Before that, **1** (2026-10-15, later: sw71 fixed under the owner's
 string-index ruling; sw75 found with it, `console.log(s.charAt(i) === "")` prints `1`. Open loud: 6,
 all found that day: ld38 `toFixed`, ld41, ld42, ld43, ld45, ld46). Before that, **1** (2026-10-15:
 sw71, an out-of-range string index gives `""` for `undefined`, found fixing ld34; sw72, sw73, sw74
@@ -253,6 +255,119 @@ exports `DATA_BASE` / `SCRATCH_SLOTS` / `ArrayLookup` (console_log.ts); the unus
 `watToOptimisedWasm` vs `binaryenOptimize`.
 
 Classified 2026-09-28 from each entry's own text; re-tally whenever an entry is added or closed.
+
+## H12 Phase 0b, audit round 2 (2026-10-15): 33 silent-wrong compiler + 10 silent tool defects, ~44 loud, CONFIRMED BY RUNNING
+
+**Class:** SILENT-WRONG / LOUD per row · **Status:** OPEN · **Scope:** compiler and tools
+
+Four parallel read-only auditors (owner: item 2 of 2026-10-15's list): fall-throughs / silent stubs
+(87 probes), codegen in wasic (144), wasic ↔ console divergence (303 variants), and the other
+source files + the CLI + dead code. Every row was RUN: `scripts/phase0/verify_repros.ts` on the
+copied repros reads 50 / 50 DIFFER in `scripts/phase0/round2/silent-wrong/` and 63 / 63
+COMPILE- or RUN-FAIL in `round2/loud/` (files named `<row>_<probe>.ts`); the tool rows have
+their inputs in `round2/tools/` (`.wat` / `.wit` there are inputs, force-added past .gitignore).
+De-duplicated across auditors. Fix order: silent first (owner's standing order), the tool rows that
+overwrite user files (sw113) at the top.
+
+**Silent-wrong, compiler** (native → compiled):
+
+| id | defect | root cause |
+| --- | --- | --- |
+| sw76 | `string[].join(sep)` and a string array in a template print pointer and length (`a-b` → `260-1`) | console `joinarr` segment never checks `isStringArr` (console_log ~1500) |
+| sw77 | a spread literal drops its plain elements (`[...a, ...b, 5]`, `[0, ...a, 7]`) | wasic ~13172 keeps only `...` parts |
+| sw78 | `[...a]` aliases `a` (a push / store through the copy changes `a`) | `emitSpreadArrayInit` ~7038 `local.set` of the first spread |
+| sw79 | a spread of string arrays copies 4-byte slots, not (ptr, len) pairs | ~7023 picks `concat_i32` |
+| sw80 | array `slice` with a negative index clamps to 0 (`slice(-2)` is the whole array) | `$__dynarr_slice_*` ~18159, string-array slice ~18193 |
+| sw81 | string `slice` with a negative index (`"hello world".slice(-5)` is the whole string; `slice(1,-1)` is `""`) | `$__str_slice` ~19009 has substring semantics |
+| sw82 | array `fill` with a negative start / end clamps to 0 | ~18502 |
+| sw83 | typed-array `fill` with a negative start does nothing | `$__ta_fill_*` ~17848 |
+| sw84 | `splice` drops insertion arguments; a one-argument `splice(i)` removes one element | ~13960: only args 0 and 1, count defaults to 1 |
+| sw85 | `splice` with a negative index removes the last element | `$__dynarr_splice_*` ~18775 (no normalisation; ld47 is its trap) |
+| sw86 | `charCodeAt` out of range gives -1, not NaN (`isNaN(s.charCodeAt(9))` false) | ~19222 |
+| sw87 | a bare numeric `sort()` sorts numerically; JavaScript sorts as strings (`1,10,100,9`) | `sort_<T>` ~10191 / ~14152 (dynrt documents the deviation, wasic does not) |
+| sw88 | `split("")` gives the whole string as one part | ~19550 "treat as no-split" |
+| sw89 | `reduce` with no initial value starts the accumulator at 0 (a product is 0) | ~10234 `zeroOf` |
+| sw90 | `find` returns a sentinel: a found -1 reads as undefined, a miss is not `=== undefined` | ~18299 |
+| sw91 | `replaceAll("", x)` loses the original characters (`abc` → `----`) | ~19415 skips the byte |
+| sw92 | `padStart` / `padEnd` with an empty pad pads with memory bytes | ~19451, ~19492 force `padlen` 1 |
+| sw93 | `x.toString(radix)` of an f64 truncates to i32 (`255.5` → `ff`) | ~7742 (ld51 is its trap) |
+| sw94 | `includes(NaN)` false on an f64 array (SameValueZero) | ~10110 = `indexOf != -1` |
+| sw95 | an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner's question**, as the string ruling: refuse, or give undefined | no record of a decision |
+| sw96 | console: `!` and `~` take the whole binary expression (`!a && b` is `!(a && b)`, `~n + 1` is `~(n + 1)`), also in templates / concats | console_log ~3010, ~3027 lack unary minus's `!hasTopLevelBinaryOp` guard |
+| sw97 | a declaration comparing parenthesised floats truncates both to i32 (`(z / 2) === (z / 2.5)` true) | wasic ~11636 `lhsType` falls back to `defaultType` for a `(` lead (ld65: NaN traps) |
+| sw98 | console prints a string POINTER for a string `??` or ternary over struct string fields (`q.s ?? "none"` → `268`) | console numeric path |
+| sw99 | `a?.b ?? d` with `a` null reads through the null pointer: `0`, not `d` | wasic ~21749 rewrites `?.` to `.` (README documents it; the result is silent) |
+| sw100 | console `s.toUpperCase().length + t.length` is `2` | console |
+| sw101 | an `Int32Array` element plus a `Float64Array` element truncates the float (declaration) | wasic `rhsKnownFloat` ~11733 (ld56 is the console's) |
+| sw102 | console prints booleans as `0` / `1`: `s.toUpperCase() !== "ABD"`, `a.slice(0,2) === b.slice(0,2)`, `ps[1].ok \|\| ps[0].x > 1` (sw75's class) | console boolean detection |
+| sw103 | console `-h.big` (a bigint field) prints without `n` | console i64 lead detection |
+| sw104 | a top-level `let` / `const` inside a block becomes a module GLOBAL and its declaration is dropped: not re-initialised per loop pass; an inner block's `const x` overwrites the outer `x` | `parseModuleGlobals` ~3991 has no brace-depth check |
+| sw105 | inside a function, a block's `const x` overwrites the outer `x` (`1 50` → `50 50`) | function locals are flat by name |
+| sw106 | `finally` is skipped when try / catch leaves by `return`, `break` / `continue`, or a throw from `catch` | try emission ~16920 inlines finally on fall-through only |
+| sw107 | `string[].indexOf` / `includes` return wrong indices | ~10104 has no string-array path |
+| sw108 | a top-level string-enum-typed variable prints its tag (`1` for `DOWN`); in a function it is right | top-level `stringEnumVars` registration |
+
+**Silent, tools** (all exit 0):
+
+| id | defect | where |
+| --- | --- | --- |
+| sw109 | `wasmbundle` seats every module's data at the same address (the second library's bytes read from the first's address) | `getDataMaxEnd` ~wasmbundle.ts:143 misses binaryang's `(offset (i32.const N))` form |
+| sw110 | a wasic merge seats the heap INSIDE a merged library's data (`79 79 200` → `79 7 200`) | wasic.ts ~23103 advances by global 0's init, not the data extent |
+| sw111 | a function exported under two names keeps only the last | `exportFuncMap` by index, wasmmerge.ts ~457 |
+| sw112 | the bundler does not prefix a file's PRIVATE top-level names, so they collide with the entry's (`6 100` → `200 100`) | tsbundler.ts ~661 renames exports only |
+| sw113 | **default output paths can overwrite the INPUT** (`convert lib.bin`, `wasm2js`, `tsbundle entry.mts`, `bindgen H2.WIT`, `jstyper calc.mjs` empties the source) | unanchored / case-sensitive extension replaces: utils.ts:531, :503, main.ts:428, bindgen.ts:649, jstyper.ts:345, :370, :333 |
+| sw114 | `wasmtk wasic broken.wat` exits 0 after "unknown operator" | `compileWasi` ignores `compileWat`'s result, wasic.ts ~23333 |
+| sw115 | `wasmtk run x.ts one two` drops the arguments; WASI `args_sizes_get` is 0; the library-call branch is unreachable | main.ts:390 passes `[]`; utils.ts:146 |
+| sw116 | `mod lib.wasm add abc 5` turns `abc` into 0 | utils.ts:437 (also `runWasi` :299) |
+| sw117 | Go `build -o out/x.wasm` (relative) writes beside the SOURCE and reports success at the given path | gowasic.ts ~203/241/426 unresolved; `report()` ~573 unchecked (Zig's was fixed 2026-08-24) |
+| sw118 | `witgen` writes duplicate exports (`fooBar`, `foo_bar` → `foo-bar` twice); package names unchecked (`local:2048`) | witgen.ts ~98, ~86 |
+
+**Loud, compiler** (`round2/loud/`): ld47 `splice(3, 10)` traps (count unclamped); ld48 `pop()` of
+an empty array traps; ld49 an f64 comparator in `sort` (signature mismatch); ld50 `flat()` on 1-D
+(the stub at ~10198 has no diagnostic); ld51 `(2**32).toString(16)` traps; ld52 `string[].sort()`
+(`$__str_cmp` undefined); ld53 `s.at(9)` (IR error); ld54 a struct FIELD operand never converted
+(`p.n * p.x`, `p.x > p.n`, `Math.max(p.n, p.x)`, 2-D mixed compare: invalid modules, declaration
+path); ld55 console unary minus of an i32 element / a 2-D row's `.length` in a sum; ld56 console
+`ia[1] + fa[1]`; ld57 a getter returning f64 compared in a method (`i32.gt_s`); ld58 console
+`.length` of a method result (with ld43, ld46); ld59 console bigint operands in f64 ops; ld60
+`Number(stringVar)`; ld61 console `reduce` returning f64; ld62 console `s.length > 2 && arr[1] > 1`;
+ld63 console `nm() < s` (bad local); ld64 a nullable string local (`$s_ptr` unresolved); ld65 a NaN
+parenthesised compare traps (sw97); ld66 `1e-7 * 1.5` in a declaration (the `-` of the exponent
+splits); ld67 console `n ** 2` of an i32; ld68 console `typeof b === "boolean"`; ld69 console
+`x > 1 || s === "q"` (splits at `===` first); ld70 `users[0].name.length` in a declaration; ld71
+`++` / `--` as a value (console and declaration; `while (m-- > 0)`); ld72 compound assignment / `++`
+on an array element or element field (`arr[i] += 1`, `ps[1].x += 5`; README claims support);
+ld73 one-line `do { … } while (…)`; ld74 classes: inherited getter, `return this`, a method
+returning string, `super()` with no base constructor, a struct alias's field store, generic and
+abstract classes; ld75 callbacks: a generic function's callback, `map((x, i) => …)` (signature
+mismatch); ld76 destructuring from a call, a tuple holding a string; ld77 a string literal in
+expression position (`"abc" > "ab"`, nested string ternary, object with a string and a function
+field); ld78 a default parameter using an earlier one, `for (let i = 0, j = 10; …)`, chained
+`filter().map().reduce()`, a function array called through a local; ld79 `for…of` over class /
+struct arrays (documented limit; virtual dispatch inside it); ld80 missing methods: `substring`,
+`lastIndexOf` (string, array), `splice` as a value, `(e as Error).message`, `string[].join` into a
+declaration (README says assignable).
+
+**Loud, tools** (`round2/tools/`): ld81 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
+to 131072 in a 1-page bundle: out of bounds); ld82 `bindgen` host imports with a camelCase method
+never link (`display_show_value` vs `display_showValue`); ld83 the deno binding cannot load a
+relative path (`fetch(String(source))`), and a typed-array view ignores byteOffset; ld84 the bundler
+handles neither `export class` nor `export { name }`; ld85 two imports with the same basename
+collide (`duplicate func $util_add`); ld86 the merge scanners count `(` `)` inside data strings;
+ld87 `mod` cannot call an i64 function; ld88 `wast` exits 0 with ✅ when modules are not built (or
+on an empty directory) — owner to say whether intended; ld89 `dync` leaves `<name>.__dync.ts` on
+failure and prints errors twice; ld90 bad flag values silently become defaults (`--runtime`,
+`--any-policy`, `--on-conflict`, `--go-runtime`, `--go-target`), `-o` ignored by `run` / `info` /
+`mod`, a missing target prints help and exits 0.
+
+**Not counted:** i32 overflow wraps (`65536 * 65536` → 0): i32 is an integer type by the README; the
+owner may confirm. **Dead code / stale, verified by grep** (cleanup, not bugs): main.ts:418-421
+(`wast`'s unreachable `!target`); utils.ts:232-249 (Javy interception), :256-264 (`console.log`
+UTF-16 shim), :292-307 (library-call branch, unreachable while sw115 stands); unused
+`getImportInfo`, `v128`, `funcref`, `externref`, `applyNames` (utils.ts:33, :49-56); utils.ts:168
+`fd_stat_put` is not a WASI function; stale comments wasmmerge.ts:138 (`DATA_PTR_THRESHOLD`),
+wasmbundle.ts:136-142, wasic.ts:23106, modc.ts:6-10, wasic.ts:23184; orphaned doc comments
+witgen.ts:35, zigwasic.ts:204; main.ts:127 / :194 compute the same value.
 
 ## `modc` of a dynrt-merged library fails to assemble, exits 0, and `bindgen_tests` grades a stale binary (FIXED 2026-09-30)
 
