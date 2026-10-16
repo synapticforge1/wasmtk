@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-15, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-15, the owner's string-index ruling (sw71), gate GREEN.** typed_decl **45** (+4
+> refusals, +1 accepted) · golden-WAT **523**, 6 moved, function by function: the 5 programs that
+> index strings (`$__str_index`, the "undefined" text in data) and `core_EmptyAndNullChecks`
+> (`$__str_is_nullish`); failed compiles 6 · 3 corpus programs migrated to `i32` / `f64.toI32`
+> indices (`1_regular-expressions`, `27_number-parsing`, `27_string-formatting`) · every other
+> count as batch 2.
+>
 > **2026-10-15, H12 loud rows batch 2 (ld10, ld14, ld37; sw74, ld44 found and fixed), gate GREEN.**
 > wasi **466/466** (+`7h_ConsoleWholeArrays`, `9b_InlineStructArrays`) · golden-WAT **523**, 7 moved
 > entries checked function by function (`golden_diff.ts` with `BY_FUNC=1`): only `$__arr_elem_str`

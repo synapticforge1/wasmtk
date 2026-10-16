@@ -196,6 +196,9 @@
     console.log; top-level `Array<{ … }>` arrays work; a whole struct array, which printed its
     element addresses (sw74), is refused. `./console_log`'s `ArrayLookup` gained an optional
     `structTypeName` (additive). Tests `7h_ConsoleWholeArrays`, `9b_InlineStructArrays`.
+35. **⚠️ BEHAVIOUR: a float string index is a compile error; out of range is `undefined`**
+    (owner, 2026-10-15). A program that indexed a string with a `number` (often a
+    `for (let i: number …)` counter) no longer compiles; README Breaking Changes row. sw71.
 
 ## Release status (2026-09-28) — v2.0.3: typed declarations, exit-code parity, binaryang 1.7.0
 
