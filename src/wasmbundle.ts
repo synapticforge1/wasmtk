@@ -41,7 +41,7 @@
 import { basename } from "@std/path";
 import wabtInit from "wabt";
 import binaryen from "./binaryen.ts";
-import { extractExportNames, mergeWasmWat } from "./wasmmerge.ts";
+import { dataExtent, extractExportNames, mergeWasmWat } from "./wasmmerge.ts";
 import { rt } from "./rt.ts";
 import { emitWitBeside } from "./witgen.ts";
 
@@ -132,30 +132,12 @@ async function promptConflict(
  * Used to advance the dataReloc offset after each module is merged.
  */
 function getDataMaxEnd(wat: string): number {
-  let maxEnd = 0;
-  // Match both plain and wabt-indexed formats:
-  //   (data (i32.const N) "...")
-  //   (data (;N;) (i32.const N) "...")
-  // The offset's brackets are OPTIONAL: wabt printed `(i32.const N)` through 1.3.5 and
-  // switched to the unfolded `i32.const N` in wabt-ts 1.4.1. Requiring one bracketing made
-  // this return 0, so `dataOffset` never advanced, every module's data stacked at the same
-  // base, and $__heap_ptr was seated INSIDE static data — silent memory corruption.
-  const dataRe =
-    /\(data\s+(?:\(;[^;]*;\)\s+)?\(?\s*i32\.const\s+(\d+)\s*\)?\s+"((?:[^"\\]|\\.)*)"\s*\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = dataRe.exec(wat)) !== null) {
-    const base = parseInt(m[1]);
-    // Count bytes: each \XX escape = 1 byte, each plain char = 1 byte
-    let len = 0;
-    const s = m[2];
-    for (let i = 0; i < s.length; i++) {
-      if (s[i] === "\\") i++; // skip the next char of the \XX pair
-      len++;
-    }
-    const end = base + len;
-    if (end > maxEnd) maxEnd = end;
-  }
-  return maxEnd;
+  // wasmmerge's one data-extent reader. This had its own regex, which wabt's printing changes
+  // broke twice: `(i32.const N)` → `i32.const N` (wabt-ts 1.4.1), then binaryang 1.12's
+  // `(data (;0;) (offset (i32.const N)) …)`, which it never matched, so it returned 0, every
+  // module's data stacked at the same base and $__heap_ptr sat at 0 (sw109, 2026-10-19). It
+  // also counted a `\n` escape as two bytes.
+  return dataExtent(wat).hi;
 }
 
 // ---------------------------------------------------------------------------
