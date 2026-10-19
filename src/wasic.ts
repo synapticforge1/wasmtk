@@ -2262,6 +2262,114 @@ class WasicTranspiler {
   // `esc`: the label of the block around that try statement whose handler re-throws OUTWARD.
   private finallyStack: Array<{ wat: string; controlDepth: number; esc: string; used: boolean }> = [];
   private finSeq = 0;
+  // f64 `x.toString(radix)` (sw93): the helper's NaN / Infinity texts, allocated at first use
+  private f64RadixTexts: { nan: [number, number]; inf: [number, number]; ninf: [number, number] } | null =
+    null;
+
+  private useF64Radix(): void {
+    if (this.f64RadixTexts) return;
+    this.f64RadixTexts = {
+      nan: this.allocString("NaN"),
+      inf: this.allocString("Infinity"),
+      ninf: this.allocString("-Infinity"),
+    };
+  }
+
+  /**
+   * `$__f64_to_str_radix(v, radix) -> (ptr, len)`: V8's DoubleToRadixCString, so the digits are
+   * Deno's: the fraction is written until it is below the value's half-ulp `delta` (round-half-
+   * even with carry), integer digits past 2^53 are zeros, the rest by exact i64 remainders. A radix
+   * outside 2..36 is 10 (JavaScript throws a RangeError), as `$__i32_to_str_radix` does.
+   */
+  private f64RadixHelperWat(): string {
+    const t = this.f64RadixTexts!;
+    const ch = (d: string) => `(select (i32.add ${d} (i32.const 48)) (i32.add ${d} (i32.const 87)) (i32.lt_u ${d} (i32.const 10)))`;
+    return `
+  ;; ── f64 → string in a radix (2..36), as V8 (sw93, 2026-10-19) ──
+  (func $__f64_to_str_radix (param $v f64) (param $radix i32) (result i32 i32)
+    (local $buf i32) (local $ic i32) (local $fc i32) (local $neg i32)
+    (local $int f64) (local $frac f64) (local $delta f64) (local $r f64)
+    (local $digit i32) (local $c i32) (local $rem f64)
+    (if (i32.or (i32.lt_s (local.get $radix) (i32.const 2)) (i32.gt_s (local.get $radix) (i32.const 36)))
+      (then (local.set $radix (i32.const 10))))
+    (if (f64.ne (local.get $v) (local.get $v)) (then (return (i32.const ${t.nan[0]}) (i32.const ${t.nan[1]}))))
+    (if (f64.eq (local.get $v) (f64.const inf)) (then (return (i32.const ${t.inf[0]}) (i32.const ${t.inf[1]}))))
+    (if (f64.eq (local.get $v) (f64.const -inf)) (then (return (i32.const ${t.ninf[0]}) (i32.const ${t.ninf[1]}))))
+    (local.set $r (f64.convert_i32_s (local.get $radix)))
+    (local.set $buf (call $__malloc (i32.const 2200)))
+    (local.set $ic (i32.const 1100))
+    (local.set $fc (i32.const 1100))
+    (if (f64.lt (local.get $v) (f64.const 0))
+      (then (local.set $neg (i32.const 1)) (local.set $v (f64.neg (local.get $v)))))
+    (local.set $int (f64.floor (local.get $v)))
+    (local.set $frac (f64.sub (local.get $v) (local.get $int)))
+    (local.set $delta (f64.mul (f64.const 0.5)
+      (f64.sub (f64.reinterpret_i64 (i64.add (i64.reinterpret_f64 (local.get $v)) (i64.const 1))) (local.get $v))))
+    (local.set $delta (f64.max (f64.reinterpret_i64 (i64.const 1)) (local.get $delta)))
+    (if (f64.ge (local.get $frac) (local.get $delta))
+      (then
+        (i32.store8 (i32.add (local.get $buf) (local.get $fc)) (i32.const 46))
+        (local.set $fc (i32.add (local.get $fc) (i32.const 1)))
+        (block $fdone
+          (loop $floop
+            (local.set $frac (f64.mul (local.get $frac) (local.get $r)))
+            (local.set $delta (f64.mul (local.get $delta) (local.get $r)))
+            (local.set $digit (i32.trunc_f64_s (local.get $frac)))
+            (i32.store8 (i32.add (local.get $buf) (local.get $fc)) ${ch("(local.get $digit)")})
+            (local.set $fc (i32.add (local.get $fc) (i32.const 1)))
+            (local.set $frac (f64.sub (local.get $frac) (f64.convert_i32_s (local.get $digit))))
+            (if (i32.or (f64.gt (local.get $frac) (f64.const 0.5))
+                  (i32.and (f64.eq (local.get $frac) (f64.const 0.5)) (i32.and (local.get $digit) (i32.const 1))))
+              (then
+                (if (f64.gt (f64.add (local.get $frac) (local.get $delta)) (f64.const 1))
+                  (then
+                    ;; round up, carrying into the integer part past the '.'
+                    (block $rdone
+                      (loop $rloop
+                        (local.set $fc (i32.sub (local.get $fc) (i32.const 1)))
+                        (if (i32.eq (local.get $fc) (i32.const 1100))
+                          (then (local.set $int (f64.add (local.get $int) (f64.const 1))) (br $rdone)))
+                        (local.set $c (i32.load8_u (i32.add (local.get $buf) (local.get $fc))))
+                        (local.set $digit (select (i32.sub (local.get $c) (i32.const 87))
+                          (i32.sub (local.get $c) (i32.const 48)) (i32.gt_u (local.get $c) (i32.const 57))))
+                        (if (i32.lt_s (i32.add (local.get $digit) (i32.const 1)) (local.get $radix))
+                          (then
+                            (local.set $digit (i32.add (local.get $digit) (i32.const 1)))
+                            (i32.store8 (i32.add (local.get $buf) (local.get $fc)) ${ch("(local.get $digit)")})
+                            (local.set $fc (i32.add (local.get $fc) (i32.const 1)))
+                            (br $rdone)))
+                        (br $rloop)))
+                    (br $fdone)))))
+            (br_if $floop (f64.ge (local.get $frac) (local.get $delta)))))))
+    ;; integer digits: past 2^53 they are zeros (V8: Double(integer / radix).Exponent() > 0)
+    (block $edone
+      (loop $eloop
+        (br_if $edone (i64.le_u
+          (i64.and (i64.shr_u (i64.reinterpret_f64 (f64.div (local.get $int) (local.get $r))) (i64.const 52)) (i64.const 2047))
+          (i64.const 1075)))
+        (local.set $int (f64.div (local.get $int) (local.get $r)))
+        (local.set $ic (i32.sub (local.get $ic) (i32.const 1)))
+        (i32.store8 (i32.add (local.get $buf) (local.get $ic)) (i32.const 48))
+        (br $eloop)))
+    (loop $iloop
+      (if (f64.eq (f64.floor (local.get $int)) (local.get $int))
+        (then (local.set $rem (f64.convert_i64_u
+          (i64.rem_u (i64.trunc_f64_u (local.get $int)) (i64.extend_i32_u (local.get $radix))))))
+        (else (local.set $rem (f64.sub (local.get $int)
+          (f64.mul (f64.trunc (f64.div (local.get $int) (local.get $r))) (local.get $r))))))
+      (local.set $digit (i32.trunc_f64_s (local.get $rem)))
+      (local.set $ic (i32.sub (local.get $ic) (i32.const 1)))
+      (i32.store8 (i32.add (local.get $buf) (local.get $ic)) ${ch("(local.get $digit)")})
+      (local.set $int (f64.div (f64.sub (local.get $int) (local.get $rem)) (local.get $r)))
+      (br_if $iloop (f64.gt (local.get $int) (f64.const 0))))
+    (if (local.get $neg)
+      (then
+        (local.set $ic (i32.sub (local.get $ic) (i32.const 1)))
+        (i32.store8 (i32.add (local.get $buf) (local.get $ic)) (i32.const 45))))
+    (i32.add (local.get $buf) (local.get $ic))
+    (i32.sub (local.get $fc) (local.get $ic))
+  )`;
+  }
 
   /**
    * The finally WAT a jump to controlStack[targetIdx] crosses, innermost first ("" for none). Each
@@ -8061,7 +8169,17 @@ class WasicTranspiler {
     if (toStrRadixM) {
       const srcName = toStrRadixM[1]!;
       const srcType = locals.get(srcName) ?? this.moduleGlobals.get(srcName)?.type;
-      if (srcType === "i32" || srcType === "f64") {
+      if (srcType === "f64") { // sw93 / ld51: V8's conversion, not a truncation to i32
+        this.useF64Radix();
+        return [
+          `(call $__f64_to_str_radix ${this.emitExpr(srcName, locals, "f64")} ${
+            this.emitExpr(toStrRadixM[2]!.trim(), locals, "i32")
+          })`,
+          `${ind}(local.set $${varName}_len)`,
+          `${ind}(local.set $${varName}_ptr)`,
+        ].join("\n");
+      }
+      if (srcType === "i32") {
         this.needsNumericHelpers = true;
         const valWat = this.emitExpr(srcName, locals, "i32");
         const radixWat = this.emitExpr(toStrRadixM[2]!.trim(), locals, "i32");
@@ -9129,7 +9247,15 @@ ${prefixed}
     if (toStrRadixSPLM) {
       const sName = toStrRadixSPLM[1]!;
       const sType = locals.get(sName) ?? this.moduleGlobals.get(sName)?.type;
-      if (sType === "i32" || sType === "f64") {
+      // An f64 converts as V8 does (fraction digits, any magnitude): it was truncated to i32,
+      // `255.5` → `ff` (sw93), and `(2**32).toString(16)` trapped (ld51; 2026-10-19).
+      if (sType === "f64") {
+        this.useF64Radix();
+        return `(call $__f64_to_str_radix ${this.emitExpr(sName, locals, "f64")} ${
+          this.emitExpr(toStrRadixSPLM[2]!.trim(), locals, "i32")
+        })`;
+      }
+      if (sType === "i32") {
         this.needsNumericHelpers = true;
         const valWat = this.emitExpr(sName, locals, "i32");
         const radixWat = this.emitExpr(toStrRadixSPLM[2]!.trim(), locals, "i32");
@@ -10081,7 +10207,12 @@ ${prefixed}
       const ccaWat = `(call $__str_char_code_at (local.get $${
         charCodeAtMatch[1]
       }_ptr) (local.get $${charCodeAtMatch[1]}_len) ${idxWat})`;
-      if (defaultType === "f64" || defaultType === "f32") return `(f64.convert_i32_s ${ccaWat})`;
+      // Out of range is NaN, as JavaScript; the helper's -1 printed as -1 (sw86, 2026-10-19). The
+      // helper is pure, so `select` may run it twice. An i32 slot cannot hold NaN: that store is the
+      // owner's sw119 rule (a run-time error), not built yet, so it keeps -1.
+      if (defaultType === "f64" || defaultType === "f32") {
+        return `(select (f64.const nan) (f64.convert_i32_s ${ccaWat}) (i32.lt_s ${ccaWat} (i32.const 0)))`;
+      }
       return ccaWat;
     }
 
@@ -10493,7 +10624,10 @@ ${prefixed}
           return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${valWat})`;
         }
         if (method === "includes") {
-          const key = `indexof_${elemType}`;
+          // includes is SameValueZero: NaN finds NaN (indexOf, ===, does not). `sameval_T` for a
+          // float array; `[1, NaN].includes(NaN)` was false (sw94, 2026-10-19).
+          const isFloatArr = elemType === "f64" || elemType === "f32";
+          const key = isFloatArr ? `sameval_${elemType}` : `indexof_${elemType}`;
           this.dynArrHelpers.add(key);
           const valWat = this.emitExpr(argsStr, locals, elemType);
           return `(i32.ne (call $__dynarr_${key} ${
@@ -10606,7 +10740,9 @@ ${prefixed}
         const fnName = args[0]?.trim() ?? "";
         const fnIdx = this.getFuncTableIdx(fnName);
         const key = `${method}_${elemType}`;
-        this.dynArrHelpers.add(key);
+        // a reduce without an initial value uses reduce1_T instead (sw89)
+        if (method !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key);
+        if (method === "find") this.needsNullableResultFlag = true; // its found flag (sw90)
         // Pre-register callback funtype so emitFuncTypes() includes it
         if (method === "map") {
           this.getOrCreateFuncType([elemType], elemType);
@@ -10616,9 +10752,13 @@ ${prefixed}
           this.getOrCreateFuncType([elemType, elemType], elemType);
         }
         if (method === "reduce") {
-          const initWat = args[1]?.trim()
-            ? this.emitExpr(args[1].trim(), locals, elemType)
-            : zeroOf(elemType);
+          // No initial value: the accumulator starts as element 0 (`reduce1_T`); it started at 0,
+          // so a product was 0 (sw89, 2026-10-19).
+          if (!args[1]?.trim()) {
+            this.dynArrHelpers.add(`reduce1_${elemType}`);
+            return `(call $__dynarr_reduce1_${elemType} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
+          }
+          const initWat = this.emitExpr(args[1].trim(), locals, elemType);
           return `(call $__dynarr_${key} ${
             this.arrGetWat(arrName)
           } (i32.const ${fnIdx}) ${initWat})`;
@@ -13987,7 +14127,9 @@ ${prefixed}
         const nlFnCallM = nlInitExpr.match(/^(\w+)\s*\(/);
         const nlCalledFn = nlFnCallM ? this.functions.find((f) => f.name === nlFnCallM[1]) : null;
         const valWat = this.emitExpr(nlInitExpr, locals, nlInner);
-        if (nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) {
+        // `arr.find(…)` reports found / not found through the same flag (sw90)
+        const nlIsFind = /^\w+\.find\s*\([\s\S]*\)$/.test(nlInitExpr);
+        if ((nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) || nlIsFind) {
           // Read the side-channel flag written by the callee
           return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
         }
@@ -14549,7 +14691,8 @@ ${prefixed}
         // Normalize method name to lowercase for key/helper name consistency
         const methodLc = method.toLowerCase() as string;
         const key = `${methodLc}_${elemType}`;
-        this.dynArrHelpers.add(key);
+        if (methodLc !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key); // sw89: reduce1_T
+        if (methodLc === "find") this.needsNullableResultFlag = true; // sw90
         if (methodLc === "foreach") {
           this.getOrCreateFuncType([elemType], null);
           return `(call $__dynarr_foreach_${elemType} (local.get $${arrName}) (i32.const ${fnIdx}))`;
@@ -14564,9 +14707,11 @@ ${prefixed}
           this.getOrCreateFuncType([elemType], "i32");
         }
         if (methodLc === "reduce") {
-          const initWat = args[1]?.trim()
-            ? this.emitExpr(args[1].trim(), locals, elemType)
-            : zeroOf(elemType);
+          if (!args[1]?.trim()) { // sw89: element 0 starts the accumulator
+            this.dynArrHelpers.add(`reduce1_${elemType}`);
+            return `(drop (call $__dynarr_reduce1_${elemType} (local.get $${arrName}) (i32.const ${fnIdx})))`;
+          }
+          const initWat = this.emitExpr(args[1].trim(), locals, elemType);
           return `(drop (call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx}) ${initWat}))`;
         }
         return `(drop (call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx})))`;
@@ -14801,7 +14946,10 @@ ${prefixed}
         const nlFnCallM = rhs.match(/^(\w+)\s*\(/);
         const nlCalledFn = nlFnCallM ? this.functions.find((f) => f.name === nlFnCallM[1]) : null;
         const valWat = this.emitExpr(rhs, locals, nlReassignInner);
-        if (nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) {
+        if (
+          (nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) ||
+          /^\w+\.find\s*\([\s\S]*\)$/.test(rhs) // sw90
+        ) {
           return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
         }
         return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null ${
@@ -14966,7 +15114,10 @@ ${prefixed}
         this.needsNumericHelpers = true;
         const [undefOffset, undefLen] = this.allocString("undefined\n");
         const isFindF64 = varType === "f64";
-        const cond = isFindF64
+        // A nullable find result has its own flag (sw90): a found -1 / NaN is a value
+        const cond = this.nullableVarInnerType.has(logSingleArg)
+          ? `(local.get $${logSingleArg}__null)`
+          : isFindF64
           ? `(f64.ne (local.get $${logSingleArg}) (local.get $${logSingleArg}))` // NaN != NaN
           : `(i32.eq (local.get $${logSingleArg}) (i32.const -1))`;
         const normalSegs: LogSegment[] = isFindF64
@@ -17653,6 +17804,7 @@ ${prefixed}
     if (this.needsNumericHelpers) parts.push(getHelperWat());
     if (this.needsArrPrintHelper) parts.push(getArrPrintHelperWat());
     if (this.needsJoinHelper) parts.push(getJoinHelperWat());
+    if (this.f64RadixTexts) parts.push(this.f64RadixHelperWat());
     if (this.neededEnumStrHelpers.size > 0) parts.push(this.emitEnumStrHelpers());
     if (this.mathHelpers.size > 0) parts.push(this.emitMathHelpers());
     if (this.needsNumParsers) parts.push(this.emitNumParserHelpers());
@@ -18662,6 +18814,28 @@ ${sum}
         (br $lp)))
     (i32.const -1)
   )`);
+      } else if (method === "sameval") {
+        // SameValueZero search for a float array (includes; sw94): equal, or both NaN
+        parts.push(`  ;; Dynamic array sameval_${elemType}: index of the first SameValueZero match, or -1.
+  (func ${name} (param $arr i32) (param $val ${valType}) (result i32)
+    (local $i i32)
+    (local $len i32)
+    (local $e ${valType})
+    (local.set $len (i32.load (local.get $arr)))
+    (block $brk
+      (loop $lp
+        (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
+        (local.set $e (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift})))))
+        (if (i32.or (${valType}.eq (local.get $e) (local.get $val))
+              (i32.and (${valType}.ne (local.get $e) (local.get $e)) (${valType}.ne (local.get $val) (local.get $val))))
+          (then (return (local.get $i)))
+        )
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $lp)
+      )
+    )
+    (i32.const -1)
+  )`);
       } else if (method === "indexof") {
         const cmpOp = `${valType}.eq`;
         parts.push(`  ;; Dynamic array indexof_${elemType}: linear search, returns index or -1.
@@ -18843,13 +19017,48 @@ ${sum}
         (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
         (local.set $val (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift})))))
         (if (call_indirect (type ${ftName}) (local.get $val) (local.get $fn))
-          (then (return (local.get $val)))
+          (then
+            (global.set $__nullable_ret_flag (i32.const 1))
+            (return (local.get $val)))
         )
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $lp)
       )
     )
+    ;; found or not is the FLAG (1 = found), as a nullable-returning function reports it: the
+    ;; sentinel alone made a found -1 read as undefined, and a miss not \`=== undefined\` (sw90)
+    (global.set $__nullable_ret_flag (i32.const 0))
     ${notFound}
+  )`,
+        );
+        this.needsNullableResultFlag = true;
+      } else if (method === "reduce1") {
+        // reduce with NO initial value: element 0 is the accumulator, the fold starts at 1; an
+        // empty array traps (JavaScript throws "Reduce of empty array with no initial value").
+        const ftName = this.getOrCreateFuncType([elemType, elemType], elemType);
+        parts.push(
+          `  ;; Dynamic array reduce1_${elemType}: fold from element 0 (no initial value).
+  (func ${name} (param $arr i32) (param $fn i32) (result ${valType})
+    (local $i i32)
+    (local $len i32)
+    (local $acc ${valType})
+    (local.set $len (i32.load (local.get $arr)))
+    (if (i32.eqz (local.get $len)) (then (unreachable)))
+    (local.set $acc (${loadOp} offset=8 (local.get $arr)))
+    (local.set $i (i32.const 1))
+    (block $brk
+      (loop $lp
+        (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
+        (local.set $acc
+          (call_indirect (type ${ftName})
+            (local.get $acc)
+            (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))
+            (local.get $fn)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $lp)
+      )
+    )
+    (local.get $acc)
   )`,
         );
       } else if (method === "reduce") {
@@ -20088,13 +20297,27 @@ ${sum}
     (local.set $arr (call $__malloc (i32.add (i32.const 8) (i32.mul (local.get $cap) (i32.const 8)))))
     (i32.store (local.get $arr) (i32.const 0))
     (i32.store offset=4 (local.get $arr) (local.get $cap))
-    ;; special case: empty delimiter → each char is a part (not implemented; treat as no-split)
+    ;; empty delimiter: one part per byte, as JavaScript ("" → []). It returned the whole string as
+    ;; ONE part (sw88, 2026-10-19). Bytes, not UTF-16 units, as everywhere the helpers index.
     (if (i32.eqz (local.get $dlen))
       (then
-        ;; store the whole string as single part
-        (i32.store offset=8 (local.get $arr) (local.get $ptr))
-        (i32.store offset=12 (local.get $arr) (local.get $len))
-        (i32.store (local.get $arr) (i32.const 1))
+        (if (i32.gt_u (local.get $len) (local.get $cap))
+          (then
+            (local.set $cap (local.get $len))
+            (local.set $arr (call $__malloc (i32.add (i32.const 8) (i32.mul (local.get $cap) (i32.const 8)))))
+            (i32.store offset=4 (local.get $arr) (local.get $cap))))
+        (block $edone
+          (loop $eloop
+            (br_if $edone (i32.ge_u (local.get $count) (local.get $len)))
+            (i32.store
+              (i32.add (local.get $arr) (i32.add (i32.const 8) (i32.mul (local.get $count) (i32.const 8))))
+              (i32.add (local.get $ptr) (local.get $count)))
+            (i32.store offset=4
+              (i32.add (local.get $arr) (i32.add (i32.const 8) (i32.mul (local.get $count) (i32.const 8))))
+              (i32.const 1))
+            (local.set $count (i32.add (local.get $count) (i32.const 1)))
+            (br $eloop)))
+        (i32.store (local.get $arr) (local.get $count))
         (return (local.get $arr))
       )
     )

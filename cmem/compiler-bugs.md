@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 16 | 121 | 0 | 27 |
-| LOUD | 39 | 58 | 10 | 9 |
+| SILENT-WRONG | 10 | 127 | 0 | 27 |
+| LOUD | 38 | 59 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 16; in the tools: 0** (2026-10-19, latest: the console
+**Open silent-wrong in the compiler: 10; in the tools: 0** (2026-10-19, latest: the method edge
+cases sw86, sw88, sw89, sw90, sw93, sw94 fixed, with loud ld51; `28_MethodEdgeCases`). Before
+that, 16 (2026-10-19, later: the console
 printing group sw96, sw98, sw102, sw103 fixed, sw75 with them; sw120, sw121 found; tests
 `7i_ConsoleUnaryBoolStringFields`, `7i_NullishStringFieldRefused`). Before that, 19 (2026-10-19, later: block scoping
 sw104, sw105 fixed, `5e_BlockScopedDeclarations`). Before that, 21 (2026-10-19, later: sw106 `finally` on
@@ -295,15 +297,15 @@ overwrite user files (sw113) at the top.
 | ~~sw83~~ | ✅ FIXED 2026-10-19 with sw80 (`relIndexWat`; the helper had no clamping at all). Was: typed-array `fill` with a negative start does nothing | `$__ta_fill_*` ~17848 |
 | ~~sw84~~ | ✅ FIXED 2026-10-19: splice is ONE helper per slot width (4 / 8 bytes): it normalises idx and count, moves the tail to open a gap of N slots (growing the array), leaves idx in `$__splice_at`, and returns the array pointer (re-stored, as push does); the caller stores the items there (scalars, strings, struct literals). A missing count removes to the end. An item that READS the spliced array is refused (it would read it changed): test `28_SpliceItemReadsArrayRefused`. Test `28_RelativeIndexMethods`. Was: `splice` drops insertion arguments; a one-argument `splice(i)` removes one element | ~13960: only args 0 and 1, count defaults to 1 |
 | ~~sw85~~ | ✅ FIXED 2026-10-19 with sw84 (with ld47). Was: `splice` with a negative index removes the last element | `$__dynarr_splice_*` ~18775 (no normalisation; ld47 is its trap) |
-| sw86 | `charCodeAt` out of range gives -1, not NaN (`isNaN(s.charCodeAt(9))` false) | ~19222 |
+| ~~sw86~~ | ✅ FIXED 2026-10-19 in an f64 context (a `select` maps the helper's -1 to NaN); an `i32` slot keeps -1 until the owner's sw119 store rule is built (NaN does not fit an i32). Test `28_MethodEdgeCases`. Was: `charCodeAt` out of range gives -1, not NaN (`isNaN(s.charCodeAt(9))` false) | ~19222 |
 | sw87 | a bare numeric `sort()` sorts numerically; JavaScript sorts as strings (`1,10,100,9`). **Owner 2026-10-19: follow JavaScript** (a JS function does what JS intends) | `sort_<T>` ~10191 / ~14152 (dynrt documents the deviation, wasic does not) |
-| sw88 | `split("")` gives the whole string as one part | ~19550 "treat as no-split" |
-| sw89 | `reduce` with no initial value starts the accumulator at 0 (a product is 0) | ~10234 `zeroOf` |
-| sw90 | `find` returns a sentinel: a found -1 reads as undefined, a miss is not `=== undefined` | ~18299 |
+| ~~sw88~~ | ✅ FIXED 2026-10-19: one part per byte (`"".split("")` is `[]`; a multi-byte character splits, as everywhere the helpers index bytes). Test `28_MethodEdgeCases`. Was: `split("")` gives the whole string as one part | ~19550 "treat as no-split" |
+| ~~sw89~~ | ✅ FIXED 2026-10-19: `reduce1_T` (expression and statement forms) starts from element 0 and folds from 1; an empty array traps (JavaScript throws). Test `28_MethodEdgeCases`. Was: `reduce` with no initial value starts the accumulator at 0 (a product is 0) | ~10234 `zeroOf` |
+| ~~sw90~~ | ✅ FIXED 2026-10-19: `find_T` sets `$__nullable_ret_flag` (1 found, 0 not); a nullable declaration / reassignment from `x.find(…)` reads it into its `__null`, and console's "undefined" print tests that flag. A NON-nullable `const f: i32 = xs.find(…)` (a TypeScript type error) keeps the sentinel. Test `28_MethodEdgeCases`. Was: `find` returns a sentinel: a found -1 reads as undefined, a miss is not `=== undefined` | ~18299 |
 | ~~sw91~~ | ✅ FIXED 2026-10-19: the empty-match step copies the byte it steps past (`-a-b-c-`); bytes, not UTF-16 units. Test `28_RelativeIndexMethods`. Was: `replaceAll("", x)` loses the original characters (`abc` → `----`) | ~19415 skips the byte |
 | ~~sw92~~ | ✅ FIXED 2026-10-19: an empty pad returns the string unchanged (a missing pad is still a space, from the call site). Test `28_RelativeIndexMethods`. Was: `padStart` / `padEnd` with an empty pad pads with memory bytes | ~19451, ~19492 force `padlen` 1 |
-| sw93 | `x.toString(radix)` of an f64 truncates to i32 (`255.5` → `ff`) | ~7742 (ld51 is its trap) |
-| sw94 | `includes(NaN)` false on an f64 array (SameValueZero) | ~10110 = `indexOf != -1` |
+| ~~sw93~~ | ✅ FIXED 2026-10-19 (with ld51): `$__f64_to_str_radix`, a port of V8's DoubleToRadixCString (fraction digits to the half-ulp, round-half-even with carry, zeros past 2^53, exact i64 remainders below), emitted only when used; NaN / ±Infinity texts. Matches Deno on 12 values × 4 radixes. Test `28_MethodEdgeCases`. Was: `x.toString(radix)` of an f64 truncates to i32 (`255.5` → `ff`) | ~7742 (ld51 is its trap) |
+| ~~sw94~~ | ✅ FIXED 2026-10-19: `includes` on a float array uses `sameval_T` (equal, or both NaN); `indexOf(NaN)` stays -1 (`===`). Test `28_MethodEdgeCases`. Was: `includes(NaN)` false on an f64 array (SameValueZero) | ~10110 = `indexOf != -1` |
 | sw95 | an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner 2026-10-19: give `undefined`, as for strings; a float array index keeps D3's conversion** | design-decisions.md § "Owner's rulings of 2026-10-19" |
 | ~~sw96~~ | ✅ FIXED 2026-10-19: console `!` / `~` apply only with no top-level binary operator (`hasTopLevelBinaryOp`, as unary minus). Test `7i_ConsoleUnaryBoolStringFields`. Was: console: `!` and `~` take the whole binary expression (`!a && b` is `!(a && b)`, `~n + 1` is `~(n + 1)`), also in templates / concats | console_log ~3010, ~3027 lack unary minus's `!hasTopLevelBinaryOp` guard |
 | sw97 | a declaration comparing parenthesised floats truncates both to i32 (`(z / 2) === (z / 2.5)` true) | wasic ~11636 `lhsType` falls back to `defaultType` for a `(` lead (ld65: NaN traps) |
@@ -338,7 +340,7 @@ overwrite user files (sw113) at the top.
 
 **Loud, compiler** (`round2/loud/`): ~~ld47~~ FIXED 2026-10-19 with sw84 (the count is clamped) `splice(3, 10)` traps (count unclamped); ld48 `pop()` of
 an empty array traps; ld49 an f64 comparator in `sort` (signature mismatch); ld50 `flat()` on 1-D
-(the stub at ~10198 has no diagnostic); ld51 `(2**32).toString(16)` traps; ld52 `string[].sort()`
+(the stub at ~10198 has no diagnostic); ~~ld51~~ FIXED 2026-10-19 with sw93 `(2**32).toString(16)` traps; ld52 `string[].sort()`
 (`$__str_cmp` undefined); ld53 `s.at(9)` (IR error); ld54 a struct FIELD operand never converted
 (`p.n * p.x`, `p.x > p.n`, `Math.max(p.n, p.x)`, 2-D mixed compare: invalid modules, declaration
 path); ld55 console unary minus of an i32 element / a 2-D row's `.length` in a sum; ld56 console

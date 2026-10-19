@@ -13,9 +13,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > sent); the `wasmValidate` letter answered; all 21 loud rows of 2026-10-13 closed (two batches,
 > with sw72–sw74 found and fixed); the owner's string-index ruling built (sw71); audit round 2
 > (below). **Resume with:** the fix order below (steps 1–2b done 2026-10-19; step 3, the compiler silent
-> rows: the index, spread, string-array, finally, block-scoping and console groups done; "the
-> rest" next: sw86, sw88–sw90, sw93, sw94, sw97, sw99–sw101, sw108, sw121, then the owner-ruled
-> sw95, sw87, sw119 and ld88; sw120 goes with the nullable gaps, item 5), then items 3–5 (binaryang 1.10.0
+> rows: the index, spread, string-array, finally, block-scoping, console and method-edge groups
+> done; next: sw97, sw99, sw100, sw101, sw108, sw121, then the owner-ruled sw95, sw87, sw119 and
+> ld88; sw120 goes with the nullable gaps, item 5), then items 3–5 (binaryang 1.10.0
 > items, H10, nullable gaps).
 >
 > **Owner's answers, 2026-10-19: all four questions decided, none built yet** (design-decisions.md
