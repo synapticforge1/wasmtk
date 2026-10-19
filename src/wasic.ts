@@ -2123,12 +2123,22 @@ class WasicTranspiler {
   // The `finally` blocks around the statement being emitted, outermost first: the WAT of each and
   // the controlStack depth at its `try`. A `return` runs every one; a `break` / `continue` runs the
   // ones entered after its target loop (sw106, 2026-10-19: they jumped past `finally`).
-  private finallyStack: Array<{ wat: string; controlDepth: number }> = [];
+  // `esc`: the label of the block around that try statement whose handler re-throws OUTWARD.
+  private finallyStack: Array<{ wat: string; controlDepth: number; esc: string; used: boolean }> = [];
+  private finSeq = 0;
 
-  /** The finally WAT a jump to controlStack[targetIdx] crosses, innermost first ("" for none). */
+  /**
+   * The finally WAT a jump to controlStack[targetIdx] crosses, innermost first ("" for none). Each
+   * copy runs in its own `try_table` branching to its statement's escape block: the jump runs it
+   * INSIDE the try, and a throw from it was caught by that same try's handlers (catch, then
+   * finally again). In JavaScript it leaves the whole try statement (2026-10-19, with sw106).
+   */
   private finallyCrossed(targetIdx: number): string {
-    return this.finallyStack.filter((f) => f.controlDepth > targetIdx).reverse().map((f) => f.wat)
-      .join("\n");
+    return this.finallyStack.filter((f) => f.controlDepth > targetIdx).reverse()
+      .map((f) => {
+        f.used = true; // its statement needs the escape block
+        return `(try_table (catch_all_ref ${f.esc})\n${f.wat}\n)`;
+      }).join("\n");
   }
 
   /**
@@ -17129,9 +17139,13 @@ ${prefixed}
         const finallyWat = hasFinally
           ? this.emitBlock(finallyBody, locals, funcResult, indent + "    ")
           : "";
-        if (hasFinally) {
-          this.finallyStack.push({ wat: finallyWat, controlDepth: this.controlStack.length });
-        }
+        const finEntry = {
+          wat: finallyWat,
+          controlDepth: this.controlStack.length,
+          esc: `$__fin_esc${this.finSeq++}`,
+          used: false,
+        };
+        if (hasFinally) this.finallyStack.push(finEntry);
         let tryWat: string, catchWat: string;
         try {
           tryWat = this.emitBlock(tryBody, locals, funcResult, indent + "    ");
@@ -17141,6 +17155,9 @@ ${prefixed}
         } finally {
           if (hasFinally) this.finallyStack.pop();
         }
+        // An exit that ran this finally (finallyCrossed) wraps it to branch HERE on a throw: the
+        // block's handler re-throws outside the whole try statement. Closed after the statement.
+        const escOpen = out.length;
 
         if (catchShadowsOuter) {
           locals.delete(internalCatchVar);
@@ -17185,8 +17202,9 @@ ${prefixed}
           out.push(`${indent}    (block ${hTag} (result i32 i32)`);
           out.push(`${indent}      (try_table (catch $__exn_tag ${hTag}) (catch_all_ref ${hAll})`);
           if (tryWat) out.push(tryWat);
-          if (finallyWat) out.push(finallyWat); // success path
           out.push(`${indent}      )`);
+          // success path, AFTER the try_table: a throw from finally is not this try's to catch
+          if (finallyWat) out.push(finallyWat);
           out.push(`${indent}      (br ${done}))`);
           out.push(...bindPayload(`${indent}    `));
           // A throw FROM the catch body goes to the catch_all_ref handler below (finally, then
@@ -17216,11 +17234,16 @@ ${prefixed}
           out.push(`${indent}  (block ${hAll} (result exnref)`);
           out.push(`${indent}    (try_table (catch_all_ref ${hAll})`);
           if (tryWat) out.push(tryWat);
-          if (finallyWat) out.push(finallyWat); // success path
           out.push(`${indent}    )`);
+          if (finallyWat) out.push(finallyWat); // success path, after the try_table
           out.push(`${indent}    (br ${done}))`);
           if (finallyWat) out.push(finallyWat); // exceptional path
           out.push(`${indent}  (throw_ref))`);
+        }
+        if (finEntry.used) {
+          const escDone = `${finEntry.esc}_done`;
+          out.splice(escOpen, 0, `${indent}(block ${escDone}`, `${indent}(block ${finEntry.esc} (result exnref)`);
+          out.push(`${indent}(br ${escDone}))`, `${indent}(throw_ref))`);
         }
         continue;
       }
