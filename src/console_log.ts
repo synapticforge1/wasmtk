@@ -1512,7 +1512,9 @@ function parseSingleArg(
         : (arrInfo.ptr === -1 || arrInfo.ptr === -2 || arrInfo.dynamic)
         ? `(local.get $${arrName})`
         : `(i32.const ${arrInfo.ptr})`;
-      return [{ kind: "joinarr", arrWat, sepPtr, sepLen, elemType: arrInfo.elemType }];
+      // a string array joins its (ptr, len) slots' TEXT ($__cbuf_join_str, sw76)
+      const joinElem = arrInfo.isStringArr || arrInfo.elemType === "string" ? "string" : arrInfo.elemType;
+      return [{ kind: "joinarr", arrWat, sepPtr, sepLen, elemType: joinElem }];
     }
   }
 
@@ -3988,7 +3990,7 @@ export function emitConsoleLog(
         needsJoinHelper = true;
         needsHelpers = true; // $__dynarr_join_to_scratch_* depends on $__i32_to_str / $__f64_to_str
         pin();
-        const joinHelper = seg.elemType === "f64" ? "$__cbuf_join_f64" : "$__cbuf_join_i32";
+        const joinHelper = cbufJoinHelper(seg.elemType);
         statements.push(
           `${indent}(call ${joinHelper} ${seg.arrWat} (i32.const ${seg.sepPtr}) (i32.const ${seg.sepLen}) (i32.const ${cursorAddr}))`,
         );
@@ -4135,7 +4137,7 @@ export function emitConsoleLog(
         needsJoinHelper = true;
         needsHelpers = true;
         needsStrGather = true; // the growable console buffer (sw62)
-        const joinHelper = seg.elemType === "f64" ? "$__cbuf_join_f64" : "$__cbuf_join_i32";
+        const joinHelper = cbufJoinHelper(seg.elemType);
         statements.push(
           `${indent}(i32.store (i32.const ${iovLen}) (i32.const 0))`,
           `${indent}(call ${joinHelper} ${seg.arrWat} (i32.const ${seg.sepPtr}) (i32.const ${seg.sepLen}) (i32.const ${iovLen}))`,
@@ -5180,6 +5182,15 @@ export function getArrPrintHelperWat(): string {
   )`;
 }
 
+/** The console-buffer join writer for an array's element kind ("string" for a string array). */
+function cbufJoinHelper(elemType: string): string {
+  return elemType === "f64"
+    ? "$__cbuf_join_f64"
+    : elemType === "string"
+    ? "$__cbuf_join_str"
+    : "$__cbuf_join_i32";
+}
+
 /**
  * Phase 28: Returns WAT helper functions that write arr.join(sep) output
  * into the scratch gather buffer.
@@ -5332,5 +5343,80 @@ export function getJoinHelperWat(): string {
                (i32.const 8))))
     (call $__dynarr_join_to_scratch_f64 (local.get $arr) (local.get $sep_ptr) (local.get $sep_len)
       (global.get $__cbuf) (local.get $cursor_addr))
+  )
+  ;; ── join string[] (8-byte (ptr, len) slots) ─────────────────────────────────
+  ;; The i32 writer printed each slot's pointer and length as numbers (\`a-b\` → \`260-1\`, sw76,
+  ;; 2026-10-19). The exact output size, every element's length plus the separators:
+  (func $__strarr_join_size (param $arr i32) (param $sep_len i32) (result i32)
+    (local $len i32) (local $idx i32) (local $total i32)
+    (local.set $len (i32.load (local.get $arr)))
+    (block $done
+      (loop $loop
+        (br_if $done (i32.ge_u (local.get $idx) (local.get $len)))
+        (local.set $total (i32.add (local.get $total)
+          (i32.load offset=4 (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $idx) (i32.const 3))))))
+        (if (i32.gt_u (local.get $idx) (i32.const 0))
+          (then (local.set $total (i32.add (local.get $total) (local.get $sep_len)))))
+        (local.set $idx (i32.add (local.get $idx) (i32.const 1)))
+        (br $loop)))
+    (local.get $total)
+  )
+  (func $__dynarr_join_to_scratch_str
+    (param $arr i32) (param $sep_ptr i32) (param $sep_len i32)
+    (param $scratch_base i32) (param $cursor_addr i32)
+    (local $len i32) (local $idx i32) (local $cur i32) (local $i i32)
+    (local $slot i32) (local $sptr i32) (local $slen i32)
+    (local.set $len (i32.load (local.get $arr)))
+    (local.set $cur (i32.load (local.get $cursor_addr)))
+    (block $done
+      (loop $loop
+        (br_if $done (i32.ge_u (local.get $idx) (local.get $len)))
+        (if (i32.gt_u (local.get $idx) (i32.const 0))
+          (then
+            (local.set $i (i32.const 0))
+            (block $sep_done
+              (loop $sep_lp
+                (br_if $sep_done (i32.ge_u (local.get $i) (local.get $sep_len)))
+                (i32.store8 (i32.add (i32.add (local.get $scratch_base) (local.get $cur)) (local.get $i))
+                  (i32.load8_u (i32.add (local.get $sep_ptr) (local.get $i))))
+                (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                (br $sep_lp)))
+            (local.set $cur (i32.add (local.get $cur) (local.get $sep_len)))))
+        (local.set $slot (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $idx) (i32.const 3))))
+        (local.set $sptr (i32.load (local.get $slot)))
+        (local.set $slen (i32.load offset=4 (local.get $slot)))
+        (local.set $i (i32.const 0))
+        (block $el_done
+          (loop $el_lp
+            (br_if $el_done (i32.ge_u (local.get $i) (local.get $slen)))
+            (i32.store8 (i32.add (i32.add (local.get $scratch_base) (local.get $cur)) (local.get $i))
+              (i32.load8_u (i32.add (local.get $sptr) (local.get $i))))
+            (local.set $i (i32.add (local.get $i) (i32.const 1)))
+            (br $el_lp)))
+        (local.set $cur (i32.add (local.get $cur) (local.get $slen)))
+        (local.set $idx (i32.add (local.get $idx) (i32.const 1)))
+        (br $loop)))
+    (i32.store (local.get $cursor_addr) (local.get $cur))
+  )
+  (func $__cbuf_join_str (param $arr i32) (param $sep_ptr i32) (param $sep_len i32) (param $cursor_addr i32)
+    (call $__cbuf_need (i32.add (i32.load (local.get $cursor_addr))
+      (i32.add (call $__strarr_join_size (local.get $arr) (local.get $sep_len)) (i32.const 8))))
+    (call $__dynarr_join_to_scratch_str (local.get $arr) (local.get $sep_ptr) (local.get $sep_len)
+      (global.get $__cbuf) (local.get $cursor_addr))
+  )
+  ;; string[].join(sep) as a (ptr, len) string VALUE
+  (func $__dynarr_join_str_str
+    (param $arr i32) (param $sep_ptr i32) (param $sep_len i32)
+    (result i32 i32)
+    (local $buf i32) (local $cursor i32)
+    (local.set $buf (call $__malloc
+      (i32.add (call $__strarr_join_size (local.get $arr) (local.get $sep_len)) (i32.const 8))))
+    (local.set $cursor (call $__malloc (i32.const 4)))
+    (i32.store (local.get $cursor) (i32.const 0))
+    (call $__dynarr_join_to_scratch_str
+      (local.get $arr) (local.get $sep_ptr) (local.get $sep_len)
+      (local.get $buf) (local.get $cursor))
+    (local.get $buf)
+    (i32.load (local.get $cursor))
   )`;
 }
