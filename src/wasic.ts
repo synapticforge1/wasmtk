@@ -1122,6 +1122,29 @@ function hasTopLevelBoolOp(e: string): boolean {
   return false;
 }
 
+/**
+ * `a?.b ?? d` (and `a.b?.c?.d ?? d`): each `?.` tests its prefix for null and the expression is
+ * `d` when one is, so it never reads through a null pointer. Only where the chain is the WHOLE
+ * left operand of `??` (it follows `=`, `(`, `,`, `?`, `:`, `return` or the start) and `d` is a
+ * simple operand (a number, a name or field chain, a string literal). `?.` elsewhere is still
+ * stripped to `.` by the caller (sw99, 2026-10-19).
+ */
+function rewriteOptChainNullish(code: string): string {
+  const re =
+    /((?:this|[A-Za-z_$][\w$]*)(?:\[[^\]\n]*\])?(?:\??\.[A-Za-z_$][\w$]*(?:\[[^\]\n]*\])?)*\?\.[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)*)\s*\?\?\s*(-?\d+(?:\.\d+)?|"[^"\n]*"|'[^'\n]*'|[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/g;
+  return code.replace(re, (whole, chain: string, dflt: string, at: number, src: string) => {
+    const before = src.slice(0, at).trimEnd();
+    // only where the chain starts an operand: not after `===`, `<=`, `+`, … (`x + a?.b ?? d` is
+    // `(x + a?.b) ?? d`)
+    if (before !== "" && !/(?:^|[^=!<>])=$|[(,?:]$|\breturn$/.test(before)) return whole;
+    const tests: string[] = [];
+    for (let i = chain.indexOf("?."); i !== -1; i = chain.indexOf("?.", i + 2)) {
+      tests.push(`${chain.slice(0, i).replace(/\?\./g, ".")} === null`);
+    }
+    return `(${tests.join(" || ")} ? ${dflt} : ${chain.replace(/\?\./g, ".")} ?? ${dflt})`;
+  });
+}
+
 /** The index of the LAST top-level `??` of `e` (it groups from the left), outside strings and
  *  brackets, or -1. A top-level `?:` ternary binds looser, so with one present this is -1. */
 function topLevelNullishIndex(e: string): number {
@@ -4455,6 +4478,9 @@ class WasicTranspiler {
           continue;
         }
         this.moduleGlobals.set(name, { type, mutable: keyword !== "const", initExpr });
+        // A string-enum-typed module variable carries the tag: remember its enum, as the _start
+        // pre-scan does for the line this promotion drops; it printed `1` for `DOWN` (sw108).
+        if (typeStr && this.stringEnumNames.has(typeStr)) this.stringEnumVars.set(name, typeStr);
         continue;
       }
       remaining.push(line);
@@ -6327,6 +6353,20 @@ class WasicTranspiler {
     const du = this.discUnionDefs.get(def.name);
     const pending: Array<{ ptr: number; field: string; expr: string }> = [];
     const ptrs = elements.map((elem) => {
+      // A struct VARIABLE element is that struct (JavaScript: the same object, so `p.n = 9` shows
+      // through `ps[0]`). It got a fresh ZEROED struct: `[p, …][0].s` was "" (sw121, 2026-10-19).
+      // A static struct is its address; a run-time one has none to lay out here: refused.
+      const id = elem.trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(id)) {
+        const sv = this.structVars.get(id);
+        if (sv && sv.ptr >= 0 && sv.def.name === def.name) return String(sv.ptr);
+        if (sv || this.classVars.has(id)) {
+          this.diagnostics.push(
+            `'${varName}': the struct variable '${id}' as an element of an array literal is not ` +
+              `supported here; push it after the declaration (${varName}.push(${id})).`,
+          );
+        }
+      }
       const open = elem.indexOf("{");
       const body = open !== -1 ? extractOuterObjectBody(elem, open) : null;
       const raw = body !== null ? parseDepth0Fields(body) : {};
@@ -7233,6 +7273,12 @@ class WasicTranspiler {
         return `(${elemType}.const ${Object.is(n, -0) ? "-0" : String(n)})`;
       }
       return `(${elemType === "i64" ? "i64" : "i32"}.const ${String(v)})`;
+    }
+    // A struct / class VARIABLE element is its pointer (local, global or static address); it was
+    // emitted as a bare name and stored 0, so `[p, …][0].s` was "" (sw121, 2026-10-19)
+    if (/^\w+$/.test(raw)) {
+      const sb = this.resolveStructBase(raw, locals ?? new Map());
+      if (sb) return sb.ptrWat;
     }
     return this.emitExpr(raw, locals ?? new Map(), elemType);
   }
@@ -8685,6 +8731,20 @@ class WasicTranspiler {
     // leading array element (i32), so `ps[1].ok || ps[0].x > 1` printed `1` (sw102, 2026-10-19).
     // Not `&&` / `||` (their result is an operand) and not across a `?` (ternary, `??`).
     if (!e.includes("?") && hasTopLevelBoolOp(e) && !splitTopLogical(e)) return "bool";
+    // A conditional is the wider of its branches (a float if either is): `(p === null ? -1 : p.z)`
+    // was typed by its first name, a pointer (2026-10-19, with sw99).
+    {
+      let u = e;
+      while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+        u = u.slice(1, -1).trim();
+      }
+      const tern = this.splitTernaryTop(u);
+      if (tern) {
+        const a = this.inferExprType(tern[1], locals), b = this.inferExprType(tern[2], locals);
+        if (a === "f64" || a === "f32" || b === "f64" || b === "f32") return "f64";
+        if (a === b) return a;
+      }
+    }
     // Struct array element field access: arr[i].field → field type
     const arrFieldDotM = e.match(/^(\w+)\[([^\]]+)\]\.(\w+)$/);
     if (arrFieldDotM) {
@@ -9661,6 +9721,21 @@ ${prefixed}
     {
       const boxRef = expr.match(/^__boxref\((\w+)\)$/);
       if (boxRef) return `(local.get $${this.boxSlot(boxRef[1])})`;
+    }
+    // `.length` of a string-valued CALL (`s.toUpperCase().length`): the string's len, through the
+    // shared $__str_op pair. It was refused here, and in console.log a sum with it printed `2` for
+    // `5` (sw100, ld58; 2026-10-19). A plain variable / field / element keeps its own handlers.
+    {
+      const lenM = expr.match(/^([\s\S]+\))\.length$/);
+      if (lenM && parenDepthNeverNegative(lenM[1]!) && this.isStringExpr(lenM[1]!, locals)) {
+        const pl = this.quietEmit(() => this.emitStringPtrLen(lenM[1]!, locals));
+        if (pl !== "(i32.const 0) (i32.const 0)") {
+          locals.set("__str_op_ptr", "i32");
+          locals.set("__str_op_len", "i32");
+          const w = `(block (result i32) ${pl} (local.set $__str_op_len) (drop) (local.get $__str_op_len))`;
+          return defaultType === "f64" || defaultType === "f32" ? `(f64.convert_i32_s ${w})` : w;
+        }
+      }
     }
 
     // Phase 22: strip TypeScript non-null assertion postfix `expr!` → `expr`
@@ -12169,7 +12244,28 @@ ${prefixed}
         const _isBoolSide = (s: string) => this.inferExprType(s, locals) === "bool" && !splitTopLogical(s);
         const _boolEquality = (op === "===" || op === "!==" || op === "==" || op === "!=") &&
           (_isBoolSide(lhs) || _isBoolSide(rhs));
-        const lhsType: WatType = alwaysI32 || _boolEquality ? "i32" : (_lhsIsStrSlice ? "string" : (_lhsCastType ?? _dotFieldType ??
+        // A PARENTHESISED left operand has its contents' type: `(z / 2) === (z / 2.5)` fell back to
+        // the context's type (i32 for a boolean declaration) and truncated both floats (sw97,
+        // 2026-10-19). Only a float / bigint is taken; anything else keeps the old resolution.
+        let _lhsParenType: WatType | null = null;
+        {
+          let inner = lhs.trim();
+          while (inner.startsWith("(") && inner.endsWith(")") && parenDepthNeverNegative(inner.slice(1, -1))) {
+            inner = inner.slice(1, -1).trim();
+          }
+          // A KNOWN float / bigint inside only: inferExprType's fallback is f64, which made
+          // `((z + 5) % 7) + 6` of i32s float arithmetic (caught by the date bundle's golden).
+          if (inner !== lhs.trim() && !_lhsCastType) {
+            const ids = [...inner.matchAll(/(?<![\w.$])([A-Za-z_$][\w$]*)(?![\w$(])/g)].map((m) => m[1]!);
+            const declOf = (n: string) => watBaseType((locals.get(n) ?? this.moduleGlobals.get(n)?.type) as WatType);
+            if (/(?:^|[^\w.])\d+\.\d/.test(inner) || ids.some((n) => /^f(64|32)$/.test(declOf(n) ?? ""))) {
+              _lhsParenType = "f64";
+            } else if (/(?:^|[^\w.])\d+n\b/.test(inner) || ids.some((n) => declOf(n) === "i64")) {
+              _lhsParenType = "i64";
+            }
+          }
+        }
+        const lhsType: WatType = alwaysI32 || _boolEquality ? "i32" : (_lhsIsStrSlice ? "string" : (_lhsCastType ?? _lhsParenType ?? _dotFieldType ??
           (/^\w+$/.test(lhs) && locals.has(lhs)
             ? locals.get(lhs)!
             : /^\w+$/.test(lhs) && this.moduleGlobals.has(lhs)
@@ -12272,8 +12368,16 @@ ${prefixed}
           : /^\w+$/.test(rhsT)
           ? watBaseType((locals.get(rhsT) ?? this.moduleGlobals.get(rhsT)?.type) as WatType)
           : watBaseType(this.inferExprType(rhs, locals));
+        // ...or an ELEMENT / FIELD declared float (a Float64Array or f64[] element, an f64 field):
+        // `ia[1] + fa[1]` was i32.add and truncated the float (sw101, 2026-10-19). Declared types
+        // only, so inferExprType's f64 fallback still does not count.
+        const rhsDeclFloat = (/^\w+\[[^\]]+\]$/.test(rhsT) &&
+          (this.typedArrayVars.has(rhsT.match(/^\w+/)![0]) || this.arrayVars.has(rhsT.match(/^\w+/)![0])) &&
+          (rhsBase === "f64" || rhsBase === "f32")) ||
+          (/^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(rhsT) &&
+            /^f(64|32)$/.test(this.fieldOfExpr(rhsT, locals)?.type ?? ""));
         const rhsKnownFloat = /^-?\d+\.\d*([eE][+-]?\d+)?$|^-?\d+[eE][+-]?\d+$/.test(rhsT) ||
-          (/^\w+$/.test(rhsT) && (rhsBase === "f64" || rhsBase === "f32"));
+          (/^\w+$/.test(rhsT) && (rhsBase === "f64" || rhsBase === "f32")) || rhsDeclFloat;
         const numType: WatType = watBaseType(lhsType) === "f32" &&
             (watBaseType(defaultType as WatType) === "f64" || rhsBase === "f64")
           ? "f64"
@@ -22515,6 +22619,9 @@ ${sum}
     this.src = gateVarToLet(this.src);
     // Phase 49: optional chaining — strip ?. to . (safe for non-nullable types). CODE ONLY: a `?.`
     // inside a string literal (e.g. a dynrt driver's eval source `"o?.x"`) must be left intact.
+    // First `a?.b ?? d` → `(a === null ? d : a.b ?? d)`: stripped, it read through the null
+    // pointer and gave 0, not d (sw99, 2026-10-19).
+    this.src = rewriteOutsideStringsAndComments(this.src, rewriteOptChainNullish);
     this.src = rewriteOutsideStringsAndComments(this.src, (code) => code.replace(/[?][.]/g, "."));
     // Pre-pass: expand generic templates by monomorphization before any other parsing
     this.src = this.expandGenerics(this.src);
