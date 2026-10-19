@@ -1122,6 +1122,26 @@ function hasTopLevelBoolOp(e: string): boolean {
   return false;
 }
 
+/** The index of the LAST top-level `??` of `e` (it groups from the left), outside strings and
+ *  brackets, or -1. A top-level `?:` ternary binds looser, so with one present this is -1. */
+function topLevelNullishIndex(e: string): number {
+  const inStr = buildStringLiteralMask(e);
+  let depth = 0, at = -1;
+  for (let i = 0; i < e.length; i++) {
+    if (inStr[i]) continue;
+    const ch = e[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (depth === 0 && ch === "?") {
+      if (e[i + 1] === "?") {
+        at = i;
+        i++;
+      } else if (e[i + 1] !== ".") return -1; // a ternary (`?.` is optional chaining)
+    }
+  }
+  return at;
+}
+
 /** `e` as `lhs || rhs` or `lhs && rhs` when a logical operator is its loosest top-level operator
  *  (`||` before `&&`, each at its last occurrence; a fully parenthesised `e` is unwrapped), else
  *  null. A top-level `?` (a
@@ -7539,6 +7559,12 @@ class WasicTranspiler {
             emitTmplConcat(jP, jL);
             continue;
           }
+          // `${c ? a : b}` over two strings: one multi-value (ptr, len). It was numbered as a
+          // pointer (`aa|284`, 2026-10-19, with sw98)
+          if (this.splitTernaryTop(e) && this.isStringExpr(e, locals)) {
+            emitTmplConcat(this.emitStringPtrLen(e, locals), "");
+            continue;
+          }
           const eType = this.inferExprType(e, locals);
           if (eType === "string") {
             if (/^\w+$/.test(e) && this.moduleStringConsts.has(e)) {
@@ -8469,6 +8495,16 @@ class WasicTranspiler {
     if (/^["']/.test(e)) return true;
     if (e.startsWith("`") && e.endsWith("`")) return true;
     if (/^\w+$/.test(e)) return locals.get(e) === "string" || this.moduleStringConsts.has(e);
+    // A string struct FIELD (`p.s`, `ps[i].s`, `a.b.s`): a ternary over two was refused in a
+    // declaration and was "" in a template (2026-10-19, with sw98)
+    if (/^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(e) && this.fieldOfExpr(e, locals)?.type === "string") {
+      return true;
+    }
+    // a conditional whose two branches are strings (`${c ? p.s : p.t}` printed the pointer)
+    {
+      const tern = this.splitTernaryTop(e);
+      if (tern && this.isStringExpr(tern[1], locals) && this.isStringExpr(tern[2], locals)) return true;
+    }
     // String array element: arr[idx] where arr is a string array
     const bracketStrM = e.match(/^(\w+)\[/);
     if (bracketStrM) {
@@ -8527,6 +8563,10 @@ class WasicTranspiler {
   /** Infers the WAT type of an arbitrary expression, including array element access. */
   private inferExprType(expr: string, locals: Map<string, WatType>): WatType {
     const e = expr.trim();
+    // A top-level COMPARISON is a boolean, whatever it starts with: `ps[0].x > 1` was typed by its
+    // leading array element (i32), so `ps[1].ok || ps[0].x > 1` printed `1` (sw102, 2026-10-19).
+    // Not `&&` / `||` (their result is an operand) and not across a `?` (ternary, `??`).
+    if (!e.includes("?") && hasTopLevelBoolOp(e) && !splitTopLogical(e)) return "bool";
     // Struct array element field access: arr[i].field → field type
     const arrFieldDotM = e.match(/^(\w+)\[([^\]]+)\]\.(\w+)$/);
     if (arrFieldDotM) {
@@ -8823,6 +8863,42 @@ ${prefixed}
 
   private emitStringPtrLen(expr: string, locals: Map<string, WatType>): string {
     expr = expr.trim();
+    // A STRING `a ?? b`: b when a is null, else a. It was refused in a declaration and printed a
+    // field's pointer in console.log (`q.s ?? "none"` → `268`, sw98, 2026-10-19). The null test is
+    // the value's own flag (nullTestWat: a nullable local's `__null`, a field's flag word); a
+    // string that cannot be null is `a`.
+    {
+      const qi = topLevelNullishIndex(expr);
+      if (qi > 0) {
+        const lhs = expr.slice(0, qi).trim();
+        const rhs = expr.slice(qi + 2).trim();
+        const nullW = this.nullTestWat(lhs, locals);
+        // A `string | null` FIELD has no null representation yet (`null` is stored as the text
+        // "null"; the nullable gaps, next-work item 5): refused, not tested wrongly.
+        const lf = nullW ? undefined : this.fieldOfExpr(lhs, locals);
+        if (lf?.nullable && lf.type === "string") {
+          this.diagnostics.push(
+            `'${expr.slice(0, 60)}': '??' on a 'string | null' field is not supported yet (a null ` +
+              `string field is not represented); test it another way or give it a default.`,
+          );
+          return "(i32.const 0) (i32.const 0)";
+        }
+        const lw = nullW === "(i32.const 1)" ? null : this.emitStringPtrLen(lhs, locals);
+        const rw = this.emitStringPtrLen(rhs, locals);
+        if (lw === null) return rw;
+        if (!nullW) return lw;
+        return `(if (result i32 i32) ${nullW} (then ${rw}) (else ${lw}))`;
+      }
+    }
+    // A conditional with two string branches, one branch evaluated (2026-10-19, with sw98)
+    {
+      const tern = this.splitTernaryTop(expr);
+      if (tern && this.isStringExpr(tern[1], locals) && this.isStringExpr(tern[2], locals)) {
+        return `(if (result i32 i32) ${this.emitCond(tern[0], locals)} (then ${
+          this.emitStringPtrLen(tern[1], locals)
+        }) (else ${this.emitStringPtrLen(tern[2], locals)}))`;
+      }
+    }
     // `n.toString()` of a number or boolean is `String(n)` (ld08's value form: as an argument or in
     // console.log, where it was refused).
     {
@@ -11861,9 +11937,20 @@ ${prefixed}
         // Also peek at the leading identifier for simple compound expressions like "n % 2"
         // (but NOT for dot-access expressions like "r.width" — the leading "r" would give wrong type).
         // str.slice(...) on a string local → string type (used in string comparisons)
-        const _lhsSliceRecv = lhs.match(/^(\w+)\.slice\s*\(/)?.[1];
-        const _lhsIsStrSlice = _lhsSliceRecv !== undefined &&
-          locals.get(_lhsSliceRecv) === "string";
+        // Every string-returning method of a string local, and a comparison against a string
+        // LITERAL (in typed TypeScript only a string compares with one): `s.toLowerCase() < "b"`
+        // compared numbers, false for "abd" < "b" (2026-10-19, found with sw102).
+        // The WHOLE lhs must be that one call: `s.at(0).charCodeAt(0)` is a number.
+        const _lhsSliceM = lhs.trim().match(
+          /^(\w+)\.(?:slice|toUpperCase|toLowerCase|trim|trimStart|trimEnd|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat|at)\s*\(([\s\S]*)\)$/,
+        );
+        const _lhsSliceRecv = _lhsSliceM && parenDepthNeverNegative(_lhsSliceM[2]!)
+          ? _lhsSliceM[1]
+          : undefined;
+        const _lhsIsStrSlice = (_lhsSliceRecv !== undefined &&
+          locals.get(_lhsSliceRecv) === "string") ||
+          (STRING_CMP_OPS.has(op) && /^["'`]/.test(rhs.trim()) && !/^["'`]/.test(lhs.trim()) &&
+            !/^(undefined|null)$/.test(lhs.trim()));
         const _lhsLeadId = !lhs.includes(".") ? lhs.match(/^(\w+)/)?.[1] : undefined;
         // For function calls, extract the leading function name even when args contain dots.
         // E.g. "intMin(tests[i].a, tests[i].b)" → _lhsFnName = "intMin" → result type f64

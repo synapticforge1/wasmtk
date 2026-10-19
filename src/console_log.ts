@@ -983,6 +983,9 @@ function parseSingleArg(
           /^(.+?)\.(toUpperCase|toLowerCase|trim|trimStart|trimEnd|slice|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat)\s*\(.*\)$/,
         );
         if (mm && looksLikeString(mm[1]!, locals, arrayLookup)) return true;
+        // a string struct FIELD (`p.s`, `ps[i].s`): it printed the pointer (sw98, 2026-10-19)
+        const fm = b.trim().match(/^(\w+(?:\[[^\]]*\])?)\.(\w+)$/);
+        if (fm && structLookup?.(fm[1]!, fm[2]!)?.type === "string") return true;
         const cm = b.match(/^(\w+)\s*\(.*\)$/);
         return !!cm && funcLookup?.(cm[1]!)?.result === "string";
       };
@@ -1382,7 +1385,11 @@ function parseSingleArg(
   ) {
     const result = dotCallLookup(token);
     if (result) {
-      const kind = result.type === "f64" || result.type === "f32"
+      // A comparison that merely STARTS with a call is a boolean: `s.toUpperCase() !== "ABD"`
+      // printed `0` (sw102, 2026-10-19; sw75's class)
+      const kind = isTopLevelComparison(token)
+        ? "boolexpr" as const
+        : result.type === "f64" || result.type === "f32"
         ? "f64expr" as const
         : result.type === "i64"
         ? "i64expr" as const
@@ -1912,6 +1919,20 @@ function parseSingleArg(
   // `_hasTernary` probe matches the leading `?` of `??`, so `val ?? -1` would otherwise be
   // mis-parsed as a ternary and fall through to the comment-stub fallback.
   if (_nullishResolver && findTopLevelOp(token, "??") !== -1) {
+    // A STRING `a ?? b` is built as a string by wasic (emitStringPtrLen): the numeric resolver
+    // printed a string field's pointer (`q.s ?? "none"` → `268`, sw98, 2026-10-19)
+    const qi = findTopLevelOp(token, "??");
+    const qr = token.slice(qi + 2).trim();
+    const ql = token.slice(0, qi).trim();
+    const qlField = ql.match(/^(\w+(?:\[[^\]]*\])?)\.(\w+)$/);
+    const strSide = /^["'`]/.test(qr) || looksLikeString(ql, locals, arrayLookup) ||
+      (!!qlField && structLookup?.(qlField[1]!, qlField[2]!)?.type === "string");
+    if (strSide && _stringExprResolver) {
+      const r = _stringExprResolver(token, locals);
+      if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+      _diagnosticSink?.(`console argument: cannot build the string '${token.slice(0, 60)}'.`);
+      return [{ kind: "literal", text: "" }];
+    }
     const nw = _nullishResolver(token, locals);
     if (nw !== undefined) {
       return [{
@@ -2145,10 +2166,14 @@ function parseSingleArg(
   // (`3n ** 20n`, ld30), had no typed lead atom: it printed through the f64 printer, without its
   // `n` (2026-10-13).
   if (leadType === undefined) {
-    const lead2 = token.replace(/^[-~(\s]+/, "").match(/^(\w+)/)?.[1];
+    const rest2 = token.replace(/^[-~(\s]+/, "");
+    const lead2 = rest2.match(/^(\w+)/)?.[1];
     if (lead2 && (/^\d+n$/.test(lead2) || (locals.get(lead2) ?? globals?.get(lead2)) === "i64")) {
       leadType = "i64";
     }
+    // ...or by a bigint FIELD (`-h.big` printed `-12`, sw103, 2026-10-19)
+    const field2 = rest2.match(/^(\w+)\.(\w+)\b/);
+    if (field2 && structLookup?.(field2[1], field2[2])?.type === "i64") leadType = "i64";
   }
   if (leadType === "i64") {
     return [{
@@ -3008,8 +3033,9 @@ function exprToWat(
   // i64 is preserved; otherwise default numeric to f64
   const numType = isFloat ? (expectedType as string) : expectedType === "i64" ? "i64" : "f64";
 
-  // Unary ! — logical not → i32.eqz
-  if (expr.startsWith("!") && !expr.startsWith("!=")) {
+  // Unary ! — logical not → i32.eqz. Like unary minus below, only when no binary operator sits at
+  // top level: `!a && b` is `(!a) && b`; it was `!(a && b)` (sw96, 2026-10-19).
+  if (expr.startsWith("!") && !expr.startsWith("!=") && !hasTopLevelBinaryOp(expr)) {
     return `(i32.eqz ${
       exprToWat(
         expr.slice(1).trim(),
@@ -3026,7 +3052,8 @@ function exprToWat(
 
   // Unary ~ — bitwise not → i32.xor with -1
   // (2026-10-13: at i64 a bigint `i64.xor`; otherwise the operand is ToInt32'd, as for `|`.)
-  if (expr.startsWith("~")) {
+  // (sw96: `~n + 1` is `(~n) + 1`; it was `~(n + 1)`)
+  if (expr.startsWith("~") && !hasTopLevelBinaryOp(expr)) {
     const inner = expr.slice(1).trim();
     if (expectedType === "i64") {
       return `(i64.xor ${
@@ -3631,6 +3658,14 @@ const TOP_LEVEL_BINARY_OPS = [
 
 /** True if `expr` has a binary operator at top level (outside brackets and string literals).
  *  findTopLevelOp does not match a unary `+` / `-`, so `-n` alone is false and `-n + m` true. */
+/** A comparison at top level (=== !== == != < > <= >=), with no top-level &&, ||, or `?`: its
+ *  value is a boolean in JavaScript, whatever its operands are (sw102). */
+function isTopLevelComparison(expr: string): boolean {
+  if (findTopLevelOp(expr, "&&") !== -1 || findTopLevelOp(expr, "||") !== -1) return false;
+  if (findTopLevelOp(expr, "?") !== -1) return false;
+  return ["===", "!==", "==", "!=", "<=", ">=", "<", ">"].some((op) => findTopLevelOp(expr, op) > 0);
+}
+
 function hasTopLevelBinaryOp(expr: string): boolean {
   return TOP_LEVEL_BINARY_OPS.some((op) => findTopLevelOp(expr, op) > 0);
 }
