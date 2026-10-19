@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 34 | 100 | 10 | 17 |
+| SILENT-WRONG | 35 | 100 | 10 | 17 |
 | LOUD | 40 | 57 | 11 | 8 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 34** (2026-10-15, audit round 2: sw76–sw108 found, and sw75;
+**Open silent-wrong in the compiler: 35** (2026-10-19: sw119, i32 overflow, opened by the owner's
+ruling; the owner also decided sw87, sw95 and ld88, design-decisions.md § "Owner's rulings of
+2026-10-19"). Before that, **34** (2026-10-15, audit round 2: sw76–sw108 found, and sw75;
 plus 10 silent TOOL defects sw109–sw118; loud 40 in the compiler (ld47–ld80 found) and 11 in the
 tools; the round-2 section below). Before that, **1** (2026-10-15, later: sw71 fixed under the owner's
 string-index ruling; sw75 found with it, `console.log(s.charAt(i) === "")` prints `1`. Open loud: 6,
@@ -284,7 +286,7 @@ overwrite user files (sw113) at the top.
 | sw84 | `splice` drops insertion arguments; a one-argument `splice(i)` removes one element | ~13960: only args 0 and 1, count defaults to 1 |
 | sw85 | `splice` with a negative index removes the last element | `$__dynarr_splice_*` ~18775 (no normalisation; ld47 is its trap) |
 | sw86 | `charCodeAt` out of range gives -1, not NaN (`isNaN(s.charCodeAt(9))` false) | ~19222 |
-| sw87 | a bare numeric `sort()` sorts numerically; JavaScript sorts as strings (`1,10,100,9`) | `sort_<T>` ~10191 / ~14152 (dynrt documents the deviation, wasic does not) |
+| sw87 | a bare numeric `sort()` sorts numerically; JavaScript sorts as strings (`1,10,100,9`). **Owner 2026-10-19: follow JavaScript** (a JS function does what JS intends) | `sort_<T>` ~10191 / ~14152 (dynrt documents the deviation, wasic does not) |
 | sw88 | `split("")` gives the whole string as one part | ~19550 "treat as no-split" |
 | sw89 | `reduce` with no initial value starts the accumulator at 0 (a product is 0) | ~10234 `zeroOf` |
 | sw90 | `find` returns a sentinel: a found -1 reads as undefined, a miss is not `=== undefined` | ~18299 |
@@ -292,7 +294,7 @@ overwrite user files (sw113) at the top.
 | sw92 | `padStart` / `padEnd` with an empty pad pads with memory bytes | ~19451, ~19492 force `padlen` 1 |
 | sw93 | `x.toString(radix)` of an f64 truncates to i32 (`255.5` → `ff`) | ~7742 (ld51 is its trap) |
 | sw94 | `includes(NaN)` false on an f64 array (SameValueZero) | ~10110 = `indexOf != -1` |
-| sw95 | an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner's question**, as the string ruling: refuse, or give undefined | no record of a decision |
+| sw95 | an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner 2026-10-19: give `undefined`, as for strings; a float array index keeps D3's conversion** | design-decisions.md § "Owner's rulings of 2026-10-19" |
 | sw96 | console: `!` and `~` take the whole binary expression (`!a && b` is `!(a && b)`, `~n + 1` is `~(n + 1)`), also in templates / concats | console_log ~3010, ~3027 lack unary minus's `!hasTopLevelBinaryOp` guard |
 | sw97 | a declaration comparing parenthesised floats truncates both to i32 (`(z / 2) === (z / 2.5)` true) | wasic ~11636 `lhsType` falls back to `defaultType` for a `(` lead (ld65: NaN traps) |
 | sw98 | console prints a string POINTER for a string `??` or ternary over struct string fields (`q.s ?? "none"` → `268`) | console numeric path |
@@ -355,13 +357,16 @@ relative path (`fetch(String(source))`), and a typed-array view ignores byteOffs
 handles neither `export class` nor `export { name }`; ld85 two imports with the same basename
 collide (`duplicate func $util_add`); ld86 the merge scanners count `(` `)` inside data strings;
 ld87 `mod` cannot call an i64 function; ld88 `wast` exits 0 with ✅ when modules are not built (or
-on an empty directory) — owner to say whether intended; ld89 `dync` leaves `<name>.__dync.ts` on
+on an empty directory) — **owner 2026-10-19: exit 1 unless the unbuilt module is on a known
+list; 0 files always fails**; ld89 `dync` leaves `<name>.__dync.ts` on
 failure and prints errors twice; ld90 bad flag values silently become defaults (`--runtime`,
 `--any-policy`, `--on-conflict`, `--go-runtime`, `--go-target`), `-o` ignored by `run` / `info` /
 `mod`, a missing target prints help and exits 0.
 
-**Not counted:** i32 overflow wraps (`65536 * 65536` → 0): i32 is an integer type by the README; the
-owner may confirm. **Dead code / stale, verified by grep** (cleanup, not bugs): main.ts:418-421
+**sw119, i32 overflow** (`65536 * 65536` → 0, Deno 4294967296): first "not counted" as the
+declared-type contract; **owner 2026-10-19: the operator gives JavaScript's result, and storing a
+value that does not fit an `i32` slot throws** (design-decisions.md § "Owner's rulings of
+2026-10-19", rule 4). Silent today, NOT BUILT; measure the corpus first. **Dead code / stale, verified by grep** (cleanup, not bugs): main.ts:418-421
 (`wast`'s unreachable `!target`); utils.ts:232-249 (Javy interception), :256-264 (`console.log`
 UTF-16 shim), :292-307 (library-call branch, unreachable while sw115 stands); unused
 `getImportInfo`, `v128`, `funcref`, `externref`, `applyNames` (utils.ts:33, :49-56); utils.ts:168
