@@ -32,7 +32,17 @@ function toKebabCase(s: string): string {
 /** A WIT identifier: kebab words, each starting with a letter. */
 const WIT_ID = /^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*$/;
 
-/** Exports that are runtime plumbing, not the module's interface (as `wasmtk info` treats them). */
+/**
+ * The package/world name for a file name. Kebab-cased, then made a WIT identifier: a file
+ * `2048.wasm` wrote `package local:2048;`, which no WIT parser accepts (sw118, 2026-10-19). A word
+ * that starts with a digit gets an `m` in front; other characters split words.
+ */
+export function witPackageName(name: string): string {
+  const words = toKebabCase(name).split(/[^a-z0-9]+/).filter(Boolean)
+    .map((w) => /^[a-z]/.test(w) ? w : `m${w}`);
+  return words.length ? words.join("-") : "module";
+}
+
 /**
  * TinyGo's libc/float runtime exports: present in every TinyGo module, not the author's API.
  * Measured on the Go fixtures 2026-09-28 (`strlib`, `mathleaf`).
@@ -83,13 +93,16 @@ function witSig(params: number, results: number): { sig: string } | { why: strin
  * internal IR for them would couple us to a shape it does not publish.
  */
 export function witFromWasm(bytes: Uint8Array, name: string): string {
-  const pkg = toKebabCase(name);
+  const pkg = witPackageName(name);
   const exports: string[] = [];
   const skipped: string[] = [];
   const hostImports = WebAssembly.Module.imports(new WebAssembly.Module(bytes as BufferSource))
     .filter((i) => i.kind === "function" && i.module !== "wasi_snapshot_preview1")
     .map((i) => `${i.module}.${i.name}`);
   const module = binaryen.readBinary(bytes);
+  // WIT name → the export that took it: `fooBar` and `foo_bar` both kebab to `foo-bar`, and the
+  // WIT listed it twice, invalid (sw118, 2026-10-19). The first keeps it; the other is skipped.
+  const witNames = new Map<string, string>();
   try {
     for (let i = 0; i < module.getNumExports(); i++) {
       const exp = binaryen.getExportInfo(module.getExportByIndex(i));
@@ -98,8 +111,13 @@ export function witFromWasm(bytes: Uint8Array, name: string): string {
       const id = toKebabCase(exp.name);
       const s = witSig(info.params, info.results);
       if (!WIT_ID.test(id)) skipped.push(`export ${exp.name}: not a WIT identifier`);
-      else if ("why" in s) skipped.push(`export ${exp.name}: ${s.why}`);
-      else exports.push(`  export ${id}: ${s.sig};`);
+      else if (witNames.has(id)) {
+        skipped.push(`export ${exp.name}: its WIT name '${id}' is already ${witNames.get(id)}'s`);
+      } else if ("why" in s) skipped.push(`export ${exp.name}: ${s.why}`);
+      else {
+        witNames.set(id, exp.name);
+        exports.push(`  export ${id}: ${s.sig};`);
+      }
     }
   } finally {
     module.dispose();

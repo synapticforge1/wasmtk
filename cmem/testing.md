@@ -114,6 +114,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw111 / sw115–sw118 (the last silent tool rows), gate GREEN.** New suite
+> **`tool_rows_tests` 16 / 16** (`tests/tool_rows_tests.ts`, the installed wasmtk; 14 of 16 fail
+> on the old code, the 2 that pass are controls; sw117's 4 need TinyGo and skip without it) · wasi
+> 466/466 · golden-WAT 523, 0 diverged · wast 64,506 / 0 / 16 · engine cross-check 1152 on baseline
+> (111 not in it) · go 7 / 7 / 12 · typed_decl 45 · outpath 12 · merge_layout 7 · api-surface
+> unchanged. Reaches: main.ts (`run`), utils.ts (WASI argv, numeric args), wasmmerge.ts (dual
+> exports), gowasic.ts, witgen.ts.
+
 > **2026-10-19, sw109 / sw110 / sw112 / ld86 (merge and bundle layout), gate GREEN.** New suite
 > **`merge_layout_tests` 7 / 7** (3 fail on the old code, a 4th cannot even compile) ·
 > golden-WAT 523, 46 pipeline entries re-recorded: each changes ONLY `$__heap_ptr`'s initial value

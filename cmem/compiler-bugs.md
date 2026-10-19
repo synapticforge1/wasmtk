@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 35 | 100 | 5 | 22 |
+| SILENT-WRONG | 35 | 100 | 0 | 27 |
 | LOUD | 40 | 57 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 35** (2026-10-19: sw119, i32 overflow, opened by the owner's
+**Open silent-wrong in the compiler: 35; in the tools: 0** (2026-10-19, later: the last tool rows
+sw111, sw115–sw118 fixed, `tests/tool_rows_tests.ts`; all ten round-2 tool rows are closed).
+Before that, 35 (2026-10-19: sw119, i32 overflow, opened by the owner's
 ruling; the owner also decided sw87, sw95 and ld88, design-decisions.md § "Owner's rulings of
 2026-10-19"). Before that, **34** (2026-10-15, audit round 2: sw76–sw108 found, and sw75;
 plus 10 silent TOOL defects sw109–sw118; loud 40 in the compiler (ld47–ld80 found) and 11 in the
@@ -315,14 +317,14 @@ overwrite user files (sw113) at the top.
 | --- | --- | --- |
 | ~~sw109~~ | ✅ FIXED 2026-10-19: `wasmmerge.dataExtent`, THE one data-extent reader (any offset bracketing, every string piece, named escapes counted once), replaces wasmbundle's own regex. Test `tests/merge_layout_tests.ts`. Was: `wasmbundle` seats every module's data at the same address (the second library's bytes read from the first's address) | `getDataMaxEnd` ~wasmbundle.ts:143 misses binaryang's `(offset (i32.const N))` form |
 | ~~sw110~~ | ✅ FIXED 2026-10-19: the next base is the HIGHEST of the library's data end (`dataExtent`), its exported `__heap_ptr`, and (as before) a mutable i32 global 0, 8-aligned; no 260 fallback. 46 pipeline goldens moved, each ONLY `$__heap_ptr`'s initial value, up 2–4 bytes (the alignment). Test `tests/merge_layout_tests.ts`. Was: a wasic merge seats the heap INSIDE a merged library's data (`79 79 200` → `79 7 200`) | wasic.ts ~23103 advances by global 0's init, not the data extent |
-| sw111 | a function exported under two names keeps only the last | `exportFuncMap` by index, wasmmerge.ts ~457 |
+| ~~sw111~~ | ✅ FIXED 2026-10-19: `exportFuncMap` holds EVERY name of an index; the first names the function, each other name is a forwarder (`call` of the first), and every name maps to it. Bundle and wasic merge both. Test `tests/tool_rows_tests.ts`. Was: a function exported under two names keeps only the last | `exportFuncMap` by index, wasmmerge.ts ~457 |
 | ~~sw112~~ | ✅ FIXED 2026-10-19 as a REFUSAL: two files of one program declaring the same top-level value name (`function` / `const` / `let` / `var` / `class` / `enum`) stop with "the top-level name 'x' is declared in both …" (tsbundler step 6). Prefixing private names safely needs a parser (object keys, interface fields, shorthand share the spelling); `type` / `interface` repeats are allowed (`type i32 = number` everywhere). wasic no longer words every bundler error "Cannot read". Test `tests/merge_layout_tests.ts`. Was: the bundler does not prefix a file's PRIVATE top-level names, so they collide with the entry's (`6 100` → `200 100`) | tsbundler.ts ~661 renames exports only |
 | ~~sw113~~ | ✅ FIXED 2026-10-19: one helper, `src/outpath.ts` (`defaultOutPath` replaces a known extension in any case, else APPENDS the new one; `assertNotInput` / `samePath` refuse any write that resolves to the input, an explicit `-o` included, case-insensitively on Windows), used by convert, wasm2js, tsbundle, bindgen, jstyper (its `.d.ts` path too) and wasic's `.ts` / `.wat` / library compiles and their sidecar `.wat` / `.wit`. Test `tests/outpath_tests.ts` (12 cases; all 12 fail on the old code, 10 of them destroying the input). Was: **default output paths can overwrite the INPUT** (`convert lib.bin`, `wasm2js`, `tsbundle entry.mts`, `bindgen H2.WIT`, `jstyper calc.mjs` empties the source) | unanchored / case-sensitive extension replaces: utils.ts:531, :503, main.ts:428, bindgen.ts:649, jstyper.ts:345, :370, :333 |
 | ~~sw114~~ | ✅ FIXED 2026-10-19 with sw113: `compileWasi` checks `compileWat`'s result and exits 1. Test `tests/outpath_tests.ts`. Was: `wasmtk wasic broken.wat` exits 0 after "unknown operator" | `compileWasi` ignores `compileWat`'s result, wasic.ts ~23333 |
-| sw115 | `wasmtk run x.ts one two` drops the arguments; WASI `args_sizes_get` is 0; the library-call branch is unreachable | main.ts:390 passes `[]`; utils.ts:146 |
-| sw116 | `mod lib.wasm add abc 5` turns `abc` into 0 | utils.ts:437 (also `runWasi` :299) |
-| sw117 | Go `build -o out/x.wasm` (relative) writes beside the SOURCE and reports success at the given path | gowasic.ts ~203/241/426 unresolved; `report()` ~573 unchecked (Zig's was fixed 2026-08-24) |
-| sw118 | `witgen` writes duplicate exports (`fooBar`, `foo_bar` → `foo-bar` twice); package names unchecked (`local:2048`) | witgen.ts ~98, ~86 |
+| ~~sw115~~ | ✅ FIXED 2026-10-19: `run` passes the arguments after the target; `args_get` / `args_sizes_get` give `[basename, …args]` (UTF-8, NUL-terminated); the library-call branch (`run lib.wasm fn 1`) is reachable. Test `tests/tool_rows_tests.ts`. Was: `wasmtk run x.ts one two` drops the arguments; WASI `args_sizes_get` is 0; the library-call branch is unreachable | main.ts:390 passes `[]`; utils.ts:146 |
+| ~~sw116~~ | ✅ FIXED 2026-10-19: a non-numeric argument exits 1 with "'abc' is not a number", in `mod` and `run`'s library call. Test `tests/tool_rows_tests.ts`. Was: `mod lib.wasm add abc 5` turns `abc` into 0 | utils.ts:437 (also `runWasi` :299) |
+| ~~sw117~~ | ✅ FIXED 2026-10-19: the output path is resolved against the working directory before the toolchain runs (`cwd: baseDir`), and `report()` checks the artifact as zigwasic's does (missing or empty: `success: false`). Test `tests/tool_rows_tests.ts` (needs TinyGo; skipped and said so without it). Was: Go `build -o out/x.wasm` (relative) writes beside the SOURCE and reports success at the given path | gowasic.ts ~203/241/426 unresolved; `report()` ~573 unchecked (Zig's was fixed 2026-08-24) |
+| ~~sw118~~ | ✅ FIXED 2026-10-19: the first export keeps a WIT name, a later one kebabing to it is listed as `// skipped export foo_bar: its WIT name 'foo-bar' is already fooBar's`; `witPackageName` makes the package a WIT identifier (`2048` → `m2048`). The orphaned doc comment at witgen.ts:35 went with it. Test `tests/tool_rows_tests.ts`. Was: `witgen` writes duplicate exports (`fooBar`, `foo_bar` → `foo-bar` twice); package names unchecked (`local:2048`) | witgen.ts ~98, ~86 |
 
 **Loud, compiler** (`round2/loud/`): ld47 `splice(3, 10)` traps (count unclamped); ld48 `pop()` of
 an empty array traps; ld49 an f64 comparator in `sort` (signature mismatch); ld50 `flat()` on 1-D
@@ -369,11 +371,11 @@ declared-type contract; **owner 2026-10-19: the operator gives JavaScript's resu
 value that does not fit an `i32` slot throws** (design-decisions.md § "Owner's rulings of
 2026-10-19", rule 4). Silent today, NOT BUILT; measure the corpus first. **Dead code / stale, verified by grep** (cleanup, not bugs): main.ts:418-421
 (`wast`'s unreachable `!target`); utils.ts:232-249 (Javy interception), :256-264 (`console.log`
-UTF-16 shim), :292-307 (library-call branch, unreachable while sw115 stands); unused
+UTF-16 shim), :292-307 (library-call branch: REACHABLE since sw115's fix, 2026-10-19); unused
 `getImportInfo`, `v128`, `funcref`, `externref`, `applyNames` (utils.ts:33, :49-56); utils.ts:168
 `fd_stat_put` is not a WASI function; stale comments wasmmerge.ts:138 (`DATA_PTR_THRESHOLD`),
 wasmbundle.ts:136-142, wasic.ts:23106, modc.ts:6-10, wasic.ts:23184; orphaned doc comments
-witgen.ts:35, zigwasic.ts:204; main.ts:127 / :194 compute the same value.
+~~witgen.ts:35~~ (removed 2026-10-19), zigwasic.ts:204; main.ts:127 / :194 compute the same value.
 
 ## `modc` of a dynrt-merged library fails to assemble, exits 0, and `bindgen_tests` grades a stale binary (FIXED 2026-09-30)
 
