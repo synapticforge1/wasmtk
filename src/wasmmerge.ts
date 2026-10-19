@@ -169,6 +169,12 @@ function extractForms(wat: string): string[] {
   let formStart = -1;
 
   for (let i = moduleIdx; i < wat.length; i++) {
+    // A string literal's `(` / `)` are data, not structure: `(data … "x(y")` split the form and
+    // the merge failed to assemble ("expected EOF, got )": ld86, 2026-10-19).
+    if (wat[i] === '"') {
+      for (i++; i < wat.length && wat[i] !== '"'; i++) if (wat[i] === "\\") i++;
+      continue;
+    }
     if (wat[i] === "(") {
       depth++;
       if (depth === 2) formStart = i;
@@ -346,6 +352,33 @@ const CONST_EXPR_RE = /\(\s*i32\.const\s+(-?\d+)\s*\)|\bi32\.const\s+(-?\d+)\b/;
 function constExprValue(text: string): number | null {
   const m = text.match(CONST_EXPR_RE);
   return m ? parseInt(m[1] ?? m[2]!) : null;
+}
+
+/**
+ * A module's static-data extent `[lo, hi)`: the lowest segment base and the highest base + length
+ * over its active `(data …)` segments (every string piece of a segment counted), `{ lo: 0, hi: 0 }`
+ * with none. Reads any bracketing of the offset (`(i32.const N)`, `i32.const N`,
+ * `(offset (i32.const N))`). THE one reader of a data extent: `wasmbundle`'s own regex missed
+ * binaryang 1.12's `(offset …)` form and returned 0, so every bundled module's data was seated
+ * at the same address (sw109, 2026-10-19), and wasic's merge advanced by global 0 (sw110).
+ */
+export function dataExtent(wat: string): { lo: number; hi: number } {
+  return dataExtentOfForms(extractForms(wat));
+}
+
+/** `dataExtent` over already-extracted top-level forms. */
+function dataExtentOfForms(forms: string[]): { lo: number; hi: number } {
+  let lo = Infinity, hi = 0;
+  for (const form of forms) {
+    if (formKind(form) !== "data") continue;
+    const base = constExprValue(form);
+    if (base === null) continue; // a passive segment has no address
+    let len = 0;
+    for (const s of form.matchAll(/"((?:\\.|[^"\\])*)"/g)) len += dataStringByteLength(s[1]!);
+    if (base < lo) lo = base;
+    if (base + len > hi) hi = base + len;
+  }
+  return lo === Infinity ? { lo: 0, hi: 0 } : { lo, hi };
 }
 
 /** Rewrite the first const-expression, PRESERVING the bracketing wabt used. */
@@ -680,17 +713,9 @@ export function mergeWasmWat(
   // data segments has an empty range (dataHi === 0), so nothing is relocated. This replaces
   // the old blanket ">= 260" heuristic, which corrupted arithmetic constants >= 260 in
   // integer-heavy leaf libraries (e.g. the Date capability's 400 / 365 / 146097 …).
-  let dataLo = Infinity;
-  let dataHi = 0;
-  for (const form of forms) {
-    if (formKind(form) !== "data") continue;
-    const base = constExprValue(form);
-    if (base === null) continue;
-    const strM = form.match(/"((?:\\.|[^"\\])*)"/);
-    const len = strM ? dataStringByteLength(strM[1]) : 0;
-    if (base < dataLo) dataLo = base;
-    if (base + len > dataHi) dataHi = base + len;
-  }
+  // (dataExtentOfForms: every string piece of a segment counts, not only the first)
+  let { lo: dataLo, hi: dataHi } = dataExtentOfForms(forms);
+  if (dataHi === 0) dataLo = Infinity; // no data: an empty range, as before
   // Floor the low end at the data-base threshold so fixed low scratch addresses
   // (iov/scratch at 0, 128, …) are never mistaken for relocatable pointers.
   if (dataLo < DATA_PTR_THRESHOLD) dataLo = DATA_PTR_THRESHOLD;

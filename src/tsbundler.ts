@@ -318,6 +318,9 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
   // Cache exportRenames per realPath so re-export chains can resolve names
   // from already-visited (source-deduplicated) files.
   const exportRenamesCache = new Map<string, Map<string, string>>();
+  // Which file declares each top-level VALUE name left unprefixed (a file's private names, and the
+  // entry's): two files declaring the same one are refused (sw112, below).
+  const topLevelOwner = new Map<string, string>();
 
   async function load(filePath: string, isEntry: boolean): Promise<LoadResult> {
     // ── 1. Resolve canonical path ─────────────────────────────────────────
@@ -690,6 +693,26 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
     // (applies to both entry and non-entry files — a lib can import from another lib)
     if (localRewrites.size > 0) {
       src = applyRenames(src, localRewrites);
+    }
+
+    // ── 6. Two files of one program declaring the same top-level VALUE name (a non-entry file's
+    // private names are not prefixed) were silently one name in the bundle: a dependency's
+    // private `scale = 3` read the entry's `scale = 100`, so `helper(2)` gave 200 for 6 (sw112,
+    // 2026-10-19). Prefixing them safely needs a parser (object keys and interface fields share
+    // the spelling), so the collision is refused. `type` / `interface` repeats are left alone:
+    // most files declare `type i32 = number`.
+    const srcCode = codeMask(src);
+    for (const d of src.matchAll(/^(?:(?:async\s+)?function\*?|const|let|var|class|enum)\s+([A-Za-z_$][\w$]*)/gm)) {
+      if (!srcCode[d.index!]) continue;
+      const owner = topLevelOwner.get(d[1]!);
+      if (owner !== undefined && owner !== realPath) {
+        throw new Error(
+          `the top-level name '${d[1]}' is declared in both ${owner} and ${realPath}; a bundle ` +
+            `has one top level, so one of them would silently replace the other. Rename one ` +
+            `(or export it and import it where it is used).`,
+        );
+      }
+      topLevelOwner.set(d[1]!, realPath);
     }
 
     // Cache export map so re-export chains can resolve names from this module
