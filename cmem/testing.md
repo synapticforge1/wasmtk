@@ -114,6 +114,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw109 / sw110 / sw112 / ld86 (merge and bundle layout), gate GREEN.** New suite
+> **`merge_layout_tests` 7 / 7** (3 fail on the old code, a 4th cannot even compile) ·
+> golden-WAT 523, 46 pipeline entries re-recorded: each changes ONLY `$__heap_ptr`'s initial value
+> (+2–4 bytes, the new 8-alignment), checked line by line (scratchpad `golden_pipe_diff.ts`) ·
+> api-surface re-baselined (`./wasmmerge` `dataExtent` added: minor) · every other count as below.
+
 > **2026-10-19, sw113 + sw114 (no command writes over its input; `wasic x.wat` exit code), gate
 > GREEN.** New suite **`outpath_tests` 12 / 12** (`tests/outpath_tests.ts`, the installed wasmtk on
 > temp copies; 0 / 12 on the old code) · golden-WAT 523, 0 diverged · every other count as on
