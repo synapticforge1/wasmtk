@@ -42,6 +42,8 @@ interface WabtModule {
 export const VERSION = "2.0.3";
 
 let wasiInstance: WebAssembly.Instance | undefined;
+/** The running WASI program's argv (its name, then its arguments), set by `runWasi` (sw115). */
+let wasiArgv: string[] = [];
 
 type WasmCallable = (...args: (number | bigint)[]) => number | bigint | void;
 type WasiImports = Record<string, Record<string, WasmCallable | WebAssembly.Memory>>;
@@ -143,11 +145,28 @@ const wasiImports: WasiImports = {
       view.setUint32(Number(bufSizePtr), 0, true);
       return 0;
     },
-    args_get: (): number => 0,
+    // argv: the program name, then `wasmtk run x.wasm <args…>` (both reported 0 arguments, so a
+    // WASI program never saw its argv: sw115, 2026-10-19). Each argument is UTF-8, NUL-terminated.
+    args_get: (argvPtr: number | bigint, bufPtr: number | bigint): number => {
+      const memory = wasiInstance?.exports.memory as WebAssembly.Memory;
+      const view = new DataView(memory.buffer);
+      let p = Number(bufPtr);
+      for (const [i, a] of wasiArgv.entries()) {
+        view.setUint32(Number(argvPtr) + i * 4, p, true);
+        const bytes = new TextEncoder().encode(a);
+        new Uint8Array(memory.buffer, p, bytes.length + 1).set([...bytes, 0]);
+        p += bytes.length + 1;
+      }
+      return 0;
+    },
     args_sizes_get: (countPtr: number | bigint, bufSizePtr: number | bigint): number => {
       const view = new DataView((wasiInstance?.exports.memory as WebAssembly.Memory).buffer);
-      view.setUint32(Number(countPtr), 0, true);
-      view.setUint32(Number(bufSizePtr), 0, true);
+      view.setUint32(Number(countPtr), wasiArgv.length, true);
+      view.setUint32(
+        Number(bufSizePtr),
+        wasiArgv.reduce((n, a) => n + new TextEncoder().encode(a).length + 1, 0),
+        true,
+      );
       return 0;
     },
     fd_fdstat_get: (fd: number | bigint, ptr: number | bigint): number => {
@@ -284,6 +303,7 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
       },
     });
     const extendedImports = { wasi_snapshot_preview1: makeWasiImport(), env: envProxy };
+    wasiArgv = [basename(path), ...args];
     const result = await WebAssembly.instantiate(
       wasmBytes as BufferSource,
       extendedImports as unknown as WebAssembly.Imports,
@@ -297,10 +317,14 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
         // Reactor libraries need _initialize before any export is called (else they trap).
         const initFn = wasiInstance.exports._initialize;
         if (typeof initFn === "function") (initFn as WasmCallable)();
-        const parsedArgs = params.map((p) => {
-          const n = Number(p);
-          return isNaN(n) ? 0 : n;
-        }) as (number | bigint)[];
+        // A non-numeric argument is refused; it became 0 (sw116, 2026-10-19).
+        const bad = params.find((p) => p.trim() === "" || isNaN(Number(p)));
+        if (bad !== undefined) {
+          console.error(`❌ wasmtk run: '${bad}' is not a number (arguments to ${name} are numbers)`);
+          rt.exit(1);
+          return;
+        }
+        const parsedArgs = params.map(Number) as (number | bigint)[];
         const res = (fn as WasmCallable)(...parsedArgs);
         if (res !== undefined) console.log(`${res}`);
         return;
@@ -435,10 +459,15 @@ export async function callExport(path: string, fnName: string, params: string[])
       rt.exit(1);
     }
 
-    const parsedArgs = params.map((p) => {
-      const n = Number(p);
-      return isNaN(n) ? 0 : n;
-    }) as (number | bigint)[];
+    // A non-numeric argument is refused; it became 0, so `mod lib.wasm add abc 5` printed 5
+    // (sw116, 2026-10-19).
+    const bad = params.find((p) => p.trim() === "" || isNaN(Number(p)));
+    if (bad !== undefined) {
+      console.error(`❌ mod: '${bad}' is not a number (the arguments to ${fnName} are numbers)`);
+      rt.exit(1);
+      return;
+    }
+    const parsedArgs = params.map(Number) as (number | bigint)[];
 
     const res = (fn as WasmCallable)(...parsedArgs);
     if (res !== undefined) console.log(`${res}`);
