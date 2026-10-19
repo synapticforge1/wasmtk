@@ -17,6 +17,7 @@
  */
 
 import { rt } from "./rt.ts";
+import { assertNotInput, defaultOutPath } from "./outpath.ts";
 
 // ── WIT type definitions ─────────────────────────────────────────────────────
 
@@ -646,7 +647,9 @@ export async function runBindgen(
 ): Promise<void> {
   const witSrc = await rt.readTextFile(witPath);
   const ts = generateBindings(witSrc, opts);
-  const out = opts.outPath ?? witPath.replace(/\.wit$/, ".bindings.ts");
+  // sw113: `H2.WIT` matched no replace and the TypeScript was written over the WIT
+  const out = opts.outPath ?? defaultOutPath(witPath, [".wit"], ".bindings.ts");
+  assertNotInput(witPath, out, "bindgen");
   await rt.writeTextFile(out, ts);
   console.log(`   bindgen: ${out}`);
 }
