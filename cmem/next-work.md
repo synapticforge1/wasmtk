@@ -13,7 +13,7 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > sent); the `wasmValidate` letter answered; all 21 loud rows of 2026-10-13 closed (two batches,
 > with sw72–sw74 found and fixed); the owner's string-index ruling built (sw71); audit round 2
 > (below). **Resume with:** the fix order below (steps 1–2b done 2026-10-19; step 3, the compiler silent
-> rows: the index group done, spread sw77–sw79 next), then items 3–5 (binaryang 1.10.0
+> rows: the index, spread and string-array groups done, finally sw106 next), then items 3–5 (binaryang 1.10.0
 > items, H10, nullable gaps).
 >
 > **Owner's answers, 2026-10-19: all four questions decided, none built yet** (design-decisions.md
@@ -37,8 +37,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > mis-seat data or rename wrongly; (2b) ~~the other tool rows sw111, sw115–sw118~~ **DONE
 > 2026-10-19** (`tests/tool_rows_tests.ts`): **all ten silent tool rows are closed**; (3) the compiler silent rows grouped by root: ~~array /
 > string helper index normalisation (sw80–sw85, sw81, sw91, sw92)~~ **DONE 2026-10-19** (with ld47;
-> `28_RelativeIndexMethods`), spread (sw77–sw79), string-array
-> paths (sw76, sw107), finally (sw106), block scoping (sw104, sw105), console unary / boolean /
+> `28_RelativeIndexMethods`), ~~spread (sw77–sw79), string-array
+> paths (sw76, sw107)~~ **DONE 2026-10-19** (`28_SpreadLiterals`, `28_StringArrayJoinSearch`), finally (sw106), block scoping (sw104, sw105), console unary / boolean /
 > pointer printing (sw96, sw98, sw102, sw103), then the rest; (4) the loud rows. **Owner's
 > questions:** sw95 (array out-of-range reads: refuse, or undefined like the string ruling?),
 > sw87 (a bare numeric `sort()`: implement string order, or refuse?), ld88 (`wast` exits 0 on
