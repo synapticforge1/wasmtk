@@ -1412,6 +1412,43 @@ function splitBraceAwareCommas(s: string): string[] {
   return result;
 }
 
+/**
+ * A declaration initialised by a SPREAD array literal, `const v: T[] = [...a, x, ...b];`, parsed
+ * bracket- and quote-aware: its name, element type hint, top-level parts and what follows the
+ * literal. null when the initializer is not an array literal with a top-level `...` part. The
+ * three sites used `\[([^\]]*)\]`, which stops at the first `]`: `[b[0], ...a]` was not seen as a
+ * spread and went to the plain-literal path (2026-10-19, with sw77).
+ */
+function spreadLiteralDecl(
+  line: string,
+): { varName: string; typeHint: string; parts: string[]; rest: string } | null {
+  const m = line.match(/^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+)\[\])?\s*=\s*\[/);
+  if (!m) return null;
+  const open = m[0].length - 1;
+  const close = findMatchingBracketAware(line, open);
+  if (close === -1) return null;
+  const body = line.slice(open + 1, close);
+  const parts: string[] = [];
+  let depth = 0, start = 0, quote = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (quote) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = "";
+    } else if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "{" || ch === "[" || ch === "(") depth++;
+    else if (ch === "}" || ch === "]" || ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(body.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  parts.push(body.slice(start).trim());
+  const kept = parts.filter((p) => p.length > 0);
+  if (!kept.some((p) => p.startsWith("..."))) return null;
+  return { varName: m[1], typeHint: m[2] ?? "", parts: kept, rest: line.slice(close + 1).trim() };
+}
+
 /** Like splitBraceAwareCommas but PRESERVES empty elements — needed for positional destructuring
  *  gaps (`[a, , c]` must keep index 1 empty so `c` reads index 2). (Phase 51.3) */
 function splitBraceAwareCommasKeepEmpty(s: string): string[] {
@@ -7033,32 +7070,81 @@ class WasicTranspiler {
    */
   private emitSpreadArrayInit(
     varName: string,
-    spreads: string[],
+    parts: string[],
     elemType: WatType,
+    locals: Map<string, WatType>,
   ): string {
-    const suffix = elemType === "f64" ? "f64" : "i32";
-    this.dynArrHelpers.add(`concat_${suffix}`);
-    if (spreads.length === 0) {
-      // Empty spread: allocate empty dynamic array
-      const capacity = 8;
-      const elemSize = elemType === "f64" ? 8 : 4;
-      const byteSize = capacity * elemSize + 8;
-      return [
-        `(local.set $${varName} (call $__malloc (i32.const ${byteSize})))`,
-        `(i32.store (local.get $${varName}) (i32.const 0))`,
-        `(i32.store offset=4 (local.get $${varName}) (i32.const ${capacity}))`,
-      ].join("\n      ");
-    }
-    const stmts: string[] = [];
-    // Start with first spread array
-    stmts.push(`(local.set $${varName} (local.get $${spreads[0]}))`);
-    // Concat subsequent spreads
-    for (let i = 1; i < spreads.length; i++) {
-      stmts.push(
-        `(local.set $${varName} (call $__dynarr_concat_${suffix} (local.get $${varName}) (local.get $${
-          spreads[i]
-        })))`,
+    // Every part in order, into a NEW array (audit round 2, 2026-10-19): a plain element was
+    // dropped (`[...a, 5]`, sw77), `[...a]` was `a` itself, so a push through the copy changed `a`
+    // (sw78), and a string array's 8-byte (ptr, len) slots were copied 4 bytes at a time (sw79).
+    // Start empty; a `...x` part is a concat (which allocates); a plain part is a push.
+    const target = this.arrayVars.get(varName) ??
+      (this.isModuleGlobalArr(varName) ? this.moduleArrayVars.get(varName) : undefined);
+    // a module-global string array is registered as elemType "i32" + isStringArr
+    const isStr = elemType === "string" || !!target?.isStringArr;
+    if (elemType === "i64") {
+      this.diagnostics.push(
+        `'${varName}': a spread literal of an i64 / bigint array is not supported; build it with push.`,
       );
+      return "";
+    }
+    const wide = isStr || elemType === "f64";
+    const suffix = wide ? "f64" : "i32";
+    const get = this.arrGetWat(varName);
+    const set = (w: string) => this.arrSetWat(varName, w);
+    const capacity = 8;
+    const stmts: string[] = [
+      set(`(call $__malloc (i32.const ${capacity * (wide ? 8 : 4) + 8}))`),
+      `(i32.store ${get} (i32.const 0))`,
+      `(i32.store offset=4 ${get} (i32.const ${capacity}))`,
+    ];
+    for (const part of parts) {
+      if (part.startsWith("...")) {
+        const src = part.slice(3).trim();
+        const info = this.arrayVars.get(src) ??
+          (this.isModuleGlobalArr(src) ? this.moduleArrayVars.get(src) : undefined);
+        if (!/^\w+$/.test(src) || !info) {
+          this.diagnostics.push(
+            `'${varName}': a spread of '${src.slice(0, 40)}' is not supported; spread an array ` +
+              `variable (copy the expression into one first).`,
+          );
+          continue;
+        }
+        const srcWat = (info.ptr === -1 || info.ptr === -2 || info.dynamic)
+          ? this.arrGetWat(src)
+          : `(i32.const ${info.ptr})`;
+        this.dynArrHelpers.add(`concat_${suffix}`);
+        stmts.push(set(`(call $__dynarr_concat_${suffix} ${get} ${srcWat})`));
+        continue;
+      }
+      if (isStr) {
+        this.dynArrHelpers.add("push_string");
+        const pl = this.quietEmit(() => this.emitStringPtrLen(part, locals));
+        if (pl === "(i32.const 0) (i32.const 0)" && part !== '""' && part !== "''") {
+          this.diagnostics.push(
+            `'${varName}': the element '${part.slice(0, 40)}' of a spread literal is not a ` +
+              `supported string (use a string variable or literal).`,
+          );
+          continue;
+        }
+        const [p, l] = splitTwoWatExprs(pl);
+        stmts.push(set(`(call $__dynarr_push_string ${get} ${p} ${l})`));
+        continue;
+      }
+      const key = `push_${elemType === "bool" ? "i32" : elemType}`;
+      this.dynArrHelpers.add(key);
+      let valWat: string;
+      const structName = target?.structTypeName;
+      if (part.startsWith("{") && structName) {
+        const structPtr = this.tryAllocStructLiteralPtr(part, structName);
+        valWat = structPtr !== null
+          ? `(i32.const ${structPtr})`
+          : this.emitRuntimeStructLiteral(part, structName, locals) ??
+            this.emitExpr(part, locals, "i32");
+      } else {
+        valWat = this.emitExpr(part, locals, elemType === "bool" ? "i32" : elemType);
+      }
+      stmts.push(set(`(call $__dynarr_${key} ${get} ${valWat})`));
     }
     return stmts.join("\n      ");
   }
@@ -8819,8 +8905,10 @@ ${prefixed}
       if (joinSPLM && parenDepthNeverNegative(joinSPLM[2]!)) {
         const arrN = joinSPLM[1]!;
         const arrI = this.arrayVars.get(arrN);
-        // i32/f64 element arrays only — a string[] join would need a different element writer.
-        if (arrI && (arrI.elemType === "i32" || arrI.elemType === "f64") && !arrI.isStringArr) {
+        // i32 / f64 elements, and string arrays through their own writer ($__dynarr_join_str_str,
+        // 2026-10-19 with sw76; a string[] join into a declaration was refused, ld80)
+        const isStrArr = !!arrI && (arrI.isStringArr || arrI.elemType === "string");
+        if (arrI && (arrI.elemType === "i32" || arrI.elemType === "f64" || isStrArr)) {
           const rawSep = joinSPLM[2]!.trim();
           let sepPtr: number, sepLen: number;
           if (rawSep === "") {
@@ -8833,7 +8921,7 @@ ${prefixed}
           }
           this.needsJoinHelper = true;
           this.needsNumericHelpers = true; // the writers call $__i32_to_str / $__f64_to_str
-          return `(call $__dynarr_join_str_${arrI.elemType} ${
+          return `(call $__dynarr_join_str_${isStrArr ? "str" : arrI.elemType} ${
             this.arrGetWat(arrN)
           } (i32.const ${sepPtr}) (i32.const ${sepLen}))`;
         }
@@ -10117,6 +10205,21 @@ ${prefixed}
       const arrInfo = this.arrayVars.get(arrName);
       if (arrInfo?.dynamic) {
         const elemType = arrInfo.elemType as WatType;
+        // string arrays search by TEXT (sw107)
+        if ((method === "indexOf" || method === "includes") && (arrInfo.isStringArr || elemType === "string")) {
+          this.dynArrHelpers.add("indexof_string");
+          this.needsStringHelpers = true; // $__str_cmp; read before the dynarr helpers are emitted
+          const pl = this.quietEmit(() => this.emitStringPtrLen(argsStr, locals));
+          if (pl === "(i32.const 0) (i32.const 0)" && argsStr !== '""' && argsStr !== "''") {
+            this.diagnostics.push(
+              `'${arrName}.${method}(${argsStr.slice(0, 40)})': search a string array with a string ` +
+                `variable or literal.`,
+            );
+            return "(i32.const -1)";
+          }
+          const call = `(call $__dynarr_indexof_string ${this.arrGetWat(arrName)} ${pl})`;
+          return method === "indexOf" ? call : `(i32.ne ${call} (i32.const -1))`;
+        }
         if (method === "indexOf") {
           const key = `indexof_${elemType}`;
           this.dynArrHelpers.add(key);
@@ -13177,17 +13280,19 @@ ${prefixed}
     }
 
     // Spread array literal declaration: const merged: T[] = [...a, ...b]
-    const spreadDeclMatch = line.match(
-      /^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+)\[\])?\s*=\s*\[([^\]]*)\]/,
-    );
-    if (spreadDeclMatch && spreadDeclMatch[3]?.includes("...")) {
-      const varName = spreadDeclMatch[1];
-      const typeHint = spreadDeclMatch[2] ?? "";
+    const spreadDecl = spreadLiteralDecl(line);
+    if (spreadDecl) {
+      const { varName, typeHint, parts, rest } = spreadDecl;
       const info = this.arrayVars.get(varName);
       const elemType: WatType = info?.elemType ?? (typeHint ? mapType(typeHint) as WatType : "i32");
-      const parts = spreadDeclMatch[3].split(",").map((s) => s.trim()).filter(Boolean);
-      const spreads = parts.filter((p) => p.startsWith("...")).map((p) => p.slice(3).trim());
-      return this.emitSpreadArrayInit(varName, spreads, elemType);
+      if (rest !== "" && rest !== ";") {
+        this.diagnostics.push(
+          `'${line.trim().slice(0, 60)}': a spread literal must be the whole initializer ` +
+            `(assign it to a variable, then use the variable).`,
+        );
+        return "";
+      }
+      return this.emitSpreadArrayInit(varName, parts, elemType, locals);
     }
 
     // Phase 44: Array<FuncType> = [] declaration (function pointer array)
@@ -18207,6 +18312,27 @@ ${sum}
     (local.get $arr)
   )`,
         );
+      } else if (key === "indexof_string") {
+        // string[] indexOf / includes compare TEXT ($__str_cmp == 0); the i32 search compared a
+        // slot's pointer word with the needle (sw107, 2026-10-19)
+        this.needsStringHelpers = true;
+        parts.push(`  ;; Dynamic string array indexof_string: first index whose text equals (ptr, len), or -1.
+  (func $__dynarr_indexof_string (param $arr i32) (param $ptr i32) (param $len i32) (result i32)
+    (local $i i32)
+    (local $n i32)
+    (local $slot i32)
+    (local.set $n (i32.load (local.get $arr)))
+    (block $brk
+      (loop $lp
+        (br_if $brk (i32.ge_u (local.get $i) (local.get $n)))
+        (local.set $slot (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3))))
+        (if (i32.eqz (call $__str_cmp (i32.load (local.get $slot)) (i32.load offset=4 (local.get $slot))
+              (local.get $ptr) (local.get $len)))
+          (then (return (local.get $i))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $lp)))
+    (i32.const -1)
+  )`);
       } else if (method === "indexof") {
         const cmpOp = `${valType}.eq`;
         parts.push(`  ;; Dynamic array indexof_${elemType}: linear search, returns index or -1.
@@ -20421,14 +20547,19 @@ ${sum}
         }
       }
       // Spread array literal: const merged = [...a, ...b]
-      const spreadArrPre = line.match(
-        /^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+)\[\])?\s*=\s*\[([^\]]*)\]/,
-      );
-      if (spreadArrPre && spreadArrPre[3]?.includes("...")) {
-        const varName = spreadArrPre[1];
-        const typeHint = spreadArrPre[2] ?? "";
+      const spreadArrPre = spreadLiteralDecl(line);
+      if (spreadArrPre) {
+        const varName = spreadArrPre.varName;
+        const typeHint = spreadArrPre.typeHint;
         const elemType: WatType = typeHint ? mapType(typeHint) as WatType : "i32";
-        this.arrayVars.set(varName, { elemType, ptr: -2, length: 0, dynamic: true });
+        this.arrayVars.set(varName, {
+          elemType,
+          ptr: -2,
+          length: 0,
+          dynamic: true,
+          isStringArr: elemType === "string",
+          ...(this.structDefs.has(typeHint) ? { structTypeName: typeHint } : {}),
+        });
         declaredLocals.push([varName, "i32"]);
         locals.set(varName, "i32");
         continue;
@@ -22386,14 +22517,19 @@ ${sum}
           continue;
         }
         // Spread array literal — mirrors emitFunction pre-scan
-        const spreadArrPre2 = line.match(
-          /^(?:var|let|const)\s+(\w+)\s*(?::\s*(\w+)\[\])?\s*=\s*\[([^\]]*)\]/,
-        );
-        if (spreadArrPre2 && spreadArrPre2[3]?.includes("...")) {
-          const varNameS = spreadArrPre2[1];
-          const typeHintS = spreadArrPre2[2] ?? "";
+        const spreadArrPre2 = spreadLiteralDecl(line);
+        if (spreadArrPre2) {
+          const varNameS = spreadArrPre2.varName;
+          const typeHintS = spreadArrPre2.typeHint;
           const elemTypeS: WatType = typeHintS ? mapType(typeHintS) as WatType : "i32";
-          this.arrayVars.set(varNameS, { elemType: elemTypeS, ptr: -2, length: 0, dynamic: true });
+          this.arrayVars.set(varNameS, {
+            elemType: elemTypeS,
+            ptr: -2,
+            length: 0,
+            dynamic: true,
+            isStringArr: elemTypeS === "string",
+            ...(this.structDefs.has(typeHintS) ? { structTypeName: typeHintS } : {}),
+          });
           startLocals.set(varNameS, "i32");
           startDeclaredLocals.push([varNameS, "i32"]);
           continue;

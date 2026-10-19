@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 27 | 108 | 0 | 27 |
+| SILENT-WRONG | 22 | 113 | 0 | 27 |
 | LOUD | 39 | 58 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 27; in the tools: 0** (2026-10-19, latest: the index-
+**Open silent-wrong in the compiler: 22; in the tools: 0** (2026-10-19, latest: spread sw77–sw79
+and the string-array paths sw76, sw107 fixed; tests `28_SpreadLiterals`, `28_StringArrayJoinSearch`,
+`28_SpreadOfExpressionRefused`). Before that, 27 (2026-10-19, later: the index-
 normalisation group sw80–sw85, sw91, sw92 fixed, with loud ld47; tests `28_RelativeIndexMethods`,
 `28_SpliceItemReadsArrayRefused`). Before that, 35 compiler, 0 tools (2026-10-19, later: the last tool rows
 sw111, sw115–sw118 fixed, `tests/tool_rows_tests.ts`; all ten round-2 tool rows are closed).
@@ -279,10 +281,10 @@ overwrite user files (sw113) at the top.
 
 | id | defect | root cause |
 | --- | --- | --- |
-| sw76 | `string[].join(sep)` and a string array in a template print pointer and length (`a-b` → `260-1`) | console `joinarr` segment never checks `isStringArr` (console_log ~1500) |
-| sw77 | a spread literal drops its plain elements (`[...a, ...b, 5]`, `[0, ...a, 7]`) | wasic ~13172 keeps only `...` parts |
-| sw78 | `[...a]` aliases `a` (a push / store through the copy changes `a`) | `emitSpreadArrayInit` ~7038 `local.set` of the first spread |
-| sw79 | a spread of string arrays copies 4-byte slots, not (ptr, len) pairs | ~7023 picks `concat_i32` |
+| ~~sw76~~ | ✅ FIXED 2026-10-19: a string-element join writer (`$__dynarr_join_to_scratch_str`, sized exactly by `$__strarr_join_size`), used by the console (`$__cbuf_join_str`, both paths) and by wasic's join VALUE (`$__dynarr_join_str_str`, which also closes ld80's "`string[].join` into a declaration"). Test `28_StringArrayJoinSearch`. Was: `string[].join(sep)` and a string array in a template print pointer and length (`a-b` → `260-1`) | console `joinarr` segment never checks `isStringArr` (console_log ~1500) |
+| ~~sw77~~ | ✅ FIXED 2026-10-19 (with sw78, sw79): `emitSpreadArrayInit` starts EMPTY and takes every part in order: `...x` is a concat (a copy), a plain part a push (strings by (ptr, len), struct literals as push does); `spreadLiteralDecl` parses the literal bracket- and quote-aware at all three sites (`[b[0], ...a]` was cut at the first `]` and missed). A spread of anything but an array variable, an i64 spread, or a literal not the whole initializer is refused (`28_SpreadOfExpressionRefused`; a spread of a call was already an unclear compile failure). Test `28_SpreadLiterals`. Was: a spread literal drops its plain elements (`[...a, ...b, 5]`, `[0, ...a, 7]`) | wasic ~13172 keeps only `...` parts |
+| ~~sw78~~ | ✅ FIXED 2026-10-19 with sw77 (`13_RestAndSpread`'s golden shows it: `merged` / `abc` were `local.set` to `a`). Was: `[...a]` aliases `a` (a push / store through the copy changes `a`) | `emitSpreadArrayInit` ~7038 `local.set` of the first spread |
+| ~~sw79~~ | ✅ FIXED 2026-10-19 with sw77 (8-byte `concat_f64` for string arrays, a module-global string array's `isStringArr` honoured). Was: a spread of string arrays copies 4-byte slots, not (ptr, len) pairs | ~7023 picks `concat_i32` |
 | ~~sw80~~ | ✅ FIXED 2026-10-19: one normalisation, `relIndexWat` (negative counts from the end, then clamp to [0, len]), in the numeric and string-array slice helpers. Test `28_RelativeIndexMethods`. Was: array `slice` with a negative index clamps to 0 (`slice(-2)` is the whole array) | `$__dynarr_slice_*` ~18159, string-array slice ~18193 |
 | ~~sw81~~ | ✅ FIXED 2026-10-19: `$__str_slice` normalises as JavaScript (no other caller relied on substring's clamping; the console hands `.slice` to wasic). Test `28_RelativeIndexMethods`. Was: string `slice` with a negative index (`"hello world".slice(-5)` is the whole string; `slice(1,-1)` is `""`) | `$__str_slice` ~19009 has substring semantics |
 | ~~sw82~~ | ✅ FIXED 2026-10-19 with sw80 (`relIndexWat`). Was: array `fill` with a negative start / end clamps to 0 | ~18502 |
@@ -310,7 +312,7 @@ overwrite user files (sw113) at the top.
 | sw104 | a top-level `let` / `const` inside a block becomes a module GLOBAL and its declaration is dropped: not re-initialised per loop pass; an inner block's `const x` overwrites the outer `x` | `parseModuleGlobals` ~3991 has no brace-depth check |
 | sw105 | inside a function, a block's `const x` overwrites the outer `x` (`1 50` → `50 50`) | function locals are flat by name |
 | sw106 | `finally` is skipped when try / catch leaves by `return`, `break` / `continue`, or a throw from `catch` | try emission ~16920 inlines finally on fall-through only |
-| sw107 | `string[].indexOf` / `includes` return wrong indices | ~10104 has no string-array path |
+| ~~sw107~~ | ✅ FIXED 2026-10-19: `$__dynarr_indexof_string` compares text (`$__str_cmp`); a needle that is not a string variable or literal is refused. Test `28_StringArrayJoinSearch`. Was: `string[].indexOf` / `includes` return wrong indices | ~10104 has no string-array path |
 | sw108 | a top-level string-enum-typed variable prints its tag (`1` for `DOWN`); in a function it is right | top-level `stringEnumVars` registration |
 
 **Silent, tools** (all exit 0):
@@ -351,8 +353,8 @@ expression position (`"abc" > "ab"`, nested string ternary, object with a string
 field); ld78 a default parameter using an earlier one, `for (let i = 0, j = 10; …)`, chained
 `filter().map().reduce()`, a function array called through a local; ld79 `for…of` over class /
 struct arrays (documented limit; virtual dispatch inside it); ld80 missing methods: `substring`,
-`lastIndexOf` (string, array), `splice` as a value, `(e as Error).message`, `string[].join` into a
-declaration (README says assignable).
+`lastIndexOf` (string, array), `splice` as a value, `(e as Error).message`, ~~`string[].join` into a
+declaration (README says assignable)~~ (done 2026-10-19 with sw76).
 
 **Loud, tools** (`round2/tools/`): ld81 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
 to 131072 in a 1-page bundle: out of bounds); ld82 `bindgen` host imports with a camelCase method
