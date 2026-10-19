@@ -2130,6 +2130,25 @@ function parseSingleArg(
       }
     }
   }
+  // A PARENTHESISED numeric conditional (`(p === null ? -1 : p.z)`, what `p?.z ?? -1` becomes,
+  // sw99) is typed by wasic from BOTH branches; its leading name is only the condition's.
+  if (_exprFallbackResolver && token.startsWith("(") && findTopLevelOp(token, "?") === -1) {
+    let u = token;
+    while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+      u = u.slice(1, -1).trim();
+    }
+    if (u !== token && splitTernary(u)) {
+      const r = _exprFallbackResolver(token, locals);
+      if (r) {
+        const kind = r.type === "f64" || r.type === "f32"
+          ? "f64expr" as const
+          : r.type === "i64"
+          ? "i64expr" as const
+          : "i32expr" as const;
+        return [{ kind, wat: r.wat }];
+      }
+    }
+  }
   // Infer i64 / i32 / f64 from the leading identifier's declared type. For a compound expression
   // led by an ARRAY variable (e.g. `arr[0] + arr[1]`), `locals.get(arr)` is the i32 POINTER type, not
   // the element type — so consult arrayLookup and route by the ELEMENT type (an f64[] element sum is
