@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 35 | 100 | 10 | 17 |
+| SILENT-WRONG | 35 | 100 | 8 | 19 |
 | LOUD | 40 | 57 | 11 | 8 |
 | n/a | — | 3 | — | 3 |
 
@@ -317,8 +317,8 @@ overwrite user files (sw113) at the top.
 | sw110 | a wasic merge seats the heap INSIDE a merged library's data (`79 79 200` → `79 7 200`) | wasic.ts ~23103 advances by global 0's init, not the data extent |
 | sw111 | a function exported under two names keeps only the last | `exportFuncMap` by index, wasmmerge.ts ~457 |
 | sw112 | the bundler does not prefix a file's PRIVATE top-level names, so they collide with the entry's (`6 100` → `200 100`) | tsbundler.ts ~661 renames exports only |
-| sw113 | **default output paths can overwrite the INPUT** (`convert lib.bin`, `wasm2js`, `tsbundle entry.mts`, `bindgen H2.WIT`, `jstyper calc.mjs` empties the source) | unanchored / case-sensitive extension replaces: utils.ts:531, :503, main.ts:428, bindgen.ts:649, jstyper.ts:345, :370, :333 |
-| sw114 | `wasmtk wasic broken.wat` exits 0 after "unknown operator" | `compileWasi` ignores `compileWat`'s result, wasic.ts ~23333 |
+| ~~sw113~~ | ✅ FIXED 2026-10-19: one helper, `src/outpath.ts` (`defaultOutPath` replaces a known extension in any case, else APPENDS the new one; `assertNotInput` / `samePath` refuse any write that resolves to the input, an explicit `-o` included, case-insensitively on Windows), used by convert, wasm2js, tsbundle, bindgen, jstyper (its `.d.ts` path too) and wasic's `.ts` / `.wat` / library compiles and their sidecar `.wat` / `.wit`. Test `tests/outpath_tests.ts` (12 cases; all 12 fail on the old code, 10 of them destroying the input). Was: **default output paths can overwrite the INPUT** (`convert lib.bin`, `wasm2js`, `tsbundle entry.mts`, `bindgen H2.WIT`, `jstyper calc.mjs` empties the source) | unanchored / case-sensitive extension replaces: utils.ts:531, :503, main.ts:428, bindgen.ts:649, jstyper.ts:345, :370, :333 |
+| ~~sw114~~ | ✅ FIXED 2026-10-19 with sw113: `compileWasi` checks `compileWat`'s result and exits 1. Test `tests/outpath_tests.ts`. Was: `wasmtk wasic broken.wat` exits 0 after "unknown operator" | `compileWasi` ignores `compileWat`'s result, wasic.ts ~23333 |
 | sw115 | `wasmtk run x.ts one two` drops the arguments; WASI `args_sizes_get` is 0; the library-call branch is unreachable | main.ts:390 passes `[]`; utils.ts:146 |
 | sw116 | `mod lib.wasm add abc 5` turns `abc` into 0 | utils.ts:437 (also `runWasi` :299) |
 | sw117 | Go `build -o out/x.wasm` (relative) writes beside the SOURCE and reports success at the given path | gowasic.ts ~203/241/426 unresolved; `report()` ~573 unchecked (Zig's was fixed 2026-08-24) |
