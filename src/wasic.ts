@@ -2120,6 +2120,55 @@ class WasicTranspiler {
   // Stack of { breakLabel, continueLabel? } entries for break/continue emission.
   // switch pushes only breakLabel; loops push both.
   private controlStack: Array<{ breakLabel: string; continueLabel?: string }> = [];
+  // The `finally` blocks around the statement being emitted, outermost first: the WAT of each and
+  // the controlStack depth at its `try`. A `return` runs every one; a `break` / `continue` runs the
+  // ones entered after its target loop (sw106, 2026-10-19: they jumped past `finally`).
+  private finallyStack: Array<{ wat: string; controlDepth: number }> = [];
+
+  /** The finally WAT a jump to controlStack[targetIdx] crosses, innermost first ("" for none). */
+  private finallyCrossed(targetIdx: number): string {
+    return this.finallyStack.filter((f) => f.controlDepth > targetIdx).reverse().map((f) => f.wat)
+      .join("\n");
+  }
+
+  /**
+   * Runs the enclosing `finally` blocks before each `(return …)` in a return statement's WAT: the
+   * value is evaluated FIRST, then the finally runs, then the function returns it, as JavaScript.
+   * `(return X)` → `(return (block (result T) X FIN))`; `(return)` → `(block FIN (return))`.
+   */
+  private injectFinallyBeforeReturns(wat: string, funcResult: WatType | null): string {
+    const fin = this.finallyCrossed(-1);
+    if (!fin) return wat;
+    const valueType = funcResult === null || funcResult === "string" || funcResult === "never"
+      ? null
+      : watBaseType(funcResult);
+    let out = "";
+    let i = 0;
+    while (i < wat.length) {
+      const at = wat.indexOf("(return", i);
+      if (at === -1 || !/[\s)]/.test(wat[at + 7] ?? "")) {
+        if (at === -1) {
+          out += wat.slice(i);
+          break;
+        }
+        out += wat.slice(i, at + 7);
+        i = at + 7;
+        continue;
+      }
+      let depth = 0, end = at;
+      for (; end < wat.length; end++) {
+        if (wat[end] === "(") depth++;
+        else if (wat[end] === ")" && --depth === 0) break;
+      }
+      const inner = wat.slice(at + 7, end).trim();
+      out += wat.slice(i, at);
+      out += inner && valueType
+        ? `(return (block (result ${valueType}) ${inner}\n${fin}))`
+        : `(block ${inner}\n${fin}\n(return))`;
+      i = end + 1;
+    }
+    return out;
+  }
   // When a label precedes a loop/block ("outer: for ..."), the label is stored here
   // so the next loop handler can use it as the WAT label name instead of a counter.
   private pendingLabel: string | null = null;
@@ -12518,16 +12567,29 @@ ${prefixed}
     this.d3Stmt = line;
     this.d3Nested.push([]);
     try {
-      const wat = this.emitStatementCore(line, locals, funcResult);
+      const core = this.emitStatementCore(line, locals, funcResult);
       const nested = this.d3Nested[depth];
       // Check only what THIS statement added: the WAT of the statements nested in it (a block's
       // body) was checked when each of them was emitted, under its own source line.
-      let own = wat;
+      let own = core;
       for (const n of nested) {
         const at = own.indexOf(n);
         if (at >= 0) own = own.slice(0, at) + own.slice(at + n.length);
       }
       this.checkImplicitTrunc(own, line);
+      // A return inside try / catch runs the enclosing finally blocks first (sw106). After the D3
+      // check: the finally WAT was checked under its own lines.
+      let wat = core;
+      if (/^return\b/.test(line) && this.finallyStack.length > 0) {
+        if (funcResult === "string" && this.finallyCrossed(-1).includes("$__str_ret_")) {
+          this.diagnostics.push(
+            `'${line.trim().slice(0, 60)}': a string returned through a finally that itself calls a ` +
+              `string-returning function is not supported (the finally would overwrite the ` +
+              `returned string). Store the result in a variable and return it after the try.`,
+          );
+        }
+        wat = this.injectFinallyBeforeReturns(core, funcResult);
+      }
       if (depth > 0) this.d3Nested[depth - 1].push(wat);
       return wat;
     } finally {
@@ -15747,18 +15809,27 @@ ${prefixed}
     const breakMatch = line.match(/^break(?:\s+(\w+))?\s*;?$/);
     if (breakMatch) {
       const label = breakMatch[1];
-      if (label) return `(br $break_${label})`;
-      const ctx = [...this.controlStack].reverse().find((c) => c.breakLabel);
-      return ctx ? `(br ${ctx.breakLabel})` : `(;; break outside loop;)`;
+      const want = label ? `$break_${label}` : null;
+      const idx = this.controlStack.findLastIndex((c) => want ? c.breakLabel === want : !!c.breakLabel);
+      if (idx === -1 && !label) return `(;; break outside loop;)`;
+      const br = `(br ${want ?? this.controlStack[idx].breakLabel})`;
+      // the finally blocks between here and the target run first (sw106)
+      const fin = this.finallyCrossed(idx);
+      return fin ? `(block\n${fin}\n${br})` : br;
     }
 
     // continue / continue label
     const contMatch = line.match(/^continue(?:\s+(\w+))?\s*;?$/);
     if (contMatch) {
       const label = contMatch[1];
-      if (label) return `(br $cont_${label})`;
-      const ctx = [...this.controlStack].reverse().find((c) => c.continueLabel);
-      return ctx ? `(br ${ctx.continueLabel})` : `(;; continue outside loop;)`;
+      const want = label ? `$cont_${label}` : null;
+      const idx = this.controlStack.findLastIndex((c) =>
+        want ? c.continueLabel === want : !!c.continueLabel
+      );
+      if (idx === -1 && !label) return `(;; continue outside loop;)`;
+      const br = `(br ${want ?? this.controlStack[idx].continueLabel})`;
+      const fin = this.finallyCrossed(idx); // sw106
+      return fin ? `(block\n${fin}\n${br})` : br;
     }
 
     // Post/pre increment/decrement as standalone statements: i++, i--, ++i, --i
@@ -17052,13 +17123,24 @@ ${prefixed}
           this.stringVars.add(internalCatchVar);
         }
 
-        const tryWat = this.emitBlock(tryBody, locals, funcResult, indent + "    ");
-        const catchWat = hasCatch
-          ? this.emitBlock(catchBodyToEmit, locals, funcResult, indent + "    ")
-          : "";
+        // finally FIRST: a return / break / continue in the try or catch body runs it before it
+        // leaves, so it must be known while they are emitted (sw106, 2026-10-19). It is emitted
+        // before being pushed: a jump inside finally itself does not re-run it.
         const finallyWat = hasFinally
           ? this.emitBlock(finallyBody, locals, funcResult, indent + "    ")
           : "";
+        if (hasFinally) {
+          this.finallyStack.push({ wat: finallyWat, controlDepth: this.controlStack.length });
+        }
+        let tryWat: string, catchWat: string;
+        try {
+          tryWat = this.emitBlock(tryBody, locals, funcResult, indent + "    ");
+          catchWat = hasCatch
+            ? this.emitBlock(catchBodyToEmit, locals, funcResult, indent + "    ")
+            : "";
+        } finally {
+          if (hasFinally) this.finallyStack.pop();
+        }
 
         if (catchShadowsOuter) {
           locals.delete(internalCatchVar);
@@ -17107,7 +17189,13 @@ ${prefixed}
           out.push(`${indent}      )`);
           out.push(`${indent}      (br ${done}))`);
           out.push(...bindPayload(`${indent}    `));
-          if (catchWat) out.push(catchWat);
+          // A throw FROM the catch body goes to the catch_all_ref handler below (finally, then
+          // re-throw); it left without running finally (sw106).
+          if (catchWat) {
+            out.push(`${indent}    (try_table (catch_all_ref ${hAll})`);
+            out.push(catchWat);
+            out.push(`${indent}    )`);
+          }
           if (finallyWat) out.push(finallyWat); // catch-success path
           out.push(`${indent}    (br ${done}))`);
           if (finallyWat) out.push(finallyWat); // exceptional path
