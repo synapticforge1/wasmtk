@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 10 | 127 | 0 | 27 |
-| LOUD | 38 | 59 | 10 | 9 |
+| SILENT-WRONG | 4 | 133 | 0 | 27 |
+| LOUD | 36 | 61 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 10; in the tools: 0** (2026-10-19, latest: the method edge
+**Open silent-wrong in the compiler: 4; in the tools: 0** (2026-10-19, latest: sw97, sw99, sw100,
+sw101, sw108, sw121 fixed, with loud ld58, ld65; `4k_LastSilentRows`. Left: the owner-ruled sw87,
+sw95, sw119, and sw120 with the nullable gaps). Before that, 10 (2026-10-19, later: the method edge
 cases sw86, sw88, sw89, sw90, sw93, sw94 fixed, with loud ld51; `28_MethodEdgeCases`). Before
 that, 16 (2026-10-19, later: the console
 printing group sw96, sw98, sw102, sw103 fixed, sw75 with them; sw120, sw121 found; tests
@@ -308,11 +310,11 @@ overwrite user files (sw113) at the top.
 | ~~sw94~~ | ✅ FIXED 2026-10-19: `includes` on a float array uses `sameval_T` (equal, or both NaN); `indexOf(NaN)` stays -1 (`===`). Test `28_MethodEdgeCases`. Was: `includes(NaN)` false on an f64 array (SameValueZero) | ~10110 = `indexOf != -1` |
 | sw95 | an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner 2026-10-19: give `undefined`, as for strings; a float array index keeps D3's conversion** | design-decisions.md § "Owner's rulings of 2026-10-19" |
 | ~~sw96~~ | ✅ FIXED 2026-10-19: console `!` / `~` apply only with no top-level binary operator (`hasTopLevelBinaryOp`, as unary minus). Test `7i_ConsoleUnaryBoolStringFields`. Was: console: `!` and `~` take the whole binary expression (`!a && b` is `!(a && b)`, `~n + 1` is `~(n + 1)`), also in templates / concats | console_log ~3010, ~3027 lack unary minus's `!hasTopLevelBinaryOp` guard |
-| sw97 | a declaration comparing parenthesised floats truncates both to i32 (`(z / 2) === (z / 2.5)` true) | wasic ~11636 `lhsType` falls back to `defaultType` for a `(` lead (ld65: NaN traps) |
+| ~~sw97~~ | ✅ FIXED 2026-10-19 (with ld65): a parenthesised left operand is f64 / i64 when its contents hold a KNOWN float / bigint (a float literal, a name declared f64 / f32 / i64); not inferExprType's f64 fallback, which turned `((z + 5) % 7) + 6` of i32s into float arithmetic (the date bundle's golden caught it). Test `4k_LastSilentRows`. Was: a declaration comparing parenthesised floats truncates both to i32 (`(z / 2) === (z / 2.5)` true) | wasic ~11636 `lhsType` falls back to `defaultType` for a `(` lead (ld65: NaN traps) |
 | ~~sw98~~ | ✅ FIXED 2026-10-19: a string struct field (`p.s`, `ps[i].s`) is a string to the console's string ternary and to wasic's `isStringExpr`; `emitStringPtrLen` builds a string ternary and a string `a ?? b` (by the value's null flag); a template part that is a string ternary is one multi-value. So the ternary prints its text in console.log, in templates and in declarations (refused before). `??` on a `string \| null` FIELD is REFUSED (`7i_NullishStringFieldRefused`): such a field has no null representation (sw120). Test `7i_ConsoleUnaryBoolStringFields`. Was: console prints a string POINTER for a string `??` or ternary over struct string fields (`q.s ?? "none"` → `268`) | console numeric path |
-| sw99 | `a?.b ?? d` with `a` null reads through the null pointer: `0`, not `d` | wasic ~21749 rewrites `?.` to `.` (README documents it; the result is silent) |
-| sw100 | console `s.toUpperCase().length + t.length` is `2` | console |
-| sw101 | an `Int32Array` element plus a `Float64Array` element truncates the float (declaration) | wasic `rhsKnownFloat` ~11733 (ld56 is the console's) |
+| ~~sw99~~ | ✅ FIXED 2026-10-19: before `?.` is stripped, `rewriteOptChainNullish` turns `a?.b ?? d` (the chain the whole left operand, `d` simple) into `(a === null ? d : a.b ?? d)`, one null test per `?.`; inferExprType types a conditional by both branches and the console types a parenthesised numeric conditional through wasic. A bare `a?.b` as a VALUE still reads through (no `undefined` to give). Test `4k_LastSilentRows`. Was: `a?.b ?? d` with `a` null reads through the null pointer: `0`, not `d` | wasic ~21749 rewrites `?.` to `.` (README documents it; the result is silent) |
+| ~~sw100~~ | ✅ FIXED 2026-10-19 (with ld58): wasic's emitExpr takes `<string-valued call>.length` from the call's (ptr, len) through `$__str_op_*`; the declaration was refused and the console sum printed 2. Test `4k_LastSilentRows`. Was: console `s.toUpperCase().length + t.length` is `2` | console |
+| ~~sw101~~ | ✅ FIXED 2026-10-19: `rhsKnownFloat` also takes a declared float ELEMENT (typed-array / f64[]) or FIELD. Test `4k_LastSilentRows`. Was: an `Int32Array` element plus a `Float64Array` element truncates the float (declaration) | wasic `rhsKnownFloat` ~11733 (ld56 is the console's) |
 | ~~sw102~~ | ✅ FIXED 2026-10-19: the console's dot-call path prints a top-level comparison as a boolean (`isTopLevelComparison`); `inferExprType` types a top-level comparison `bool` whatever leads it (`ps[0].x > 1` took the array's element type). Found with it and fixed: a string compared through any string method or against a string LITERAL (`s.toLowerCase() < "b"`) compared numbers in the console and was refused in a declaration. Test `7i_ConsoleUnaryBoolStringFields`. Was: console prints booleans as `0` / `1`: `s.toUpperCase() !== "ABD"`, `a.slice(0,2) === b.slice(0,2)`, `ps[1].ok \|\| ps[0].x > 1` (sw75's class) | console boolean detection |
 | ~~sw103~~ | ✅ FIXED 2026-10-19: after a leading `-` / `~` / `(`, a `struct.field` lead takes the field's type (i64 → the bigint printer). Test `7i_ConsoleUnaryBoolStringFields`. Was: console `-h.big` (a bigint field) prints without `n` | console i64 lead detection |
 | ~~sw104~~ | ✅ FIXED 2026-10-19: `parseModuleGlobals` and the module-array pass take only depth-0 declarations (`braceDepthOf`); a block's declaration stays a `_start` statement, re-run each pass. Shadowing: with sw105. Test `5e_BlockScopedDeclarations`. Was: a top-level `let` / `const` inside a block becomes a module GLOBAL and its declaration is dropped: not re-initialised per loop pass; an inner block's `const x` overwrites the outer `x` | `parseModuleGlobals` ~3991 has no brace-depth check |
@@ -320,8 +322,8 @@ overwrite user files (sw113) at the top.
 | ~~sw106~~ | ✅ FIXED 2026-10-19: finally is emitted FIRST and kept on `finallyStack` (with the controlStack depth at its try) while the try and catch bodies are emitted. A `return` runs every enclosing finally after its value is evaluated (`(return (block (result T) X FIN))`, emitStatement); a `break` / `continue` (labeled too) runs the ones entered after its target loop, innermost first; the catch body sits in its own `try_table (catch_all_ref …)`, so a throw from it runs finally and re-throws. Refused: a string return through a finally that calls a string-returning function (the `$__str_ret_*` globals would be overwritten; `15_FinallyStringReturnRefused`, which the old compiler built). The same day (owner: "I do want the one finally case fixed"): a throw FROM finally leaves the whole try statement. The fall-through copy moved after the `try_table` (it was inside, so the try's own catch caught it); each copy run by a return / break / continue is in a `try_table (catch_all_ref $__fin_escN)` branching to an escape block around the statement that re-throws outward (emitted only when an exit used it). Was "3 1013" for "3 11": the inner catch ran, then finally again. Test `15_FinallyOnEveryExit`. Was: `finally` is skipped when try / catch leaves by `return`, `break` / `continue`, or a throw from `catch` | try emission ~16920 inlines finally on fall-through only |
 | ~~sw107~~ | ✅ FIXED 2026-10-19: `$__dynarr_indexof_string` compares text (`$__str_cmp`); a needle that is not a string variable or literal is refused. Test `28_StringArrayJoinSearch`. Was: `string[].indexOf` / `includes` return wrong indices | ~10104 has no string-array path |
 | sw120 | FOUND 2026-10-19 with sw98: a `string \| null` FIELD has no null representation: `{ s: null }` stores the TEXT "null", so `r.s === null` is `false` and `${r.s}` prints `null` by accident. `??` on such a field is refused meanwhile. The nullable gaps (next-work item 5) | struct literal / field init stores `null` through emitStringPtrLen |
-| sw121 | FOUND 2026-10-19 with sw98: a struct VARIABLE as an element of a struct-array literal loses its string fields (`const ps: P[] = [p, …]`: `ps[0].s` is ""; a literal element is right) | static struct-array literal layout |
-| sw108 | a top-level string-enum-typed variable prints its tag (`1` for `DOWN`); in a function it is right | top-level `stringEnumVars` registration |
+| ~~sw121~~ | ✅ FIXED 2026-10-19 (the same day): `allocStructArrayElems` lays out a STATIC struct variable element as its address (JavaScript's same object: `p.n = 9` shows through `ps[0]`); a run-time one is refused, pointing at push. Test `4k_LastSilentRows`. Was: FOUND 2026-10-19 with sw98: a struct VARIABLE as an element of a struct-array literal loses its string fields (`const ps: P[] = [p, …]`: `ps[0].s` is ""; a literal element is right) | static struct-array literal layout |
+| ~~sw108~~ | ✅ FIXED 2026-10-19: parseModuleGlobals registers a promoted string-enum-typed module variable in stringEnumVars (the _start pre-scan never saw the dropped line). Test `4k_LastSilentRows`. Was: a top-level string-enum-typed variable prints its tag (`1` for `DOWN`); in a function it is right | top-level `stringEnumVars` registration |
 
 **Silent, tools** (all exit 0):
 
@@ -344,10 +346,10 @@ an empty array traps; ld49 an f64 comparator in `sort` (signature mismatch); ld5
 (`$__str_cmp` undefined); ld53 `s.at(9)` (IR error); ld54 a struct FIELD operand never converted
 (`p.n * p.x`, `p.x > p.n`, `Math.max(p.n, p.x)`, 2-D mixed compare: invalid modules, declaration
 path); ld55 console unary minus of an i32 element / a 2-D row's `.length` in a sum; ld56 console
-`ia[1] + fa[1]`; ld57 a getter returning f64 compared in a method (`i32.gt_s`); ld58 console
+`ia[1] + fa[1]`; ld57 a getter returning f64 compared in a method (`i32.gt_s`); ~~ld58~~ FIXED 2026-10-19 with sw100 console
 `.length` of a method result (with ld43, ld46); ld59 console bigint operands in f64 ops; ld60
 `Number(stringVar)`; ld61 console `reduce` returning f64; ld62 console `s.length > 2 && arr[1] > 1`;
-ld63 console `nm() < s` (bad local); ld64 a nullable string local (`$s_ptr` unresolved); ld65 a NaN
+ld63 console `nm() < s` (bad local); ld64 a nullable string local (`$s_ptr` unresolved); ~~ld65~~ FIXED 2026-10-19 with sw97 a NaN
 parenthesised compare traps (sw97); ld66 `1e-7 * 1.5` in a declaration (the `-` of the exponent
 splits); ld67 console `n ** 2` of an i32; ld68 console `typeof b === "boolean"`; ld69 console
 `x > 1 || s === "q"` (splits at `===` first); ld70 `users[0].name.length` in a declaration; ld71
