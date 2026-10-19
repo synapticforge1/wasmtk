@@ -29,8 +29,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > "audit round 2". Four parallel auditors, every row RUN; repros in `scripts/phase0/round2/`.
 > **Found: 33 silent-wrong compiler bugs (sw76–sw108), 10 silent tool defects (sw109–sw118),
 > 34 loud compiler rows (ld47–ld80), 10 loud tool rows (ld81–ld90)**, and a grep-verified dead-code
-> list. **Proposed fix order** (silent first, the owner's standing order): (1) sw113, the CLI
-> overwriting its INPUT file (destructive); (2) sw109 / sw110 / sw112, merges and bundles that
+> list. **Proposed fix order** (silent first, the owner's standing order): (1) ~~sw113, the CLI
+> overwriting its INPUT file~~ **DONE 2026-10-19** (with sw114; `src/outpath.ts`,
+> `tests/outpath_tests.ts`); (2) sw109 / sw110 / sw112, merges and bundles that
 > mis-seat data or rename wrongly; (3) the compiler silent rows grouped by root: array / string
 > helper index normalisation (sw80–sw85, sw81, sw91, sw92), spread (sw77–sw79), string-array
 > paths (sw76, sw107), finally (sw106), block scoping (sw104, sw105), console unary / boolean /

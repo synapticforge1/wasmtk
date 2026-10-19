@@ -120,6 +120,7 @@ import wabt from "wabt";
 import binaryen from "./binaryen.ts";
 import { basename, dirname } from "@std/path";
 import { rt } from "./rt.ts";
+import { defaultOutPath, samePath } from "./outpath.ts";
 import { emitWitBeside } from "./witgen.ts";
 import { bundleImportsEx } from "./tsbundler.ts";
 import { classify, formatReport, isSourceError, type SourceFile } from "./diagnostics.ts";
@@ -283,7 +284,11 @@ async function watToOptimisedWasm(
  * @param outPath - Output path; defaults to same name with .wasm extension.
  */
 export async function compileWat(watPath: string, outPath?: string): Promise<WasicResult> {
-  const out = outPath ?? watPath.replace(/\.wat$/, ".wasm");
+  // never the input (sw113): an extension the replace missed left `out` equal to `watPath`
+  const out = outPath ?? defaultOutPath(watPath, [".wat"], ".wasm");
+  if (samePath(watPath, out)) {
+    return { success: false, error: `the output '${out}' is the input file; pass another -o` };
+  }
   const source = await rt.readTextFile(watPath);
   const result = await watToOptimisedWasm(source, watPath, out);
   if (result.success) {
@@ -23012,8 +23017,13 @@ export async function compileWasiTs(
   const name = basename(tsPath).replace(/\.[^/.]+$/, "");
   const srcDir = dirname(tsPath);
   const out = outPath ?? `${srcDir}/${name}.wasm`;
-  // WAT goes alongside the output WASM
-  const watPath = out.replace(/\.wasm$/, ".wat");
+  // WAT goes alongside the output WASM; for an output that is not `.wasm` it is appended, so it
+  // can never be the output itself (sw113's class: `-o x.bin` made both the same file)
+  const watPath = defaultOutPath(out, [".wasm"], ".wat");
+  // never write over the source (sw113): `-o prog.ts` would have
+  if (samePath(tsPath, out) || samePath(tsPath, watPath)) {
+    return { success: false, error: `the output '${out}' is the input file; pass another -o` };
+  }
 
   if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
 
@@ -23162,7 +23172,7 @@ export async function compileWasiTs(
     // (opts.emitWit === false): a dync module is a whole-program WASI command with no exports,
     // so its WIT is an empty world — writing it is a wasted step.
     if (opts?.emitWit !== false) {
-      const witPath = out.replace(/\.wasm$/, ".wit");
+      const witPath = defaultOutPath(out, [".wasm"], ".wit"); // never the output itself (sw113)
       await rt.writeTextFile(witPath, transpiler.generateWit(name));
       console.log(`   WIT:  ${witPath}`);
     }
@@ -23195,7 +23205,11 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
   const name = basename(tsPath).replace(/\.[^/.]+$/, "");
   const srcDir = dirname(tsPath);
   const out = outPath ?? `${srcDir}/${name}.wasm`;
-  const watPath = out.replace(/\.wasm$/, ".wat");
+  const watPath = defaultOutPath(out, [".wasm"], ".wat"); // never the output itself (sw113)
+  // never write over the source (sw113): `-o lib.ts` would have
+  if (samePath(tsPath, out) || samePath(tsPath, watPath)) {
+    return { success: false, error: `the output '${out}' is the input file; pass another -o` };
+  }
 
   if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
 
@@ -23307,8 +23321,8 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
 
   const result = await watToOptimisedWasm(wat, watPath, out);
   if (result.success) {
-    // Phase 41: emit .wit interface file alongside the compiled .wasm
-    const witPath = out.replace(/\.wasm$/, ".wit");
+    // Phase 41: emit .wit interface file alongside the compiled .wasm (never the output itself)
+    const witPath = defaultOutPath(out, [".wasm"], ".wit");
     await rt.writeTextFile(witPath, transpiler.generateWit(name));
     console.log(`✅ Library: ${out} (${result.sizeBytes} bytes)`);
     console.log(`   WAT:  ${watPath}`);
@@ -23331,7 +23345,12 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
  */
 export async function compileWasi(path: string, outPath?: string): Promise<void> {
   if (path.endsWith(".wat")) {
-    await compileWat(path, outPath);
+    // its result was ignored, so `wasmtk wasic broken.wat` printed the error and exited 0 (sw114)
+    const watResult = await compileWat(path, outPath);
+    if (!watResult.success) {
+      if (watResult.error) console.error(`❌ wasic: ${watResult.error}`);
+      rt.exit(1);
+    }
     return;
   }
 

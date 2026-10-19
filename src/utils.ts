@@ -6,6 +6,7 @@
 
 import { basename, dirname } from "@std/path";
 import { rt } from "./rt.ts";
+import { assertNotInput, defaultOutPath, samePath } from "./outpath.ts";
 import wasm2js_compiler from "wasm2js";
 import binaryen from "./binaryen.ts";
 import wabt from "wabt";
@@ -500,8 +501,9 @@ export async function showInfo(path: string): Promise<void> {
  * @param path - Path to the module.
  */
 export async function wasm2js(path: string, outPath?: string): Promise<boolean> {
-  const out = outPath ?? path.replace(/\.(wasm|wat)$/, ".js");
+  const out = outPath ?? defaultOutPath(path, [".wasm", ".wat"], ".js");
   try {
+    assertNotInput(path, out, "wasm2js"); // sw113: `lib2.bin` was replaced by JS
     if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
     const wasmBuffer = await getWasmBytes(path);
     const result = wasm2js_compiler(wasmBuffer as BufferSource);
@@ -523,12 +525,18 @@ export async function wasm2js(path: string, outPath?: string): Promise<boolean> 
  * @param p - Path to the input file.
  */
 export async function convertFile(p: string, outPath?: string): Promise<boolean> {
-  const isWat = p.endsWith(".wat");
+  const isWat = p.toLowerCase().endsWith(".wat");
   // ANCHORED. `String.replace` with a string pattern hits the FIRST occurrence, so a path whose
   // DIRECTORY carries the extension rewrote the wrong segment: `build.wat/out.wat` became
-  // `build.wasm/out.wat`. `wasm2js` 20 lines above already anchors with `/\.(wasm|wat)$/`; this
-  // one did not. (2026-08-24 audit — `utils.ts` has no direct test suite.)
-  const out = outPath ?? (isWat ? p.replace(/\.wat$/, ".wasm") : p.replace(/\.wasm$/, ".wat"));
+  // `build.wasm/out.wat`. (2026-08-24 audit — `utils.ts` has no direct test suite.) And never the
+  // input: `lib.bin` / `libcopy.WASM` matched no replace, so the WAT was written over the input
+  // (sw113); an unknown extension now gets the new one appended.
+  const out = outPath ??
+    (isWat ? defaultOutPath(p, [".wat"], ".wasm") : defaultOutPath(p, [".wasm"], ".wat"));
+  if (samePath(p, out)) {
+    console.error(`❌ convert: the output '${out}' is the input file; pass -o <path>.`);
+    return false;
+  }
   if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
 
   try {
@@ -574,7 +582,9 @@ export async function convertFile(p: string, outPath?: string): Promise<boolean>
  * @param outPath - The output destination.
  */
 export async function bundleTs(p: string, outPath?: string): Promise<void> {
-  const out = outPath || p.replace(".ts", ".bundled.ts");
+  // sw113: an `.mts` entry matched no replace and the bundle was written over it
+  const out = outPath || defaultOutPath(p, [".ts", ".mts", ".cts"], ".bundled.ts");
+  assertNotInput(p, out, "tsbundle");
   const bundled = await bundleImports(p);
   await rt.writeTextFile(out, bundled);
   console.log(`✅ Bundled: ${out}`);

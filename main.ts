@@ -425,7 +425,7 @@ Options:
       break;
     }
     case "tsbundle":
-      await bundleTs(target, outPath ?? target.replace(/\.ts$/, ".bundled.ts"));
+      await bundleTs(target, outPath); // its default output is never the input (sw113)
       break;
     case "jstyper": {
       const anyPolicyRaw = args["any-policy"] as string | undefined;

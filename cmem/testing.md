@@ -112,7 +112,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-15, binaryang **1.12.1**; latest release v2.0.3)
+## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
+
+> **2026-10-19, sw113 + sw114 (no command writes over its input; `wasic x.wat` exit code), gate
+> GREEN.** New suite **`outpath_tests` 12 / 12** (`tests/outpath_tests.ts`, the installed wasmtk on
+> temp copies; 0 / 12 on the old code) · golden-WAT 523, 0 diverged · every other count as on
+> 2026-10-15. Reaches: main.ts, utils.ts, bindgen.ts, jstyper.ts, wasic.ts (output paths only).
 
 > **2026-10-15, the owner's string-index ruling (sw71), gate GREEN.** typed_decl **45** (+4
 > refusals, +1 accepted) · golden-WAT **523**, 6 moved, function by function: the 5 programs that

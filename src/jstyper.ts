@@ -11,6 +11,11 @@
  *                            [-n <out>]
  */
 
+import { assertNotInput, defaultOutPath } from "./outpath.ts";
+
+/** The JavaScript extensions whose sibling `.d.ts` / `.ts` the paths are derived from (sw113). */
+const JS_EXTS = [".js", ".mjs", ".cjs"];
+
 export type AnyPolicy = "skip" | "warn" | "default";
 
 /** Options controlling a {@link runJstyper} invocation. */
@@ -330,7 +335,8 @@ export async function runJstyper(
   // --dts-only: generate skeleton .d.ts for hand-editing
   if (dtsOnly) {
     const skeleton = generateSkeletonDts(jsFns);
-    const dest = outPath ?? jsFile.replace(/\.js$/, ".d.ts");
+    const dest = outPath ?? defaultOutPath(jsFile, JS_EXTS, ".d.ts");
+    if (!dryRun) assertNotInput(jsFile, dest, "jstyper");
     if (dryRun) {
       console.log(`--- ${dest} ---`);
       console.log(skeleton);
@@ -341,8 +347,10 @@ export async function runJstyper(
     return;
   }
 
-  // Normal mode: .js + .d.ts  →  .ts
-  const dtsPath = jsFile.replace(/\.js$/, ".d.ts");
+  // Normal mode: .js + .d.ts  →  .ts. For a `.mjs` the old `.js` replace matched nothing, so the
+  // ".d.ts" path WAS the source: it was read as declarations, every function skipped, and the
+  // empty result written over it (sw113, 2026-10-15). An unknown extension now gets one appended.
+  const dtsPath = defaultOutPath(jsFile, JS_EXTS, ".d.ts");
   const dtsBase = dtsPath.replace(/.*[\\/]/, ""); // basename for display
   const jsBase = jsFile.replace(/.*[\\/]/, "");
 
@@ -367,11 +375,13 @@ export async function runJstyper(
 
   for (const w of warnings) console.warn(`⚠  jstyper: ${w}`);
 
-  const dest = outPath ?? jsFile.replace(/\.js$/, ".ts");
+  const dest = outPath ?? defaultOutPath(jsFile, JS_EXTS, ".ts");
   if (dryRun) {
     console.log(`--- ${dest} ---`);
     console.log(source);
   } else {
+    assertNotInput(jsFile, dest, "jstyper");
+    assertNotInput(dtsPath, dest, "jstyper");
     await Deno.writeTextFile(dest, source);
     console.log(`✅ jstyper: wrote ${dest}`);
   }
