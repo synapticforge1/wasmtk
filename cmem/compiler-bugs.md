@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 22 | 113 | 0 | 27 |
+| SILENT-WRONG | 21 | 114 | 0 | 27 |
 | LOUD | 39 | 58 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 22; in the tools: 0** (2026-10-19, latest: spread sw77–sw79
+**Open silent-wrong in the compiler: 21; in the tools: 0** (2026-10-19, latest: sw106 `finally` on
+every exit fixed, `15_FinallyOnEveryExit`). Before that, 22 (2026-10-19, later: spread sw77–sw79
 and the string-array paths sw76, sw107 fixed; tests `28_SpreadLiterals`, `28_StringArrayJoinSearch`,
 `28_SpreadOfExpressionRefused`). Before that, 27 (2026-10-19, later: the index-
 normalisation group sw80–sw85, sw91, sw92 fixed, with loud ld47; tests `28_RelativeIndexMethods`,
@@ -311,7 +312,7 @@ overwrite user files (sw113) at the top.
 | sw103 | console `-h.big` (a bigint field) prints without `n` | console i64 lead detection |
 | sw104 | a top-level `let` / `const` inside a block becomes a module GLOBAL and its declaration is dropped: not re-initialised per loop pass; an inner block's `const x` overwrites the outer `x` | `parseModuleGlobals` ~3991 has no brace-depth check |
 | sw105 | inside a function, a block's `const x` overwrites the outer `x` (`1 50` → `50 50`) | function locals are flat by name |
-| sw106 | `finally` is skipped when try / catch leaves by `return`, `break` / `continue`, or a throw from `catch` | try emission ~16920 inlines finally on fall-through only |
+| ~~sw106~~ | ✅ FIXED 2026-10-19: finally is emitted FIRST and kept on `finallyStack` (with the controlStack depth at its try) while the try and catch bodies are emitted. A `return` runs every enclosing finally after its value is evaluated (`(return (block (result T) X FIN))`, emitStatement); a `break` / `continue` (labeled too) runs the ones entered after its target loop, innermost first; the catch body sits in its own `try_table (catch_all_ref …)`, so a throw from it runs finally and re-throws. Refused: a string return through a finally that calls a string-returning function (the `$__str_ret_*` globals would be overwritten; `15_FinallyStringReturnRefused`, which the old compiler built). Known edge, not fixed: a throw from finally WHILE a return / break runs it is caught by the same try's handlers (finally may run twice). Test `15_FinallyOnEveryExit`. Was: `finally` is skipped when try / catch leaves by `return`, `break` / `continue`, or a throw from `catch` | try emission ~16920 inlines finally on fall-through only |
 | ~~sw107~~ | ✅ FIXED 2026-10-19: `$__dynarr_indexof_string` compares text (`$__str_cmp`); a needle that is not a string variable or literal is refused. Test `28_StringArrayJoinSearch`. Was: `string[].indexOf` / `includes` return wrong indices | ~10104 has no string-array path |
 | sw108 | a top-level string-enum-typed variable prints its tag (`1` for `DOWN`); in a function it is right | top-level `stringEnumVars` registration |
 

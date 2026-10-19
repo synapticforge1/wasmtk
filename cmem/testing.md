@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw106 (`finally` on every exit), gate GREEN.** wasi **473/473**
+> (+`15_FinallyOnEveryExit`, +`15_FinallyStringReturnRefused` `@expect-fail: compile`; both fail on
+> the old compiler, which BUILT the refused case) · golden-WAT **530**, 1 moved, `15_Exceptions`:
+> its string data in a new order (finally is emitted first) and the catch body's new `try_table`;
+> failed compiles **9** · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 ·
+> api-surface unchanged.
+
 > **2026-10-19, sw76–sw79, sw107 (spread literals; string arrays join and search by text), gate
 > GREEN.** wasi **471/471** (+`28_SpreadLiterals`, +`28_StringArrayJoinSearch`, both failing on the
 > old compiler; +`28_SpreadOfExpressionRefused`, `@expect-fail: compile`, which the old compiler
