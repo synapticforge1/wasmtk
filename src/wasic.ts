@@ -1523,6 +1523,122 @@ function netSquareBracketDepth(s: string): number {
   return d;
 }
 
+/**
+ * Block scoping for one body (a function's, or the top level's): a `const` / `let` that SHADOWS a
+ * name declared in an enclosing scope of the same body is renamed (`x` → `x__blkN`) for the extent
+ * of its block. Locals are flat by name, so the inner `const x` overwrote the outer `x` (sw104 at
+ * the top level, sw105 in a function; 2026-10-19). Code that does not shadow is returned unchanged.
+ * `outer`: names already in scope (a function's parameters). `seq` numbers the renames.
+ */
+function renameShadowingDecls(lines: string[], outer: Iterable<string>, seq: { n: number }): string[] {
+  const scopes: Map<string, string>[] = [new Map([...outer].map((n) => [n, n]))];
+  const resolve = (n: string): string | undefined => {
+    for (let k = scopes.length - 1; k >= 0; k--) {
+      const r = scopes[k].get(n);
+      if (r !== undefined) return r;
+    }
+    return undefined;
+  };
+  const shadows = (n: string): boolean => scopes.slice(0, -1).some((s) => s.has(n));
+  let renamedAny = false;
+  const out: string[] = [];
+  for (const raw of lines) {
+    const t = raw.trim();
+    // closing braces at the start of the line end their scopes first (`} else {`)
+    const lead = t.match(/^}+/)?.[0].length ?? 0;
+    for (let k = 0; k < lead && scopes.length > 1; k++) scopes.pop();
+    const net = braceDepthOf(t) + lead; // the scopes this line opens (after its leading `}`s)
+    let pushed = 0;
+    // `for (let i …) {` / `for (const x of …) {`: the variable belongs to the loop's scope
+    const forDecl = t.match(/^for\s*\(\s*(?:let|const)\s+([A-Za-z_$][\w$]*)/);
+    const decl = forDecl ? null : t.slice(lead).trim().match(/^(?:let|const)\s+([A-Za-z_$][\w$]*)/);
+    if (forDecl && net > 0) {
+      scopes.push(new Map());
+      pushed = 1;
+    }
+    const name = (forDecl ?? decl)?.[1];
+    if (name && (!forDecl || pushed)) {
+      const target = scopes[scopes.length - 1];
+      if (shadows(name)) {
+        target.set(name, `${name}__blk${seq.n++}`);
+        renamedAny = true;
+      } else target.set(name, name);
+    }
+    out.push(renamedAny ? renameIdentsIn(raw, resolve) : raw);
+    for (let k = pushed; k < net; k++) scopes.push(new Map());
+    for (let k = 0; k > net; k--) if (scopes.length > 1) scopes.pop();
+  }
+  return out;
+}
+
+/** Rewrites identifier references in one source line through `resolve` (see renameShadowingDecls). */
+function renameIdentsIn(line: string, resolve: (n: string) => string | undefined): string {
+  let out = "";
+  // innermost open bracket kinds; "o" = an object-literal brace
+  const stack: string[] = [];
+  let i = 0;
+  const prevNonSpace = (): string => out.trimEnd().slice(-1);
+  const prevWord = (): string => out.trimEnd().match(/[A-Za-z_$][\w$]*$/)?.[0] ?? "";
+  while (i < line.length) {
+    const c = line[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < line.length && line[j] !== c) j += line[j] === "\\" ? 2 : 1;
+      out += line.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (c === "`") {
+      // template: text kept, each ${…} rewritten recursively
+      let j = i + 1;
+      out += "`";
+      while (j < line.length && line[j] !== "`") {
+        if (line[j] === "\\") {
+          out += line.slice(j, j + 2);
+          j += 2;
+        } else if (line[j] === "$" && line[j + 1] === "{") {
+          let d = 0, k = j + 1;
+          for (; k < line.length; k++) {
+            if (line[k] === "{") d++;
+            else if (line[k] === "}" && --d === 0) break;
+          }
+          out += "${" + renameIdentsIn(line.slice(j + 2, k), resolve) + "}";
+          j = k + 1;
+        } else out += line[j++];
+      }
+      out += "`";
+      i = j + 1;
+      continue;
+    }
+    if (c === "{") {
+      const p = prevNonSpace();
+      stack.push(/[=(,:[?]/.test(p) || prevWord() === "return" ? "o" : "b");
+    } else if (c === "(" || c === "[") stack.push(c);
+    else if (c === "}" || c === ")" || c === "]") stack.pop();
+    if (/[A-Za-z_$]/.test(c) && !/[\w$]/.test(line[i - 1] ?? "")) {
+      let j = i;
+      while (j < line.length && /[\w$]/.test(line[j])) j++;
+      const id = line.slice(i, j);
+      const r = resolve(id);
+      const before = out.trimEnd();
+      const isMember = before.endsWith(".") && !before.endsWith("...");
+      const isLabel = /\b(?:break|continue)$/.test(before);
+      const nextCh = line.slice(j).trimStart()[0] ?? "";
+      const inObj = stack[stack.length - 1] === "o";
+      const keyPos = inObj && /[{,]$/.test(before);
+      if (r === undefined || r === id || isMember || isLabel) out += id;
+      else if (keyPos && nextCh === ":") out += id; // an object key
+      else if (keyPos && (nextCh === "," || nextCh === "}")) out += `${id}: ${r}`; // shorthand
+      else out += r;
+      i = j;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
 /** Net `{` minus `}` in `s`, outside string literals. */
 function braceDepthOf(s: string): number {
   const mask = buildStringLiteralMask(s);
@@ -4100,7 +4216,17 @@ class WasicTranspiler {
    */
   private parseModuleGlobals(): void {
     const remaining: string[] = [];
+    // Only a declaration at brace depth 0 is a MODULE variable. One inside a block (a loop or if
+    // body at the top level) was promoted to a global and its line dropped, so it was not
+    // re-initialised per pass, and an inner `const x` replaced the outer `x` (sw104, 2026-10-19).
+    let depth = 0;
     for (const line of this.startBodyLines) {
+      const atDepth = depth;
+      depth += braceDepthOf(line);
+      if (atDepth > 0) {
+        remaining.push(line);
+        continue;
+      }
       const m = line.match(
         // The annotation accepts a Phase 24 nullable union (`i32 | null`) as well as a plain
         // type name — without the union alternative the whole match fails and the declaration
@@ -4276,8 +4402,13 @@ class WasicTranspiler {
     // Also mark arrays as dynamic if startBodyLines uses push/pop on them.
     for (const name of this.findDynamicArrays(this.startBodyLines)) needsDynamic.add(name);
 
-    // Scan startBodyLines for array declarations whose names appear in function bodies.
+    // Scan startBodyLines for array declarations whose names appear in function bodies. Depth 0
+    // only: an array declared inside a top-level block is not a module variable (sw104).
+    let arrDepth = 0;
     for (const line of this.startBodyLines) {
+      const atDepth = arrDepth;
+      arrDepth += braceDepthOf(line);
+      if (atDepth > 0) continue;
       // Phase 44: Array<FuncType> = [] syntax (function pointer arrays)
       const mFA = line.match(
         /^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*:\s*Array<((?:[^<>]|=>)*)>\s*=\s*\[\]/,
@@ -22167,6 +22298,14 @@ ${sum}
     this.parseTopLevel();
     this.liftStartBodyArrows(); // Phase 44: second pass for startBodyLines with synthetic _start context
     this.joinMultilineArrayLiterals();
+    // Block scoping (sw104, sw105): a block's `const x` that shadows an enclosing `x` gets its own
+    // name. Before parseModuleGlobals, which reads the top-level declarations.
+    const blkSeq = { n: 0 };
+    for (const fn of this.functions) {
+      if (fn.name === "_start") continue;
+      fn.bodyLines = renameShadowingDecls(fn.bodyLines, fn.params.map((p) => p.name), blkSeq);
+    }
+    this.startBodyLines = renameShadowingDecls(this.startBodyLines, [], blkSeq);
     this.parseModuleGlobals();
 
     // Phase 5g: pre-populate closureTypedVars for all functions so inner functions emitted

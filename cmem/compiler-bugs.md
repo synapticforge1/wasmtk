@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 21 | 114 | 0 | 27 |
+| SILENT-WRONG | 19 | 116 | 0 | 27 |
 | LOUD | 39 | 58 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 21; in the tools: 0** (2026-10-19, latest: sw106 `finally` on
+**Open silent-wrong in the compiler: 19; in the tools: 0** (2026-10-19, latest: block scoping
+sw104, sw105 fixed, `5e_BlockScopedDeclarations`). Before that, 21 (2026-10-19, later: sw106 `finally` on
 every exit fixed, `15_FinallyOnEveryExit`). Before that, 22 (2026-10-19, later: spread sw77–sw79
 and the string-array paths sw76, sw107 fixed; tests `28_SpreadLiterals`, `28_StringArrayJoinSearch`,
 `28_SpreadOfExpressionRefused`). Before that, 27 (2026-10-19, later: the index-
@@ -310,8 +311,8 @@ overwrite user files (sw113) at the top.
 | sw101 | an `Int32Array` element plus a `Float64Array` element truncates the float (declaration) | wasic `rhsKnownFloat` ~11733 (ld56 is the console's) |
 | sw102 | console prints booleans as `0` / `1`: `s.toUpperCase() !== "ABD"`, `a.slice(0,2) === b.slice(0,2)`, `ps[1].ok \|\| ps[0].x > 1` (sw75's class) | console boolean detection |
 | sw103 | console `-h.big` (a bigint field) prints without `n` | console i64 lead detection |
-| sw104 | a top-level `let` / `const` inside a block becomes a module GLOBAL and its declaration is dropped: not re-initialised per loop pass; an inner block's `const x` overwrites the outer `x` | `parseModuleGlobals` ~3991 has no brace-depth check |
-| sw105 | inside a function, a block's `const x` overwrites the outer `x` (`1 50` → `50 50`) | function locals are flat by name |
+| ~~sw104~~ | ✅ FIXED 2026-10-19: `parseModuleGlobals` and the module-array pass take only depth-0 declarations (`braceDepthOf`); a block's declaration stays a `_start` statement, re-run each pass. Shadowing: with sw105. Test `5e_BlockScopedDeclarations`. Was: a top-level `let` / `const` inside a block becomes a module GLOBAL and its declaration is dropped: not re-initialised per loop pass; an inner block's `const x` overwrites the outer `x` | `parseModuleGlobals` ~3991 has no brace-depth check |
+| ~~sw105~~ | ✅ FIXED 2026-10-19: `renameShadowingDecls` (before parseModuleGlobals, per function with its params, and on the top level) renames a `const` / `let` that shadows an enclosing scope's name to `x__blkN` for its block's extent; references are rewritten outside strings (template `${}` included), skipping members, object keys and break / continue labels, and expanding shorthand (`{ x }` → `{ x: x__blk1 }`). Code that does not shadow is unchanged (no golden moved). Not covered: destructuring declarations, `var`, catch variables (catchVarShadows has its own path); a bare `{ … }` block is still refused (loud). Test `5e_BlockScopedDeclarations`. Was: inside a function, a block's `const x` overwrites the outer `x` (`1 50` → `50 50`) | function locals are flat by name |
 | ~~sw106~~ | ✅ FIXED 2026-10-19: finally is emitted FIRST and kept on `finallyStack` (with the controlStack depth at its try) while the try and catch bodies are emitted. A `return` runs every enclosing finally after its value is evaluated (`(return (block (result T) X FIN))`, emitStatement); a `break` / `continue` (labeled too) runs the ones entered after its target loop, innermost first; the catch body sits in its own `try_table (catch_all_ref …)`, so a throw from it runs finally and re-throws. Refused: a string return through a finally that calls a string-returning function (the `$__str_ret_*` globals would be overwritten; `15_FinallyStringReturnRefused`, which the old compiler built). The same day (owner: "I do want the one finally case fixed"): a throw FROM finally leaves the whole try statement. The fall-through copy moved after the `try_table` (it was inside, so the try's own catch caught it); each copy run by a return / break / continue is in a `try_table (catch_all_ref $__fin_escN)` branching to an escape block around the statement that re-throws outward (emitted only when an exit used it). Was "3 1013" for "3 11": the inner catch ran, then finally again. Test `15_FinallyOnEveryExit`. Was: `finally` is skipped when try / catch leaves by `return`, `break` / `continue`, or a throw from `catch` | try emission ~16920 inlines finally on fall-through only |
 | ~~sw107~~ | ✅ FIXED 2026-10-19: `$__dynarr_indexof_string` compares text (`$__str_cmp`); a needle that is not a string variable or literal is refused. Test `28_StringArrayJoinSearch`. Was: `string[].indexOf` / `includes` return wrong indices | ~10104 has no string-array path |
 | sw108 | a top-level string-enum-typed variable prints its tag (`1` for `DOWN`); in a function it is right | top-level `stringEnumVars` registration |

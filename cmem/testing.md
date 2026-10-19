@@ -114,6 +114,11 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw104 / sw105 (block scoping), gate GREEN.** wasi **474/474**
+> (+`5e_BlockScopedDeclarations`, failing on the old compiler) · golden-WAT **531**, NOTHING else
+> moved (no corpus program declared in a top-level block or shadowed) · failed compiles 9 · wast
+> 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · api-surface unchanged.
+
 > **2026-10-19, sw106 follow-up (a throw from `finally` leaves the whole try statement), gate
 > GREEN.** wasi 473/473 (`15_FinallyOnEveryExit` gained 5 cases; the old build printed `3 1013` for
 > `3 11`) · golden-WAT 530, 3 moved: `15_Exceptions` and `15_TestCase1-NestedEscalation` by ONE
