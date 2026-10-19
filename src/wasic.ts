@@ -124,7 +124,7 @@ import { defaultOutPath, samePath } from "./outpath.ts";
 import { emitWitBeside } from "./witgen.ts";
 import { bundleImportsEx } from "./tsbundler.ts";
 import { classify, formatReport, isSourceError, type SourceFile } from "./diagnostics.ts";
-import { type ExternalFuncDef, mergeWasmWat, type WasmWatType } from "./wasmmerge.ts";
+import { dataExtent, type ExternalFuncDef, mergeWasmWat, type WasmWatType } from "./wasmmerge.ts";
 import { gateVarToLet, maskCode } from "./varscope.ts";
 import { findUntypedDeclarations } from "./decltypes.ts";
 import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
@@ -23009,6 +23009,15 @@ function mergeOneWasmImport(
  * @param tsPath - Path to the source .ts file.
  * @param outPath - Optional output path; defaults to same name with .wasm extension.
  */
+/** A bundler failure as the CLI prints it: a file that could not be read says so; anything else
+ *  (a refused program, sw112's name collision) is the bundler's own message, not "Cannot read". */
+function bundleErrorText(tsPath: string, err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (err instanceof Error && err.name === "NotFound") || /No such file|cannot find|os error 2/i.test(msg)
+    ? `Cannot read ${tsPath}: ${msg}`
+    : msg;
+}
+
 export async function compileWasiTs(
   tsPath: string,
   outPath?: string,
@@ -23031,7 +23040,7 @@ export async function compileWasiTs(
   try {
     bundleResult = await bundleImportsEx(tsPath);
   } catch (err) {
-    return { success: false, error: `Cannot read ${tsPath}: ${err}` };
+    return { success: false, error: bundleErrorText(tsPath, err) };
   }
   const { source, wasmImports } = bundleResult;
 
@@ -23106,14 +23115,20 @@ export async function compileWasiTs(
     const mod2 = wabtMod.readWasm(bytes.buffer as ArrayBuffer, { readDebugNames: false });
     const wat2 = mod2.toText({ inlineExport: false });
     mod2.destroy();
-    // Advance dataOffset by the imported module's static footprint
-    // Brackets around the initialiser are OPTIONAL — wabt-ts 1.4.1 began printing const-exprs
-    // unfolded. Requiring `(i32.const N)` sent every module down the 260 fallback below,
-    // under-advancing dataOffset into an out-of-bounds heap.
-    const heapM = wat2.match(
-      /\(global\s+\(;0;\)\s+\(mut i32\)\s+\(?\s*i32\.const\s+(\d+)\s*\)?\s*\)/,
+    // Advance dataOffset by the imported module's static footprint: the end of its data, or its
+    // own heap start when it EXPORTS `__heap_ptr` (a wasic library, binaryang 1.12.0), whichever
+    // is higher; 8-aligned. It advanced by GLOBAL 0's initial value, else 260: a library with
+    // data at 300 and no globals got 260, so the heap began inside its data and the program's
+    // pushes overwrote it (`79 79 200` → `79 7 200`, sw110, 2026-10-19).
+    // The heap start counts too: a wasic library's zero-filled statics sit past its last data
+    // segment, below its heap. Its exported `__heap_ptr`, else (as before) a mutable i32 global 0.
+    // (read without debug names: the export says `(global N)`, the global carries `(;N;)`)
+    const heapIdx = wat2.match(/\(export\s+"__heap_ptr"\s+\(global\s+(\d+)\)\)/)?.[1] ?? "0";
+    const heapInit = parseInt(
+      wat2.match(new RegExp(`\\(global\\s+\\(;${heapIdx};\\)\\s+\\(mut i32\\)\\s+\\(?\\s*i32\\.const\\s+(\\d+)`))
+        ?.[1] ?? "0",
     );
-    dataOffset += heapM ? parseInt(heapM[1]) : 260 /* DATA_BASE fallback */;
+    dataOffset += (Math.max(dataExtent(wat2).hi, heapInit) + 7) & ~7;
   }
   // If any merged module has a mutable global placed at the page-2 boundary (131072),
   // ensure the main module declares at least 3 memory pages.
@@ -23217,7 +23232,7 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
   try {
     bundleResult2 = await bundleImportsEx(tsPath);
   } catch (err) {
-    return { success: false, error: `Cannot read ${tsPath}: ${err}` };
+    return { success: false, error: bundleErrorText(tsPath, err) };
   }
   const { source, wasmImports } = bundleResult2;
 
