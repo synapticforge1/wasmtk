@@ -114,6 +114,15 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw80–sw85, sw91, sw92, ld47 (relative indices in the array / string helpers),
+> gate GREEN.** wasi **468/468** (+`28_RelativeIndexMethods`, +`28_SpliceItemReadsArrayRefused`, an
+> `@expect-fail: compile`; both fail on the old compiler) · golden-WAT **525**, 212 moved, EVERY one
+> reviewed by function (scratchpad `golden_review.ts`, `modc` keys compiled in library mode): each
+> changes only `$__str_slice`, `$__str_pad_start` / `_end`, `$__str_replace_all`,
+> `$__dynarr_slice_*`, `$__dynarr_fill_*`, `$__ta_fill_*`, `$__dynarr_splice_*` (+ `$__splice_at`)
+> and splice's call sites (`28_maps` `$mapDel`); failed compiles **7** (the new refusal) · wast
+> 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · api-surface unchanged.
+
 > **2026-10-19, sw111 / sw115–sw118 (the last silent tool rows), gate GREEN.** New suite
 > **`tool_rows_tests` 16 / 16** (`tests/tool_rows_tests.ts`, the installed wasmtk; 14 of 16 fail
 > on the old code, the 2 that pass are controls; sw117's 4 need TinyGo and skip without it) · wasi
