@@ -555,6 +555,17 @@ function internalizeDynrtHostImports(wat: string): string {
   return wat.replace(/\)\s*$/, `${defs.join("\n")}\n)`);
 }
 
+/**
+ * WAT that normalises a relative index local `$v` against the length local `$len`, as JavaScript's
+ * `slice` / `fill` / `splice` do: a negative index counts from the end, then it is clamped to
+ * [0, len]. The helpers clamped a negative index to 0 (sw80–sw83, 2026-10-19).
+ */
+function relIndexWat(v: string, len = "$len"): string {
+  return `(if (i32.lt_s (local.get ${v}) (i32.const 0)) (then (local.set ${v} (i32.add (local.get ${v}) (local.get ${len})))))
+    (if (i32.lt_s (local.get ${v}) (i32.const 0)) (then (local.set ${v} (i32.const 0))))
+    (if (i32.gt_s (local.get ${v}) (local.get ${len})) (then (local.set ${v} (local.get ${len}))))`;
+}
+
 /** Converts camelCase or snake_case identifiers to WIT kebab-case. */
 function toKebabCase(s: string): string {
   return s
@@ -13961,21 +13972,76 @@ ${prefixed}
         const isStrArr = effectiveInfo.isStringArr || outerElem === "string";
         const getExpr = isGlobalArr ? `(global.get $${arrName})` : `(local.get $${arrName})`;
 
-        // splice(idx, count) — in-place remove N elements starting at idx
+        // splice(idx, count?, ...items) — in place, as JavaScript: a negative idx counts from the
+        // end, a missing count removes to the end, the count is clamped, and the items are inserted
+        // at idx. It dropped the items, removed ONE element without a count, and removed the last
+        // element for a negative idx (sw84, sw85; ld47 trapped on an over-long count; 2026-10-19).
         if (method === "splice") {
-          const args = this.splitArgs(argsStr);
-          const idxWat = args[0]?.trim()
-            ? this.emitExpr(args[0].trim(), locals, "i32")
+          const args = this.splitArgs(argsStr).map((a) => a.trim());
+          const idxWat = args[0] ? this.emitExpr(args[0], locals, "i32") : "(i32.const 0)";
+          const countWat = args.length >= 2 && args[1]
+            ? this.emitExpr(args[1], locals, "i32")
+            : args[0]
+            ? "(i32.const 2147483647)"
             : "(i32.const 0)";
-          const countWat = args[1]?.trim()
-            ? this.emitExpr(args[1].trim(), locals, "i32")
-            : "(i32.const 1)";
-          // Use f64 splice (8-byte elements) for string and f64 arrays; i32 splice for 4-byte arrays
-          const spliceKey = (isStrArr || outerElem === "f64" || outerElem === "i64")
-            ? "splice_f64"
-            : "splice_i32";
+          const items = args.slice(2).filter((a) => a.length > 0);
+          // The items are stored AFTER the gap is opened, so one that reads this array would read
+          // the array already changed. Refused rather than wrong.
+          const readsArr = new RegExp(`(^|[^\\w$.])${arrName}(?![\\w$])`);
+          const reader = items.find((a) => readsArr.test(a));
+          if (reader !== undefined) {
+            this.diagnostics.push(
+              `'${arrName}.splice(…, ${reader})': an inserted item that reads '${arrName}' itself is ` +
+                `not supported (it would read the array after the splice). Copy the value into a ` +
+                `variable first.`,
+            );
+          }
+          // 8-byte slots for string ((ptr, len) pairs), f64 and i64 arrays; 4-byte for the rest
+          const wide = isStrArr || outerElem === "f64" || outerElem === "i64";
+          const spliceKey = wide ? "splice_f64" : "splice_i32";
           this.dynArrHelpers.add(spliceKey);
-          return `(call $__dynarr_${spliceKey} ${getExpr} ${idxWat} ${countWat})`;
+          const setArr = (w: string) =>
+            isGlobalArr ? `(global.set $${arrName} ${w})` : `(local.set $${arrName} ${w})`;
+          const out = [
+            setArr(
+              `(call $__dynarr_${spliceKey} ${getExpr} ${idxWat} ${countWat} (i32.const ${items.length}))`,
+            ),
+          ];
+          const shift = wide ? 3 : 2;
+          items.forEach((item, k) => {
+            const addr = `(i32.add (i32.add ${getExpr} (i32.const 8)) (i32.shl (i32.add ` +
+              `(global.get $__splice_at) (i32.const ${k})) (i32.const ${shift})))`;
+            if (isStrArr) {
+              const pl = this.quietEmit(() => this.emitStringPtrLen(item, locals));
+              if (pl === "(i32.const 0) (i32.const 0)" && item !== '""' && item !== "''") {
+                this.diagnostics.push(
+                  `'${arrName}.splice(…, ${item})': insert a string variable or literal ` +
+                    `(this expression is not supported as a spliced string item).`,
+                );
+                return;
+              }
+              const [p, l] = splitTwoWatExprs(pl);
+              out.push(`(i32.store ${addr} ${p})`, `(i32.store offset=4 ${addr} ${l})`);
+              return;
+            }
+            let valWat: string;
+            if (item.startsWith("{") && effectiveInfo.structTypeName) {
+              const structPtr = this.tryAllocStructLiteralPtr(item, effectiveInfo.structTypeName);
+              valWat = structPtr !== null
+                ? `(i32.const ${structPtr})`
+                : this.emitRuntimeStructLiteral(item, effectiveInfo.structTypeName, locals) ??
+                  this.emitExpr(item, locals, outerElem);
+            } else {
+              valWat = this.emitExpr(item, locals, outerElem);
+            }
+            const st = outerElem === "f64" ? "f64.store" : outerElem === "i64"
+              ? "i64.store"
+              : outerElem === "f32"
+              ? "f32.store"
+              : "i32.store";
+            out.push(`(${st} ${addr} ${valWat})`);
+          });
+          return out.join("\n      ");
         }
 
         // push/unshift on string arrays — need 3-param helper (arr, ptr, len)
@@ -17853,6 +17919,10 @@ ${sum}
   (func $__ta_fill_${elemType} (param $arr i32) (param $val ${watElem}) (param $start i32) (param $end i32)
     (local $i i32)
     (local $data i32)
+    (local $len i32)
+    (local.set $len (i32.load (local.get $arr)))
+    ${relIndexWat("$start")}
+    ${relIndexWat("$end")}
     (local.set $data (i32.add (local.get $arr) (i32.const 8)))
     (local.set $i (local.get $start))
     (block $done
@@ -17982,6 +18052,12 @@ ${sum}
       }
       const [method, elemType] = key.split("_");
       if (method === "push" || method === "unshift") growNeeded.add(elemType);
+      // splice grows when it inserts more than it removes (sw84): 4- or 8-byte slots
+      if (method === "splice") growNeeded.add(elemType === "f64" ? "f64" : "i32");
+    }
+    if (this.dynArrHelpers.has("splice_i32") || this.dynArrHelpers.has("splice_f64")) {
+      parts.push(`  ;; splice's normalised start index, read by the caller to store the inserted items
+  (global $__splice_at (mut i32) (i32.const 0))`);
     }
 
     // Emit grow helpers first (push/unshift call them).
@@ -18161,10 +18237,8 @@ ${sum}
     (local $newptr i32)
     (local $i i32)
     (local.set $len (i32.load (local.get $arr)))
-    (if (i32.lt_s (local.get $start) (i32.const 0)) (then (local.set $start (i32.const 0))))
-    (if (i32.gt_s (local.get $start) (local.get $len)) (then (local.set $start (local.get $len))))
-    (if (i32.lt_s (local.get $end) (i32.const 0)) (then (local.set $end (i32.const 0))))
-    (if (i32.gt_s (local.get $end) (local.get $len)) (then (local.set $end (local.get $len))))
+    ${relIndexWat("$start")}
+    ${relIndexWat("$end")}
     (local.set $newlen (i32.sub (local.get $end) (local.get $start)))
     (if (i32.lt_s (local.get $newlen) (i32.const 0)) (then (local.set $newlen (i32.const 0))))
     (local.set $newptr (call $__malloc (i32.add (i32.const 8) (i32.shl (local.get $newlen) (i32.const ${shift})))))
@@ -18195,10 +18269,8 @@ ${sum}
     (local $newptr i32)
     (local $i i32)
     (local.set $len (i32.load (local.get $arr)))
-    (if (i32.lt_s (local.get $start) (i32.const 0)) (then (local.set $start (i32.const 0))))
-    (if (i32.gt_s (local.get $start) (local.get $len)) (then (local.set $start (local.get $len))))
-    (if (i32.lt_s (local.get $end) (i32.const 0)) (then (local.set $end (i32.const 0))))
-    (if (i32.gt_s (local.get $end) (local.get $len)) (then (local.set $end (local.get $len))))
+    ${relIndexWat("$start")}
+    ${relIndexWat("$end")}
     (local.set $newlen (i32.sub (local.get $end) (local.get $start)))
     (if (i32.lt_s (local.get $newlen) (i32.const 0)) (then (local.set $newlen (i32.const 0))))
     (local.set $newptr (call $__malloc (i32.add (i32.const 8) (i32.shl (local.get $newlen) (i32.const 3)))))
@@ -18504,10 +18576,8 @@ ${sum}
     (local $len i32)
     (local $i i32)
     (local.set $len (i32.load (local.get $arr)))
-    (if (i32.lt_s (local.get $start) (i32.const 0)) (then (local.set $start (i32.const 0))))
-    (if (i32.gt_s (local.get $start) (local.get $len)) (then (local.set $start (local.get $len))))
-    (if (i32.lt_s (local.get $end) (i32.const 0)) (then (local.set $end (i32.const 0))))
-    (if (i32.gt_s (local.get $end) (local.get $len)) (then (local.set $end (local.get $len))))
+    ${relIndexWat("$start")}
+    ${relIndexWat("$end")}
     (local.set $i (local.get $start))
     (block $brk
       (loop $lp
@@ -18774,56 +18844,63 @@ ${sum}
     (local.get $arr)
   )`,
         );
-      } else if (key === "splice_i32") {
-        // Remove count elements in-place starting at idx (4-byte elements).
-        parts.push(`  ;; Dynamic array splice_i32: remove count elements at idx in-place.
-  (func $__dynarr_splice_i32 (param $arr i32) (param $idx i32) (param $count i32)
+      } else if (key === "splice_i32" || key === "splice_f64") {
+        // splice as JavaScript (sw84, sw85, ld47; 2026-10-19): normalise idx (negative counts from
+        // the end, clamped to [0, len]) and count (clamped to [0, len - idx]); move the tail so a gap
+        // of $nins slots opens at idx (growing the array when it must); leave idx in $__splice_at
+        // for the caller, which stores the items there. Returns the (possibly new) array pointer.
+        // 8-byte slots (f64, i64, string (ptr, len) pairs) copy bit-identically through f64.
+        const w = key === "splice_f64" ? 3 : 2;
+        const ld = w === 3 ? "f64.load" : "i32.load";
+        const st = w === 3 ? "f64.store" : "i32.store";
+        const slot = (i: string) =>
+          `(i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl ${i} (i32.const ${w})))`;
+        parts.push(`  ;; Dynamic array ${key}: remove $count at $idx, open $nins slots there (JavaScript's splice).
+  (func $__dynarr_${key} (param $arr i32) (param $idx i32) (param $count i32) (param $nins i32) (result i32)
     (local $len i32)
+    (local $newlen i32)
+    (local $cap i32)
     (local $i i32)
-    (local $end i32)
     (local.set $len (i32.load (local.get $arr)))
-    (local.set $end (i32.sub (local.get $len) (local.get $count)))
-    (local.set $i (local.get $idx))
-    (block $brk
-      (loop $lp
-        (br_if $brk (i32.ge_u (local.get $i) (local.get $end)))
-        (i32.store
-          (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 2)))
-          (i32.load
-            (i32.add (i32.add (local.get $arr) (i32.const 8))
-              (i32.shl (i32.add (local.get $i) (local.get $count)) (i32.const 2)))))
-        (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br $lp)
-      )
-    )
-    (i32.store (local.get $arr) (local.get $end))
+    (if (i32.lt_s (local.get $idx) (i32.const 0)) (then (local.set $idx (i32.add (local.get $idx) (local.get $len)))))
+    (if (i32.lt_s (local.get $idx) (i32.const 0)) (then (local.set $idx (i32.const 0))))
+    (if (i32.gt_s (local.get $idx) (local.get $len)) (then (local.set $idx (local.get $len))))
+    (if (i32.lt_s (local.get $count) (i32.const 0)) (then (local.set $count (i32.const 0))))
+    (if (i32.gt_s (local.get $count) (i32.sub (local.get $len) (local.get $idx)))
+      (then (local.set $count (i32.sub (local.get $len) (local.get $idx)))))
+    (local.set $newlen (i32.add (i32.sub (local.get $len) (local.get $count)) (local.get $nins)))
+    (local.set $cap (i32.load offset=4 (local.get $arr)))
+    (if (i32.gt_u (local.get $newlen) (local.get $cap))
+      (then
+        (local.set $cap (select (i32.const 8) (i32.shl (local.get $cap) (i32.const 1)) (i32.eqz (local.get $cap))))
+        (if (i32.lt_u (local.get $cap) (local.get $newlen)) (then (local.set $cap (local.get $newlen))))
+        (local.set $arr (call $__dynarr_grow_${w === 3 ? "f64" : "i32"} (local.get $arr) (local.get $cap)))))
+    (if (i32.lt_u (local.get $nins) (local.get $count))
+      (then
+        ;; the tail moves LEFT: copy forwards
+        (local.set $i (i32.add (local.get $idx) (local.get $count)))
+        (block $brk
+          (loop $lp
+            (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
+            (${st} ${slot("(i32.add (i32.sub (local.get $i) (local.get $count)) (local.get $nins))")}
+              (${ld} ${slot("(local.get $i)")}))
+            (local.set $i (i32.add (local.get $i) (i32.const 1)))
+            (br $lp)))))
+    (if (i32.gt_u (local.get $nins) (local.get $count))
+      (then
+        ;; the tail moves RIGHT: copy backwards
+        (local.set $i (local.get $len))
+        (block $brk2
+          (loop $lp2
+            (br_if $brk2 (i32.le_u (local.get $i) (i32.add (local.get $idx) (local.get $count))))
+            (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+            (${st} ${slot("(i32.add (i32.sub (local.get $i) (local.get $count)) (local.get $nins))")}
+              (${ld} ${slot("(local.get $i)")}))
+            (br $lp2)))))
+    (i32.store (local.get $arr) (local.get $newlen))
+    (global.set $__splice_at (local.get $idx))
+    (local.get $arr)
   )`);
-      } else if (key === "splice_f64") {
-        // Remove count elements in-place starting at idx (8-byte elements; also used for string arrays).
-        parts.push(
-          `  ;; Dynamic array splice_f64: remove count elements at idx in-place (8-byte elements).
-  (func $__dynarr_splice_f64 (param $arr i32) (param $idx i32) (param $count i32)
-    (local $len i32)
-    (local $i i32)
-    (local $end i32)
-    (local.set $len (i32.load (local.get $arr)))
-    (local.set $end (i32.sub (local.get $len) (local.get $count)))
-    (local.set $i (local.get $idx))
-    (block $brk
-      (loop $lp
-        (br_if $brk (i32.ge_u (local.get $i) (local.get $end)))
-        (f64.store
-          (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3)))
-          (f64.load
-            (i32.add (i32.add (local.get $arr) (i32.const 8))
-              (i32.shl (i32.add (local.get $i) (local.get $count)) (i32.const 3)))))
-        (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br $lp)
-      )
-    )
-    (i32.store (local.get $arr) (local.get $end))
-  )`,
-        );
       } else if (key === "sort_string") {
         // Insertion sort for string arrays: compare pairs (ptr,len) lexicographically via $__str_cmp.
         this.needsStringHelpers = true;
@@ -19005,22 +19082,21 @@ ${sum}
   )
 
   ;; ── str_slice: return sub-range of existing string (no allocation) ───────────
-  ;; Clamps start/end to [0, len]. Returns (ptr+start, end-start).
+  ;; As JavaScript: a negative start/end counts from the end, then both clamp to [0, len] and end
+  ;; to >= start (it had substring's clamping: slice(-5) was the whole string, sw81, 2026-10-19).
+  ;; Returns (ptr+start, end-start).
   (func $__str_slice
     (param $ptr i32) (param $len i32) (param $start i32) (param $end i32)
     (result i32 i32)
     (local $cs i32) (local $ce i32)
-    ;; clamp start to [0, len]
-    (local.set $cs
-      (select (i32.const 0) (local.get $start) (i32.lt_s (local.get $start) (i32.const 0)))
-    )
-    (if (i32.gt_s (local.get $cs) (local.get $len))
-      (then (local.set $cs (local.get $len)))
-    )
-    ;; clamp end to [cs, len]
-    (local.set $ce
-      (select (local.get $len) (local.get $end) (i32.gt_s (local.get $end) (local.get $len)))
-    )
+    (local.set $cs (local.get $start))
+    (local.set $ce (local.get $end))
+    (if (i32.lt_s (local.get $cs) (i32.const 0)) (then (local.set $cs (i32.add (local.get $cs) (local.get $len)))))
+    (if (i32.lt_s (local.get $cs) (i32.const 0)) (then (local.set $cs (i32.const 0))))
+    (if (i32.gt_s (local.get $cs) (local.get $len)) (then (local.set $cs (local.get $len))))
+    (if (i32.lt_s (local.get $ce) (i32.const 0)) (then (local.set $ce (i32.add (local.get $ce) (local.get $len)))))
+    (if (i32.lt_s (local.get $ce) (i32.const 0)) (then (local.set $ce (i32.const 0))))
+    (if (i32.gt_s (local.get $ce) (local.get $len)) (then (local.set $ce (local.get $len))))
     (if (i32.lt_s (local.get $ce) (local.get $cs))
       (then (local.set $ce (local.get $cs)))
     )
@@ -19418,11 +19494,16 @@ ${sum}
           (br $ln)
         ))
         (local.set $cur (i32.add (local.get $pos) (i32.add (local.get $oldlen) (i32.const 0))))
-        ;; guard against zero-length old (avoid infinite loop)
+        ;; an empty old matches between every pair of bytes: copy the byte at $cur and step past it
+        ;; ("abc" → "-a-b-c-"). It stepped WITHOUT copying, so "abc" became "----" (sw91, 2026-10-19).
+        ;; Bytes, not UTF-16 units: a multi-byte character is split, as everywhere the helpers index.
         (if (i32.eqz (local.get $oldlen))
           (then
+            (if (i32.ge_u (local.get $cur) (local.get $len)) (then (br $done)))
+            (i32.store8 (i32.add (local.get $buf) (local.get $wi))
+              (i32.load8_u (i32.add (local.get $ptr) (local.get $cur))))
+            (local.set $wi (i32.add (local.get $wi) (i32.const 1)))
             (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
-            (if (i32.gt_u (local.get $cur) (local.get $len)) (then (br $done)))
           )
         )
         (br $loop)
@@ -19447,13 +19528,13 @@ ${sum}
     (param $ptr i32) (param $len i32) (param $target i32) (param $padptr i32) (param $padlen i32)
     (result i32 i32)
     (local $out i32) (local $need i32) (local $wi i32) (local $pi i32)
-    (if (i32.le_s (local.get $target) (local.get $len))
+    ;; an empty pad leaves the string as it is, as JavaScript (it padded with memory bytes, sw92)
+    (if (i32.or (i32.le_s (local.get $target) (local.get $len)) (i32.eqz (local.get $padlen)))
       (then (return (local.get $ptr) (local.get $len)))
     )
     (local.set $need (i32.sub (local.get $target) (local.get $len)))
     (local.set $out (call $__malloc (local.get $target)))
     ;; fill pad chars cycling through padstr
-    (if (i32.eqz (local.get $padlen)) (then (local.set $padlen (i32.const 1))))
     (block $dp (loop $lp
       (br_if $dp (i32.ge_u (local.get $wi) (local.get $need)))
       (local.set $pi (i32.rem_u (local.get $wi) (local.get $padlen)))
@@ -19480,7 +19561,8 @@ ${sum}
     (param $ptr i32) (param $len i32) (param $target i32) (param $padptr i32) (param $padlen i32)
     (result i32 i32)
     (local $out i32) (local $need i32) (local $wi i32) (local $pi i32)
-    (if (i32.le_s (local.get $target) (local.get $len))
+    ;; an empty pad leaves the string as it is, as JavaScript (it padded with memory bytes, sw92)
+    (if (i32.or (i32.le_s (local.get $target) (local.get $len)) (i32.eqz (local.get $padlen)))
       (then (return (local.get $ptr) (local.get $len)))
     )
     (local.set $need (i32.sub (local.get $target) (local.get $len)))
@@ -19494,7 +19576,6 @@ ${sum}
       (br $ls)
     ))
     ;; fill pad chars
-    (if (i32.eqz (local.get $padlen)) (then (local.set $padlen (i32.const 1))))
     (block $dp (loop $lp
       (br_if $dp (i32.ge_u (local.get $wi) (local.get $target)))
       (local.set $pi (i32.rem_u (i32.sub (local.get $wi) (local.get $len)) (local.get $padlen)))

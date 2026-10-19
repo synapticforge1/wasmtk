@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 35 | 100 | 0 | 27 |
-| LOUD | 40 | 57 | 10 | 9 |
+| SILENT-WRONG | 27 | 108 | 0 | 27 |
+| LOUD | 39 | 58 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 35; in the tools: 0** (2026-10-19, later: the last tool rows
+**Open silent-wrong in the compiler: 27; in the tools: 0** (2026-10-19, latest: the index-
+normalisation group sw80–sw85, sw91, sw92 fixed, with loud ld47; tests `28_RelativeIndexMethods`,
+`28_SpliceItemReadsArrayRefused`). Before that, 35 compiler, 0 tools (2026-10-19, later: the last tool rows
 sw111, sw115–sw118 fixed, `tests/tool_rows_tests.ts`; all ten round-2 tool rows are closed).
 Before that, 35 (2026-10-19: sw119, i32 overflow, opened by the owner's
 ruling; the owner also decided sw87, sw95 and ld88, design-decisions.md § "Owner's rulings of
@@ -281,19 +283,19 @@ overwrite user files (sw113) at the top.
 | sw77 | a spread literal drops its plain elements (`[...a, ...b, 5]`, `[0, ...a, 7]`) | wasic ~13172 keeps only `...` parts |
 | sw78 | `[...a]` aliases `a` (a push / store through the copy changes `a`) | `emitSpreadArrayInit` ~7038 `local.set` of the first spread |
 | sw79 | a spread of string arrays copies 4-byte slots, not (ptr, len) pairs | ~7023 picks `concat_i32` |
-| sw80 | array `slice` with a negative index clamps to 0 (`slice(-2)` is the whole array) | `$__dynarr_slice_*` ~18159, string-array slice ~18193 |
-| sw81 | string `slice` with a negative index (`"hello world".slice(-5)` is the whole string; `slice(1,-1)` is `""`) | `$__str_slice` ~19009 has substring semantics |
-| sw82 | array `fill` with a negative start / end clamps to 0 | ~18502 |
-| sw83 | typed-array `fill` with a negative start does nothing | `$__ta_fill_*` ~17848 |
-| sw84 | `splice` drops insertion arguments; a one-argument `splice(i)` removes one element | ~13960: only args 0 and 1, count defaults to 1 |
-| sw85 | `splice` with a negative index removes the last element | `$__dynarr_splice_*` ~18775 (no normalisation; ld47 is its trap) |
+| ~~sw80~~ | ✅ FIXED 2026-10-19: one normalisation, `relIndexWat` (negative counts from the end, then clamp to [0, len]), in the numeric and string-array slice helpers. Test `28_RelativeIndexMethods`. Was: array `slice` with a negative index clamps to 0 (`slice(-2)` is the whole array) | `$__dynarr_slice_*` ~18159, string-array slice ~18193 |
+| ~~sw81~~ | ✅ FIXED 2026-10-19: `$__str_slice` normalises as JavaScript (no other caller relied on substring's clamping; the console hands `.slice` to wasic). Test `28_RelativeIndexMethods`. Was: string `slice` with a negative index (`"hello world".slice(-5)` is the whole string; `slice(1,-1)` is `""`) | `$__str_slice` ~19009 has substring semantics |
+| ~~sw82~~ | ✅ FIXED 2026-10-19 with sw80 (`relIndexWat`). Was: array `fill` with a negative start / end clamps to 0 | ~18502 |
+| ~~sw83~~ | ✅ FIXED 2026-10-19 with sw80 (`relIndexWat`; the helper had no clamping at all). Was: typed-array `fill` with a negative start does nothing | `$__ta_fill_*` ~17848 |
+| ~~sw84~~ | ✅ FIXED 2026-10-19: splice is ONE helper per slot width (4 / 8 bytes): it normalises idx and count, moves the tail to open a gap of N slots (growing the array), leaves idx in `$__splice_at`, and returns the array pointer (re-stored, as push does); the caller stores the items there (scalars, strings, struct literals). A missing count removes to the end. An item that READS the spliced array is refused (it would read it changed): test `28_SpliceItemReadsArrayRefused`. Test `28_RelativeIndexMethods`. Was: `splice` drops insertion arguments; a one-argument `splice(i)` removes one element | ~13960: only args 0 and 1, count defaults to 1 |
+| ~~sw85~~ | ✅ FIXED 2026-10-19 with sw84 (with ld47). Was: `splice` with a negative index removes the last element | `$__dynarr_splice_*` ~18775 (no normalisation; ld47 is its trap) |
 | sw86 | `charCodeAt` out of range gives -1, not NaN (`isNaN(s.charCodeAt(9))` false) | ~19222 |
 | sw87 | a bare numeric `sort()` sorts numerically; JavaScript sorts as strings (`1,10,100,9`). **Owner 2026-10-19: follow JavaScript** (a JS function does what JS intends) | `sort_<T>` ~10191 / ~14152 (dynrt documents the deviation, wasic does not) |
 | sw88 | `split("")` gives the whole string as one part | ~19550 "treat as no-split" |
 | sw89 | `reduce` with no initial value starts the accumulator at 0 (a product is 0) | ~10234 `zeroOf` |
 | sw90 | `find` returns a sentinel: a found -1 reads as undefined, a miss is not `=== undefined` | ~18299 |
-| sw91 | `replaceAll("", x)` loses the original characters (`abc` → `----`) | ~19415 skips the byte |
-| sw92 | `padStart` / `padEnd` with an empty pad pads with memory bytes | ~19451, ~19492 force `padlen` 1 |
+| ~~sw91~~ | ✅ FIXED 2026-10-19: the empty-match step copies the byte it steps past (`-a-b-c-`); bytes, not UTF-16 units. Test `28_RelativeIndexMethods`. Was: `replaceAll("", x)` loses the original characters (`abc` → `----`) | ~19415 skips the byte |
+| ~~sw92~~ | ✅ FIXED 2026-10-19: an empty pad returns the string unchanged (a missing pad is still a space, from the call site). Test `28_RelativeIndexMethods`. Was: `padStart` / `padEnd` with an empty pad pads with memory bytes | ~19451, ~19492 force `padlen` 1 |
 | sw93 | `x.toString(radix)` of an f64 truncates to i32 (`255.5` → `ff`) | ~7742 (ld51 is its trap) |
 | sw94 | `includes(NaN)` false on an f64 array (SameValueZero) | ~10110 = `indexOf != -1` |
 | sw95 | an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner 2026-10-19: give `undefined`, as for strings; a float array index keeps D3's conversion** | design-decisions.md § "Owner's rulings of 2026-10-19" |
@@ -326,7 +328,7 @@ overwrite user files (sw113) at the top.
 | ~~sw117~~ | ✅ FIXED 2026-10-19: the output path is resolved against the working directory before the toolchain runs (`cwd: baseDir`), and `report()` checks the artifact as zigwasic's does (missing or empty: `success: false`). Test `tests/tool_rows_tests.ts` (needs TinyGo; skipped and said so without it). Was: Go `build -o out/x.wasm` (relative) writes beside the SOURCE and reports success at the given path | gowasic.ts ~203/241/426 unresolved; `report()` ~573 unchecked (Zig's was fixed 2026-08-24) |
 | ~~sw118~~ | ✅ FIXED 2026-10-19: the first export keeps a WIT name, a later one kebabing to it is listed as `// skipped export foo_bar: its WIT name 'foo-bar' is already fooBar's`; `witPackageName` makes the package a WIT identifier (`2048` → `m2048`). The orphaned doc comment at witgen.ts:35 went with it. Test `tests/tool_rows_tests.ts`. Was: `witgen` writes duplicate exports (`fooBar`, `foo_bar` → `foo-bar` twice); package names unchecked (`local:2048`) | witgen.ts ~98, ~86 |
 
-**Loud, compiler** (`round2/loud/`): ld47 `splice(3, 10)` traps (count unclamped); ld48 `pop()` of
+**Loud, compiler** (`round2/loud/`): ~~ld47~~ FIXED 2026-10-19 with sw84 (the count is clamped) `splice(3, 10)` traps (count unclamped); ld48 `pop()` of
 an empty array traps; ld49 an f64 comparator in `sort` (signature mismatch); ld50 `flat()` on 1-D
 (the stub at ~10198 has no diagnostic); ld51 `(2**32).toString(16)` traps; ld52 `string[].sort()`
 (`$__str_cmp` undefined); ld53 `s.at(9)` (IR error); ld54 a struct FIELD operand never converted
