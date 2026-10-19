@@ -114,6 +114,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw86 / sw88 / sw89 / sw90 / sw93 / sw94 (+ ld51; method edge cases), gate
+> GREEN.** wasi **477/477** (+`28_MethodEdgeCases`, failing on the old compiler) · golden-WAT
+> **534**, 73 moved, each reviewed by function: the `$__str_split` helper (68, incl. the dynrt
+> library's copy), `find`'s flag and its two `__null` reads (`12_ArrayMethods`), the charCodeAt NaN
+> `select` in f64 contexts (`27_file-paths`, `27_number-parsing`, `27_string-formatting`) · failed
+> compiles 10 · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · api-surface
+> unchanged.
+
 > **2026-10-19, sw96 / sw98 / sw102 / sw103 (+ sw75; console printing), gate GREEN.** wasi
 > **476/476** (+`7i_ConsoleUnaryBoolStringFields`, +`7i_NullishStringFieldRefused` `@expect-fail:
 > compile`; both fail on the old compiler) · golden-WAT **533**, nothing else moved (a first try
