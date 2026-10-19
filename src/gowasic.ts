@@ -200,7 +200,9 @@ export async function compileGoWasi(input: string, opts: GoCompileOptions = {}):
   const runtime: GoRuntime = opts.runtime ?? "tinygo";
   const target: GoTarget = opts.target ?? "wasip1";
   const { baseDir, buildArg, name } = await resolveBuild(input);
-  const out = opts.outPath ?? join(baseDir, `${name}.wasm`);
+  // ABSOLUTE: the toolchain runs with `cwd: baseDir`, so a relative `-o out/x.wasm` was written
+  // under the SOURCE directory while success was reported at the path given (sw117, 2026-10-19).
+  const out = resolve(opts.outPath ?? join(baseDir, `${name}.wasm`));
   return runtime === "std"
     ? await buildWithStd(baseDir, buildArg, out, target)
     : await buildWithTinyGo(baseDir, buildArg, out, target);
@@ -571,10 +573,22 @@ func main() {
 `;
 
 async function report(out: string, how: string): Promise<GoResult> {
+  // The size read is the ARTIFACT CHECK, as in zigwasic's report() (fixed there 2026-08-24, left
+  // half-fixed here: a build that wrote nothing at `out` was announced as success; sw117).
   let size = 0;
   try {
     size = (await rt.readFile(out)).length;
-  } catch { /* ignore */ }
-  console.log(`✅ Go → wasm (${how}): ${out}${size ? ` (${size} bytes)` : ""}`);
+  } catch (e) {
+    console.error(
+      `❌ wasmtk (go): the build reported success but ${out} could not be read: ` +
+        `${e instanceof Error ? e.message : e}`,
+    );
+    return { success: false, error: `output missing after build: ${out}` };
+  }
+  if (size === 0) {
+    console.error(`❌ wasmtk (go): the build reported success but ${out} is empty (0 bytes).`);
+    return { success: false, error: `empty output after build: ${out}` };
+  }
+  console.log(`✅ Go → wasm (${how}): ${out} (${size} bytes)`);
   return { success: true, outputPath: out };
 }

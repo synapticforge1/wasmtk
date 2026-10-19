@@ -12,7 +12,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > pushed, published or tagged). Done today: binaryang 1.12.1 pinned (`go_asyncify` 12 / 12, count
 > sent); the `wasmValidate` letter answered; all 21 loud rows of 2026-10-13 closed (two batches,
 > with sw72–sw74 found and fixed); the owner's string-index ruling built (sw71); audit round 2
-> (below). **Resume with:** the fix order below (sw113 first), then items 3–5 (binaryang 1.10.0
+> (below). **Resume with:** the fix order below (steps 1–2b done 2026-10-19; step 3, the compiler silent
+> rows, next), then items 3–5 (binaryang 1.10.0
 > items, H10, nullable gaps).
 >
 > **Owner's answers, 2026-10-19: all four questions decided, none built yet** (design-decisions.md
@@ -33,7 +34,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > overwriting its INPUT file~~ **DONE 2026-10-19** (with sw114; `src/outpath.ts`,
 > `tests/outpath_tests.ts`); (2) ~~sw109 / sw110 / sw112~~ **DONE 2026-10-19** (with ld86;
 > `tests/merge_layout_tests.ts`; sw112 as a refusal), merges and bundles that
-> mis-seat data or rename wrongly; (3) the compiler silent rows grouped by root: array / string
+> mis-seat data or rename wrongly; (2b) ~~the other tool rows sw111, sw115–sw118~~ **DONE
+> 2026-10-19** (`tests/tool_rows_tests.ts`): **all ten silent tool rows are closed**; (3) the compiler silent rows grouped by root: array / string
 > helper index normalisation (sw80–sw85, sw81, sw91, sw92), spread (sw77–sw79), string-array
 > paths (sw76, sw107), finally (sw106), block scoping (sw104, sw105), console unary / boolean /
 > pointer printing (sw96, sw98, sw102, sw103), then the rest; (4) the loud rows. **Owner's

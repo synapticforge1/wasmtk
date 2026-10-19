@@ -387,7 +387,8 @@ Options:
           Deno.exit(1);
         }
       }
-      await runWasi(target, []);
+      // the arguments after the target go to the program (they were dropped: `[]`, sw115)
+      await runWasi(target, args._.slice(2).map(String));
       break;
     }
     case "mod": {

@@ -220,6 +220,7 @@ deno run --allow-read --allow-write --allow-run --allow-env tests/wasi_tests.ts 
 #    bindgen bundle merge mod varscope jstyper dync_conformance dync_cross_runtime
 #    outpath (2026-10-19, sw113: no command writes over its input; runs the INSTALLED wasmtk)
 #    merge_layout (2026-10-19, sw109 / sw110 / sw112 / ld86: merged and bundled data layout)
+#    tool_rows (2026-10-19, sw111 / sw115–sw118: dual exports, run argv, numeric args, Go -o, WIT names; 16)
 
 # 2b. hybrid + wasmmerge_guard are Deno.test-based — `deno run` runs NOTHING and exits 0
 deno test --no-check --allow-read --allow-write --allow-run --allow-env \
@@ -237,7 +238,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 #    The known failures print in red every run by design; the gate fails only if a count MOVES.
 
 # 5. engine_cross_check → expect 1152 pairs on baseline (2026-09-30), 0 regressed, 0 improved;
-#    15 pairs (the five `36_*` modules) are not in the baseline yet
+#    111 pairs are not in the baseline (re-read 2026-10-19; it said 15, the five `36_*` modules, in 2026-09-30)
 deno run --allow-read --allow-run --allow-env --allow-write tests/engine_cross_check_tests.ts
 #    Multi-engine (V8 vs wasmtime/wasmer/wazero). Absent engines skip, never fail.
 #    An IMPROVEMENT fails too, until the baseline is re-recorded deliberately.

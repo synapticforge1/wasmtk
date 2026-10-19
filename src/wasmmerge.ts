@@ -457,8 +457,10 @@ export function mergeWasmWat(
 
   // importFuncIdx → { module, name }
   const importMap = new Map<number, { module: string; name: string }>();
-  // funcIdx (absolute, including imports) → export name
-  const exportFuncMap = new Map<number, string>();
+  // funcIdx (absolute, including imports) → its export NAMES. A list: one function exported under
+  // two names (`twice` and `double`) kept only the last, so a bundle lost an export and a wasic
+  // merge called an unknown function (sw111, 2026-10-19).
+  const exportFuncMap = new Map<number, string[]>();
   // funcIdx → WAT type index string (for resolving signatures)
   const funcTypeIndexMap = new Map<number, number>();
   // funcIdx → inline signature, for disassemblies that emit `(func (;N;) (param ...)
@@ -491,7 +493,8 @@ export function mergeWasmWat(
       // (export "name" (func N)) — index is a plain number, not (;N;)
       const expM = form.match(/\(export\s+"([^"]+)"\s+\(func\s+(\d+)\)\)/);
       if (expM) {
-        exportFuncMap.set(parseInt(expM[2]), expM[1]);
+        const fi = parseInt(expM[2]);
+        exportFuncMap.set(fi, [...(exportFuncMap.get(fi) ?? []), expM[1]]);
       }
       // A wasic library exports its heap pointer (`__heap_ptr`), so the allocator unifies even when
       // the optimizer has inlined `$__malloc` away (see below).
@@ -562,11 +565,11 @@ export function mergeWasmWat(
 
   // Strip entry-only from export map
   if (!skipEntryStrip) {
-    for (const [idx, name] of exportFuncMap) {
-      if (ENTRY_ONLY_NAMES.has(name)) {
-        strippedNames.push(name);
-        exportFuncMap.delete(idx);
-      }
+    for (const [idx, names] of exportFuncMap) {
+      const kept = names.filter((name) => !ENTRY_ONLY_NAMES.has(name));
+      strippedNames.push(...names.filter((name) => ENTRY_ONLY_NAMES.has(name)));
+      if (kept.length === 0) exportFuncMap.delete(idx);
+      else exportFuncMap.set(idx, kept);
     }
   }
   // Find import indices for entry-only WASI functions
@@ -610,10 +613,11 @@ export function mergeWasmWat(
     }
   }
 
-  // Exported non-import functions → prefix_exportName
-  for (const [idx, exportName] of exportFuncMap) {
+  // Exported non-import functions → prefix_exportName (its FIRST export name; the others get a
+  // forwarder below)
+  for (const [idx, names] of exportFuncMap) {
     if (!importMap.has(idx)) {
-      funcName.set(idx, `$${prefix}_${exportName}`);
+      funcName.set(idx, `$${prefix}_${names[0]}`);
     }
   }
 
@@ -638,15 +642,27 @@ export function mergeWasmWat(
   // ── Build ExternalFuncDef list ────────────────────────────────────────────
 
   const exportedFuncs: ExternalFuncDef[] = [];
-  for (const [idx, exportName] of exportFuncMap) {
+  // A function's second and later export names, as forwarders calling the first (sw111): the
+  // host calls `$prefix_<name>` for whichever name it imported.
+  const forwarders: string[] = [];
+  for (const [idx, names] of exportFuncMap) {
     if (importMap.has(idx)) continue; // skip WASI re-exports
     const typeIdx = funcTypeIndexMap.get(idx);
     const sig = typeIdx !== undefined ? typeTable.get(typeIdx) : funcInlineSig.get(idx);
-    exportedFuncs.push({
-      name: `${prefix}_${exportName}`,
-      params: sig?.params ?? [],
-      result: sig?.result ?? null,
-    });
+    for (const [k, exportName] of names.entries()) {
+      exportedFuncs.push({
+        name: `${prefix}_${exportName}`,
+        params: sig?.params ?? [],
+        result: sig?.result ?? null,
+      });
+      if (k === 0) continue;
+      const ps = sig?.params ?? [];
+      forwarders.push(
+        `(func $${prefix}_${exportName} ${ps.map((t, i) => `(param $p${i} ${t})`).join(" ")}` +
+          `${sig?.result ? ` (result ${sig.result})` : ""} ${ps.map((_, i) => `local.get $p${i}`).join(" ")}` +
+          ` call ${funcName.get(idx)})`,
+      );
+    }
   }
 
   // ── Build exportMap (original name → mangled internal name) ─────────────
@@ -656,10 +672,10 @@ export function mergeWasmWat(
   // understand the internal symbol mapping without re-deriving it.
 
   const exportMap = new Map<string, string>();
-  for (const [idx, exportName] of exportFuncMap) {
+  for (const [idx, names] of exportFuncMap) {
     if (importMap.has(idx)) continue;
     const internalName = funcName.get(idx) ?? `$${prefix}__fn${idx}`;
-    exportMap.set(exportName, internalName);
+    for (const exportName of names) exportMap.set(exportName, internalName); // every name (sw111)
   }
 
   // ── Build export declarations (wasmbundle mode) ───────────────────────────
@@ -1039,7 +1055,7 @@ export function mergeWasmWat(
 
   return {
     importWat: importParts.join("\n  "),
-    funcWat: funcParts.join("\n  "),
+    funcWat: [...funcParts, ...forwarders].join("\n  "),
     globalWat: globalParts.join("\n  "),
     dataWat: dataParts.join("\n  "),
     wasiImportNames,
