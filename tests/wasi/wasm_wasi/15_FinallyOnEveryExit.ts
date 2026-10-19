@@ -167,3 +167,86 @@ try {
   hits += 50;
 }
 console.log(hits);
+
+// A throw FROM finally leaves the whole try statement: its own catch does not see it, and the
+// finally does not run twice. When a return / break ran it, it ran inside the try, and that try's
+// handlers caught it (catch, then finally again: "3 1013" for "3 11").
+log = 0;
+function boom(n: i32): void {
+  if (n > 0) throw new Error("fin");
+}
+function retThrow(): i32 {
+  try {
+    try {
+      return 1;
+    } catch (e) {
+      log += 1000;
+      return 2;
+    } finally {
+      log += 1;
+      boom(1);
+    }
+  } catch (e2) {
+    log += 10;
+    return 3;
+  }
+}
+console.log(retThrow(), log);
+log = 0;
+for (let i: i32 = 0; i < 3; i++) {
+  try {
+    try {
+      if (i === 1) break;
+      log += 1;
+    } finally {
+      log += 100;
+      boom(i);
+    }
+  } catch (e) {
+    log += 10000;
+  }
+}
+console.log(log);
+log = 0;
+try {
+  try {
+    log += 1;
+  } catch (e) {
+    log += 1000;
+  } finally {
+    log += 10;
+    boom(1);
+  }
+} catch (e) {
+  log += 100;
+}
+console.log(log);
+log = 0;
+function nestedRet(): i32 {
+  try {
+    try {
+      return 5;
+    } finally {
+      log += 1;
+      boom(1);
+    }
+  } finally {
+    log += 10;
+  }
+}
+try {
+  console.log(nestedRet());
+} catch (e) {
+  log += 100;
+}
+console.log(log);
+log = 0;
+function noThrow(): i32 {
+  try {
+    return 7;
+  } finally {
+    log += 1;
+    boom(0);
+  }
+}
+console.log(noThrow(), log);
