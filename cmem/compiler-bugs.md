@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 35 | 100 | 8 | 19 |
-| LOUD | 40 | 57 | 11 | 8 |
+| SILENT-WRONG | 35 | 100 | 5 | 22 |
+| LOUD | 40 | 57 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -313,10 +313,10 @@ overwrite user files (sw113) at the top.
 
 | id | defect | where |
 | --- | --- | --- |
-| sw109 | `wasmbundle` seats every module's data at the same address (the second library's bytes read from the first's address) | `getDataMaxEnd` ~wasmbundle.ts:143 misses binaryang's `(offset (i32.const N))` form |
-| sw110 | a wasic merge seats the heap INSIDE a merged library's data (`79 79 200` → `79 7 200`) | wasic.ts ~23103 advances by global 0's init, not the data extent |
+| ~~sw109~~ | ✅ FIXED 2026-10-19: `wasmmerge.dataExtent`, THE one data-extent reader (any offset bracketing, every string piece, named escapes counted once), replaces wasmbundle's own regex. Test `tests/merge_layout_tests.ts`. Was: `wasmbundle` seats every module's data at the same address (the second library's bytes read from the first's address) | `getDataMaxEnd` ~wasmbundle.ts:143 misses binaryang's `(offset (i32.const N))` form |
+| ~~sw110~~ | ✅ FIXED 2026-10-19: the next base is the HIGHEST of the library's data end (`dataExtent`), its exported `__heap_ptr`, and (as before) a mutable i32 global 0, 8-aligned; no 260 fallback. 46 pipeline goldens moved, each ONLY `$__heap_ptr`'s initial value, up 2–4 bytes (the alignment). Test `tests/merge_layout_tests.ts`. Was: a wasic merge seats the heap INSIDE a merged library's data (`79 79 200` → `79 7 200`) | wasic.ts ~23103 advances by global 0's init, not the data extent |
 | sw111 | a function exported under two names keeps only the last | `exportFuncMap` by index, wasmmerge.ts ~457 |
-| sw112 | the bundler does not prefix a file's PRIVATE top-level names, so they collide with the entry's (`6 100` → `200 100`) | tsbundler.ts ~661 renames exports only |
+| ~~sw112~~ | ✅ FIXED 2026-10-19 as a REFUSAL: two files of one program declaring the same top-level value name (`function` / `const` / `let` / `var` / `class` / `enum`) stop with "the top-level name 'x' is declared in both …" (tsbundler step 6). Prefixing private names safely needs a parser (object keys, interface fields, shorthand share the spelling); `type` / `interface` repeats are allowed (`type i32 = number` everywhere). wasic no longer words every bundler error "Cannot read". Test `tests/merge_layout_tests.ts`. Was: the bundler does not prefix a file's PRIVATE top-level names, so they collide with the entry's (`6 100` → `200 100`) | tsbundler.ts ~661 renames exports only |
 | ~~sw113~~ | ✅ FIXED 2026-10-19: one helper, `src/outpath.ts` (`defaultOutPath` replaces a known extension in any case, else APPENDS the new one; `assertNotInput` / `samePath` refuse any write that resolves to the input, an explicit `-o` included, case-insensitively on Windows), used by convert, wasm2js, tsbundle, bindgen, jstyper (its `.d.ts` path too) and wasic's `.ts` / `.wat` / library compiles and their sidecar `.wat` / `.wit`. Test `tests/outpath_tests.ts` (12 cases; all 12 fail on the old code, 10 of them destroying the input). Was: **default output paths can overwrite the INPUT** (`convert lib.bin`, `wasm2js`, `tsbundle entry.mts`, `bindgen H2.WIT`, `jstyper calc.mjs` empties the source) | unanchored / case-sensitive extension replaces: utils.ts:531, :503, main.ts:428, bindgen.ts:649, jstyper.ts:345, :370, :333 |
 | ~~sw114~~ | ✅ FIXED 2026-10-19 with sw113: `compileWasi` checks `compileWat`'s result and exits 1. Test `tests/outpath_tests.ts`. Was: `wasmtk wasic broken.wat` exits 0 after "unknown operator" | `compileWasi` ignores `compileWat`'s result, wasic.ts ~23333 |
 | sw115 | `wasmtk run x.ts one two` drops the arguments; WASI `args_sizes_get` is 0; the library-call branch is unreachable | main.ts:390 passes `[]`; utils.ts:146 |
@@ -355,7 +355,8 @@ to 131072 in a 1-page bundle: out of bounds); ld82 `bindgen` host imports with a
 never link (`display_show_value` vs `display_showValue`); ld83 the deno binding cannot load a
 relative path (`fetch(String(source))`), and a typed-array view ignores byteOffset; ld84 the bundler
 handles neither `export class` nor `export { name }`; ld85 two imports with the same basename
-collide (`duplicate func $util_add`); ld86 the merge scanners count `(` `)` inside data strings;
+collide (`duplicate func $util_add`); ~~ld86~~ FIXED 2026-10-19 (`extractForms` skips string
+literals; `tests/merge_layout_tests.ts`) the merge scanners count `(` `)` inside data strings;
 ld87 `mod` cannot call an i64 function; ld88 `wast` exits 0 with ✅ when modules are not built (or
 on an empty directory) — **owner 2026-10-19: exit 1 unless the unbuilt module is on a known
 list; 0 files always fails**; ld89 `dync` leaves `<name>.__dync.ts` on

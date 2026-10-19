@@ -219,6 +219,7 @@ deno run --allow-read --allow-write --allow-run --allow-env tests/wasi_tests.ts 
 # 2. every non-Go suite — `deno run`, each prints its own summary
 #    bindgen bundle merge mod varscope jstyper dync_conformance dync_cross_runtime
 #    outpath (2026-10-19, sw113: no command writes over its input; runs the INSTALLED wasmtk)
+#    merge_layout (2026-10-19, sw109 / sw110 / sw112 / ld86: merged and bundled data layout)
 
 # 2b. hybrid + wasmmerge_guard are Deno.test-based — `deno run` runs NOTHING and exits 0
 deno test --no-check --allow-read --allow-write --allow-run --allow-env \
