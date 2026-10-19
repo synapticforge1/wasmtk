@@ -13,8 +13,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > sent); the `wasmValidate` letter answered; all 21 loud rows of 2026-10-13 closed (two batches,
 > with sw72–sw74 found and fixed); the owner's string-index ruling built (sw71); audit round 2
 > (below). **Resume with:** the fix order below (steps 1–2b done 2026-10-19; step 3, the compiler silent
-> rows: the index, spread, string-array, finally and block-scoping groups done; console printing
-> sw96 / sw98 / sw102 / sw103 next), then items 3–5 (binaryang 1.10.0
+> rows: the index, spread, string-array, finally, block-scoping and console groups done; "the
+> rest" next: sw86, sw88–sw90, sw93, sw94, sw97, sw99–sw101, sw108, sw121, then the owner-ruled
+> sw95, sw87, sw119 and ld88; sw120 goes with the nullable gaps, item 5), then items 3–5 (binaryang 1.10.0
 > items, H10, nullable gaps).
 >
 > **Owner's answers, 2026-10-19: all four questions decided, none built yet** (design-decisions.md
@@ -41,7 +42,9 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > `28_RelativeIndexMethods`), ~~spread (sw77–sw79), string-array
 > paths (sw76, sw107)~~ **DONE 2026-10-19** (`28_SpreadLiterals`, `28_StringArrayJoinSearch`), ~~finally~~ **DONE 2026-10-19**
 > (`15_FinallyOnEveryExit`; a throw from finally too, the owner's follow-up), ~~block scoping
-> (sw104, sw105)~~ **DONE 2026-10-19** (`5e_BlockScopedDeclarations`) (sw106), block scoping (sw104, sw105), console unary / boolean /
+> (sw104, sw105)~~ **DONE 2026-10-19** (`5e_BlockScopedDeclarations`), ~~console printing (sw96,
+> sw98, sw102, sw103)~~ **DONE 2026-10-19** (with sw75; `7i_ConsoleUnaryBoolStringFields`; found
+> sw120 null string fields, sw121 a struct variable as an array-literal element) (sw106), block scoping (sw104, sw105), console unary / boolean /
 > pointer printing (sw96, sw98, sw102, sw103), then the rest; (4) the loud rows. **Owner's
 > questions:** sw95 (array out-of-range reads: refuse, or undefined like the string ruling?),
 > sw87 (a bare numeric `sort()`: implement string order, or refuse?), ld88 (`wast` exits 0 on
