@@ -12,8 +12,18 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > pushed, published or tagged). Done today: binaryang 1.12.1 pinned (`go_asyncify` 12 / 12, count
 > sent); the `wasmValidate` letter answered; all 21 loud rows of 2026-10-13 closed (two batches,
 > with sw72–sw74 found and fixed); the owner's string-index ruling built (sw71); audit round 2
-> (below). **Resume with:** the owner's answers to the four questions below, then the fix order
-> below (sw113 first), then items 3–5 (binaryang 1.10.0 items, H10, nullable gaps).
+> (below). **Resume with:** the fix order below (sw113 first), then items 3–5 (binaryang 1.10.0
+> items, H10, nullable gaps).
+>
+> **Owner's answers, 2026-10-19: all four questions decided, none built yet** (design-decisions.md
+> § "Owner's rulings of 2026-10-19"): (1) an out-of-range ARRAY read gives `undefined`, as for
+> strings; a float array index keeps D3's conversion (sw95); (2) semantics follow the function's
+> origin: a JavaScript / TypeScript function does what JavaScript does (sw87: a bare numeric
+> `sort()` sorts as strings), a wasm-specific function does what the wasm instruction does; (3)
+> `wasmtk wast` exits 1 on an unbuilt module not on a known list and on 0 files (ld88); (4) i32
+> overflow: `+ - *` give JavaScript's result, and storing a value that does not fit an `i32` slot
+> throws a run-time error; wrapping is wasMath's `i32.*` (new row sw119; measure the corpus
+> before building). All four join the round-2 fix order.
 >
 > **2026-10-15: Phase 0b audit round 2 DONE (item 2 of the owner's list)** — compiler-bugs.md §
 > "audit round 2". Four parallel auditors, every row RUN; repros in `scripts/phase0/round2/`.

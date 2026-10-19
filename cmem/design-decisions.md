@@ -385,6 +385,31 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     JavaScript does), and a string compared with `undefined` / `null` calls `$__str_is_nullish`
     (no text, or that marker). Edges kept, documented in sw71: `.length` of it is 9, and it equals
     the string "undefined". `charAt` out of range stays `""`. 3 corpus programs migrated.
+  - **Owner's rulings of 2026-10-19 (NOT BUILT yet):**
+    1. **An out-of-range ARRAY read gives `undefined`, as for strings (sw95).** Only that half
+       of the string rule: a FLOAT array index keeps D3's conversion (asked: "out-of-range
+       only"; about 26 corpus programs index arrays with a `number`). Shape: mirror sw71, a
+       marker the element read returns out of range, printing `undefined`, `=== undefined` true.
+    2. **Semantics follow the function's ORIGIN.** A JavaScript / TypeScript function, method or
+       operator does what JavaScript intends (a bare numeric `sort()` sorts as strings, sw87; the
+       round-2 method edge cases follow JavaScript); a WASM-specific function (wasMath's `i32.*`,
+       `f64.*` …) does what the wasm instruction intends.
+    3. **`wasmtk wast` exits 1 on an unbuilt module that is not on a known-unbuilt list, and on
+       a run that finds 0 files** (ld88; option C of those discussed: the gate's "fails only
+       when a count moves" rule, applied to the user-facing command).
+    4. **i32 overflow (sw119).** JavaScript has no `i32`; it is wasMath's alias for `number`, so
+       under Deno `m * m` of two "i32" 65536 is 4294967296 and never errors. By rule 2 the
+       OPERATOR is JavaScript's and gives JavaScript's result; the 32-bit limit is the wasMath
+       TYPE's. So `+` `-` `*` on i32 values compute as JavaScript (f64, which IS JavaScript's
+       arithmetic), and **storing a value that does not fit a slot declared `i32` throws a
+       run-time error naming the operator and the type** (recorded as run time, raised only on
+       an actual overflow; the owner was asked to say if compile-time refusal was meant).
+       Deliberate wrapping is wasMath's `i32.add` / `i32.mul` / `f64.toI32Wrap`. Bitwise ops keep
+       ToInt32 (JavaScript's own wrap, ld29); integer `/` stays refused. This replaces "the
+       declared type decides" (2026-09-30) for `+` `-` `*`. Before building: measure how many
+       corpus programs store an out-of-range value (hashes, mulberry32 will move to wasMath) and
+       the cost to integer-heavy code (a range check at every i32 store; later, skip provably
+       safe ones such as `i++` bounded by a length).
   - **An f32 is converted at every f32 boundary, by ONE rule** (2026-10-06, ld18 / sw43):
     `emitExpr` wraps the emitter, reads the emitted WAT's result type from its outermost form
     (`watResultType`) and converts when exactly one side is f32. A new leaf path need not know
