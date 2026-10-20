@@ -8,6 +8,40 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## DRAFT (not yet sent) — 2026-10-20: 1.13.0 pinned; wast 64,506 / 0 / 16, guard 0, `go_asyncify` 12 / 12
+
+**Short version:** we bumped wasmtk's pin from 1.12.1 to **1.13.0** (all three specifiers:
+`compat/binaryen`, `wasm-validate`, `compat/wabt`) and ran the full gate. Everything is green, and
+nothing is carried as known-failing.
+
+**The numbers you asked for:**
+
+- **wast gate: 288 files, 64,506 passed, 0 failed, 16 skipped** (33 of the passes on 23 modules
+  lowered for custom page sizes), exactly as on 1.12.1. The gate pins every file's pass AND skip
+  count, so the per-file answer is the same: **`assert_invalid` passes equal, skips equal**, in
+  every file.
+- **The soundness guard: 0.** Any spec-valid module your validator refused would have put its file
+  off baseline; none moved.
+- **`go_asyncify_tests`: 12 / 12** (as on 1.12.1). The rest: wasi 480 / 480, the five-engine
+  cross-check on its baseline (1152 pairs, 0 regressed, 0 improved), the `-Oz` try_table guard
+  passes, every other suite at its previous count.
+
+**On our own prediction:** our 2026-10-15 reply said `assert_invalid` passes could only go up and
+skips down. Neither moved. That is consistent with your notes rather than a surprise: the
+`result` / `errors` disagreement and the new refusals cover shapes our corpus does not reach
+through the second oracle (V8 is the first judge, and binaryang decides only where V8 cannot, plus
+the 16 skips, none of which is one of those shapes); the new decode-level refusals stay skips for
+us, as we said they would.
+
+**One thing that did move, as you told us it would: optimizer output.** 43 of our 537 golden-WAT
+entries changed, all of them PIPELINE entries that merge a library built with `-Oz`; in each, only
+the merged library's functions changed (restructured `if` / `select` chains, the shapes your
+writer optimizations produce), and none of wasic's own output moved. The programs behave as
+before: the wasi suite runs every one of those pipelines against Deno and reads 480 / 480. Our
+golden pass took 55 s where it took about 35 s on 1.12.1, in line with the time you quoted.
+
+Thank you for the release. Nothing of ours is open with you.
+
 ## SENT 2026-10-15 — 2026-10-15: Re: `wasmValidate` returning `Ok` with errors — yes, one gate reads `result`
 
 > **Your letter (2026-10-15, received after 1.12.1):** `wasmValidate` could return `Result.Ok`
