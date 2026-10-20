@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 135 | 0 | 27 |
-| LOUD | 36 | 61 | 10 | 9 |
+| LOUD | 36 | 61 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -375,7 +375,10 @@ relative path (`fetch(String(source))`), and a typed-array view ignores byteOffs
 handles neither `export class` nor `export { name }`; ld85 two imports with the same basename
 collide (`duplicate func $util_add`); ~~ld86~~ FIXED 2026-10-19 (`extractForms` skips string
 literals; `tests/merge_layout_tests.ts`) the merge scanners count `(` `)` inside data strings;
-ld87 `mod` cannot call an i64 function; ld88 `wast` exits 0 with ✅ when modules are not built (or
+ld87 `mod` cannot call an i64 function; ~~ld88~~ FIXED 2026-10-19 (the owner's rule 3: `src/wast_known_unbuilt.ts` holds each vendored
+corpus file's unbuilt-module CEILING, 21 files / 94 modules, all engine / proposal gaps; a run
+above a ceiling, with an unlisted unbuilt file, or with 0 files exits 1 and the summary says ❌;
+`tests/wast_cli_tests.ts`) `wast` exits 0 with ✅ when modules are not built (or
 on an empty directory) — **owner 2026-10-19: exit 1 unless the unbuilt module is on a known
 list; 0 files always fails**; ld89 `dync` leaves `<name>.__dync.ts` on
 failure and prints errors twice; ld90 bad flag values silently become defaults (`--runtime`,

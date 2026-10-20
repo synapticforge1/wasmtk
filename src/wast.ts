@@ -23,6 +23,7 @@ import { allFeatures, wasmValidate } from "binaryang-validate";
 import { binaryenLowerCustomPageSizes } from "./binaryen.ts";
 import { rt } from "./rt.ts";
 import { engineName, explainEngineRejection } from "./engine.ts";
+import { KNOWN_UNBUILT } from "./wast_known_unbuilt.ts";
 
 // deno-lint-ignore no-explicit-any
 type WabtModule = any;
@@ -1891,9 +1892,15 @@ export async function wastCli(target: string, opts: { verbose?: boolean } = {}):
       console.log("    " + m.replace(/\s+/g, " ").slice(0, 140));
     }
   }
+  // ld88: an unbuilt module above its known ceiling fails the run (see the end)
+  const unknownUnbuilt = results.filter((r) => {
+    const base = r.file.split(/[\\/]/).pop() ?? r.file;
+    return r.modulesFailed > (KNOWN_UNBUILT[base] ?? 0);
+  });
+  const runOk = tf === 0 && unknownUnbuilt.length === 0 && results.length > 0;
   console.log(
     `\n${
-      tf === 0 ? "✅" : "❌"
+      runOk ? "✅" : "❌"
     } wast: ${results.length} file(s) — ${tp} passed, ${tf} failed, ${ts} skipped, ${tm} unbuilt modules` +
       (tf > 0 ? "  (execution assertion failures)" : ""),
   );
@@ -1926,6 +1933,24 @@ export async function wastCli(target: string, opts: { verbose?: boolean } = {}):
     for (const [feature, { statement, count }] of limits) {
       console.log(`   • ${feature} (${count} skipped): ${statement}`);
     }
+  }
+  // The owner's rule 3 (ld88, 2026-10-19): an unbuilt module not on the known list, or a run that
+  // found no `.wast` file, is a FAILED run. Both exited 0 with ✅: a broken backend or a mistyped
+  // path read as a pass.
+  if (results.length === 0) {
+    console.log(`\n❌ wast: no .wast file found at ${target}`);
+    return 1;
+  }
+  if (unknownUnbuilt.length > 0) {
+    console.log(
+      `\n❌ wast: ${unknownUnbuilt.length} file(s) have modules that did not build and are not on the ` +
+        `known-unbuilt list (src/wast_known_unbuilt.ts):`,
+    );
+    for (const r of unknownUnbuilt.slice(0, 20)) {
+      const base = r.file.split(/[\\/]/).pop() ?? r.file;
+      console.log(`   ${base}: ${r.modulesFailed} unbuilt (known: ${KNOWN_UNBUILT[base] ?? 0})`);
+    }
+    return 1;
   }
   return tf === 0 ? 0 : 1;
 }
