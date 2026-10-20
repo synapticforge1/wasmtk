@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 3 | 134 | 0 | 27 |
+| SILENT-WRONG | 2 | 135 | 0 | 27 |
 | LOUD | 36 | 61 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 3; in the tools: 0** (2026-10-19, latest: sw95 built, the
+**Open silent-wrong in the compiler: 2; in the tools: 0** (2026-10-19, latest: sw87 built, the
+owner's rule 2, `28_SortDefaultStringOrder`; left sw119, sw120). Before that, 3 (2026-10-19, later: sw95 built, the
 owner's rule 1, `9c_ArrayOutOfRangeUndefined`; left sw87, sw119, sw120). Before that, 4 (2026-10-19, later: sw97, sw99, sw100,
 sw101, sw108, sw121 fixed, with loud ld58, ld65; `4k_LastSilentRows`. Left: the owner-ruled sw87,
 sw95, sw119, and sw120 with the nullable gaps). Before that, 10 (2026-10-19, later: the method edge
@@ -301,7 +302,7 @@ overwrite user files (sw113) at the top.
 | ~~sw84~~ | ✅ FIXED 2026-10-19: splice is ONE helper per slot width (4 / 8 bytes): it normalises idx and count, moves the tail to open a gap of N slots (growing the array), leaves idx in `$__splice_at`, and returns the array pointer (re-stored, as push does); the caller stores the items there (scalars, strings, struct literals). A missing count removes to the end. An item that READS the spliced array is refused (it would read it changed): test `28_SpliceItemReadsArrayRefused`. Test `28_RelativeIndexMethods`. Was: `splice` drops insertion arguments; a one-argument `splice(i)` removes one element | ~13960: only args 0 and 1, count defaults to 1 |
 | ~~sw85~~ | ✅ FIXED 2026-10-19 with sw84 (with ld47). Was: `splice` with a negative index removes the last element | `$__dynarr_splice_*` ~18775 (no normalisation; ld47 is its trap) |
 | ~~sw86~~ | ✅ FIXED 2026-10-19 in an f64 context (a `select` maps the helper's -1 to NaN); an `i32` slot keeps -1 until the owner's sw119 store rule is built (NaN does not fit an i32). Test `28_MethodEdgeCases`. Was: `charCodeAt` out of range gives -1, not NaN (`isNaN(s.charCodeAt(9))` false) | ~19222 |
-| sw87 | a bare numeric `sort()` sorts numerically; JavaScript sorts as strings (`1,10,100,9`). **Owner 2026-10-19: follow JavaScript** (a JS function does what JS intends) | `sort_<T>` ~10191 / ~14152 (dynrt documents the deviation, wasic does not) |
+| ~~sw87~~ | ✅ FIXED 2026-10-19 (the owner's rule 2): `sort_T` (a bare sort of an i32 / f64 / f32 / bool array) compares `String(a)` with `String(b)` (`$__numstr_gt_T`, two 32-byte buffers per call), as JavaScript; a comparator still decides. dynrt keeps its own documented numeric default (a separate runtime, not wasic). Test `28_SortDefaultStringOrder`. Was: a bare numeric `sort()` sorts numerically; JavaScript sorts as strings (`1,10,100,9`). **Owner 2026-10-19: follow JavaScript** (a JS function does what JS intends) | `sort_<T>` ~10191 / ~14152 (dynrt documents the deviation, wasic does not) |
 | ~~sw88~~ | ✅ FIXED 2026-10-19: one part per byte (`"".split("")` is `[]`; a multi-byte character splits, as everywhere the helpers index bytes). Test `28_MethodEdgeCases`. Was: `split("")` gives the whole string as one part | ~19550 "treat as no-split" |
 | ~~sw89~~ | ✅ FIXED 2026-10-19: `reduce1_T` (expression and statement forms) starts from element 0 and folds from 1; an empty array traps (JavaScript throws). Test `28_MethodEdgeCases`. Was: `reduce` with no initial value starts the accumulator at 0 (a product is 0) | ~10234 `zeroOf` |
 | ~~sw90~~ | ✅ FIXED 2026-10-19: `find_T` sets `$__nullable_ret_flag` (1 found, 0 not); a nullable declaration / reassignment from `x.find(…)` reads it into its `__null`, and console's "undefined" print tests that flag. A NON-nullable `const f: i32 = xs.find(…)` (a TypeScript type error) keeps the sentinel. Test `28_MethodEdgeCases`. Was: `find` returns a sentinel: a found -1 reads as undefined, a miss is not `=== undefined` | ~18299 |
