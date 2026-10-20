@@ -33,8 +33,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > returned unsigned; the WIT u32 / u64 → s32 / s64 collapse (bindgen.ts:73–79) to be revisited
 > with (b). **Order (owner, 2026-10-19): AFTER the bug fixes** (the loud rows and items 3–5);
 > "do not add to the issue we are trying to fix" — no new behaviour while the fix list is open. **2026-10-20: binaryang 1.13.0 PINNED, gate green
-> (wast 64,506 / 0 / 16, guard 0, go 7 / 7 / 12, wasi 480/480); the reply is DRAFTED in
-> `scripts/binaryang-report.md` for the owner to send.** Still pending from before: the 3.0.0
+> (wast 64,506 / 0 / 16, guard 0, go 7 / 7 / 12, wasi 480/480); the reply was SENT 2026-10-20
+> (`scripts/binaryang-report.md`).** Still pending from before: the 3.0.0
 > release, the Deno-exit plan P0.
 >
 > **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `33b3e0e` and green on binaryang
@@ -424,8 +424,7 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   them in `../cmem/handoffs.md`.
 - ~~binaryang's release after 1.12.1~~ **1.13.0 PINNED 2026-10-20** (letter of 2026-10-20): wast
   64,506 / 0 / 16, guard 0, `go_asyncify` 12 / 12, 43 pipeline goldens moved (optimizer). **The
-  reply is DRAFTED** in `scripts/binaryang-report.md` (top section): the owner sends it, then flip
-  its heading to SENT.
+  reply was SENT 2026-10-20** (`scripts/binaryang-report.md`, top section).
 - **binaryang: nothing else of ours is open.**
 
 ## Deferred (no consumer)

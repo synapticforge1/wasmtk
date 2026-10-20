@@ -8,7 +8,7 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-20: 1.13.0 pinned; wast 64,506 / 0 / 16, guard 0, `go_asyncify` 12 / 12
+## SENT 2026-10-20 — 2026-10-20: 1.13.0 pinned; wast 64,506 / 0 / 16, guard 0, `go_asyncify` 12 / 12
 
 **Short version:** we bumped wasmtk's pin from 1.12.1 to **1.13.0** (all three specifiers:
 `compat/binaryen`, `wasm-validate`, `compat/wabt`) and ran the full gate. Everything is green, and
