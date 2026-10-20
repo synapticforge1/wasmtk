@@ -417,6 +417,21 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
        corpus programs store an out-of-range value (hashes, mulberry32 will move to wasMath) and
        the cost to integer-heavy code (a range check at every i32 store; later, skip provably
        safe ones such as `i++` bounded by a length).
+  - **Owner's decisions of 2026-10-19, end of day (NOT BUILT):** "i32 overflow check should be
+    on by default. we will retire the u32 and u64 types now. yes bindgen check at the boundary
+    and return of any issues is desired."
+    1. **Rule 4 (sw119) is the default**, not an opt-in: `+ - *` of i32s give JavaScript's
+       result and a store that does not fit an `i32` slot throws (measured: 1 of 461 corpus
+       programs, `45_random-numbers`, relies on wrapping and moves to wasMath; +2.8% size; an
+       arithmetic-heavy loop ~2.3× slower).
+    2. **`u32` and `u64` are retired as TYPES.** wasm has no unsigned type, only `_u`
+       operations; wasic stored a `u32` as an f64 (documentation only) and a `u64` only changed
+       printing. The unsigned OPERATIONS (`u32.*`, `u64.*`) stay. wasMath is unreleased, so this
+       breaks no published API.
+    3. **bindgen checks values at the boundary and reports every issue:** an i32 argument must
+       be an integer in range, i64 takes a bigint (or a safe-integer number), f32 rounds (its
+       meaning), f64 passes as is; an issue throws a RangeError / TypeError naming the function,
+       the parameter and the type; unsigned results come back unsigned.
   - **Direction of 2026-10-19: untyped is JavaScript's number; JavaScript and npm through the
     bundle (owner, after reviewing the number model; NOT BUILT, measure first).** The owner: "I
     might have over thought this a bit, and should have kept the value inference intact that we
