@@ -7,6 +7,23 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **PAUSED 2026-10-19, end of day (owner).** `main` is clean at `fcb2a259e99` and green on
+> binaryang 1.12.1: wasi **480/480**, golden **537** (9 fail on purpose), typed_decl 45, wast
+> 64,506 / 0 / 16, cross-check 1152 on baseline, go 7 / 7 / 12, outpath 12, merge_layout 7,
+> tool_rows 16, wast_cli 4; api-surface unchanged since its last re-baseline. Nothing pushed,
+> published or tagged. **Done today:** every silent TOOL row (sw109–sw118) and every unruled silent
+> COMPILER row of audit round 2 (sw75–sw108, sw121, with loud ld47, ld51, ld58, ld65); the owner's
+> rulings 1–3 built (sw95, sw87, ld88); sw120 (null string fields; string field assignment);
+> ruling 4 (sw119) MEASURED on branch `feat/i32-overflow-check` (435769b, not merged). Tally:
+> silent 1 open (sw119), loud 36 compiler + 9 tool open. **Resume with (owner's order):** (1) the
+> loud rows, grouped by root (compiler-bugs.md § audit round 2, "Loud, compiler" / "Loud, tools",
+> plus the round-1 table's open loud rows); (2) items 3–5 (binaryang 1.10.0 items, H10, the
+> remaining nullable gaps, e.g. ld64 a nullable string LOCAL); (3) THEN scope the number-type
+> reversion and inference model (§ "Owner's direction, 2026-10-19, late" below). Waiting on the
+> owner: sw119 on by default? (may change with the scoping); retire the `u32` / `u64` type
+> annotations?; bindgen boundary checks? Also still pending from before: binaryang's next release
+> (re-run wast, send numbers), the 3.0.0 release, the Deno-exit plan P0.
+>
 > **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `33b3e0e` and green on binaryang
 > 1.12.1 (wasi 466/466, golden 523, typed_decl 45, wast 64,506 / 0 / 16, go 7 / 7 / 12; nothing
 > pushed, published or tagged). Done today: binaryang 1.12.1 pinned (`go_asyncify` 12 / 12, count
