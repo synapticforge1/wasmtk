@@ -19,9 +19,19 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > loud rows, grouped by root (compiler-bugs.md § audit round 2, "Loud, compiler" / "Loud, tools",
 > plus the round-1 table's open loud rows); (2) items 3–5 (binaryang 1.10.0 items, H10, the
 > remaining nullable gaps, e.g. ld64 a nullable string LOCAL); (3) THEN scope the number-type
-> reversion and inference model (§ "Owner's direction, 2026-10-19, late" below). Waiting on the
-> owner: sw119 on by default? (may change with the scoping); retire the `u32` / `u64` type
-> annotations?; bindgen boundary checks? Also still pending from before: binaryang's next release
+> reversion and inference model (§ "Owner's direction, 2026-10-19, late" below).
+> **Owner's decisions, 2026-10-19, end of day (NOT BUILT; design-decisions.md § "Owner's
+> decisions of 2026-10-19, end of day"):** (a) **the i32 overflow check is ON by default**
+> (sw119): finish branch `feat/i32-overflow-check` (cover console.log's operator path, template
+> parts, `++` / `--`), migrate `45_random-numbers` to wasMath's wrapping `i32.*`, decide what the
+> `--i32-check` flag becomes (an opt-OUT, or removed), full gate, re-baseline the API in its own
+> commit; (b) **retire the `u32` / `u64` TYPES now** (the `u32.*` / `u64.*` operations stay):
+> remove the aliases from wasMath, wasic's u64 print-unsigned tracking, migrate the 2 corpus
+> programs and wasMath's own tests; (c) **bindgen checks at the boundary and reports every
+> issue**: an i32 argument must be an integer in range (else a RangeError naming the parameter
+> and type), i64 takes a bigint (a safe-integer number converted), f32 rounds, unsigned RESULTS
+> returned unsigned; the WIT u32 / u64 → s32 / s64 collapse (bindgen.ts:73–79) to be revisited
+> with (b). Order to settle with the owner on resume: these three vs the loud rows. Also still pending from before: binaryang's next release
 > (re-run wast, send numbers), the 3.0.0 release, the Deno-exit plan P0.
 >
 > **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `33b3e0e` and green on binaryang
