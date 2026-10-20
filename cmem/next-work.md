@@ -21,6 +21,21 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > nullable gaps, item 5; then the loud rows, step 4), then items 3–5 (binaryang 1.10.0
 > items, H10, nullable gaps).
 >
+> **Owner's direction, 2026-10-19, late: JavaScript projects and npm (design-decisions.md §
+> "Direction of 2026-10-19: untyped is JavaScript's number; JavaScript and npm through the
+> bundle"). NOT BUILT; plan, in order:** (a) MEASURE `number` inference: re-allow untyped
+> declarations as JavaScript's `number` (f64), `bigint` as i64, wasm types as opt-in hints; run
+> the corpus with its annotations stripped (matches Deno? speed cost?), as sw119 was measured
+> first; (b) jstyper inside the bundle (a `.js` import runs it; `wasmtk wasic x.js` too) and jstyper
+> INFERENCE when there is no `.d.ts` (a shipped `.d.ts` / JSDoc first, then call sites and use,
+> then the `number` default; the rest reported, never guessed); (c) npm: resolution
+> (`npm:` / `node_modules`, `exports` / `main`, transitive deps), **CommonJS converted by esbuild
+> (owner's choice)**, then (b); jstyper must unwrap esbuild's `__commonJS` / `__toESM` shims;
+> per-package verdict (compiled / `dync` / kept on the host as an import); then try a handful of
+> real packages. Open questions with it: sw119 on by default? retire the `u32` / `u64` TYPE
+> annotations (wasMath is unreleased, 2 corpus programs use them)? boundary checks in bindgen
+> (i32 integer + range, unsigned results)?
+>
 > **Owner's answers, 2026-10-19: all four questions decided, none built yet** (design-decisions.md
 > § "Owner's rulings of 2026-10-19"): (1) an out-of-range ARRAY read gives `undefined`, as for
 > strings; a float array index keeps D3's conversion (sw95); (2) semantics follow the function's

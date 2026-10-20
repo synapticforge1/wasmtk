@@ -417,6 +417,36 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
        corpus programs store an out-of-range value (hashes, mulberry32 will move to wasMath) and
        the cost to integer-heavy code (a range check at every i32 store; later, skip provably
        safe ones such as `i++` bounded by a length).
+  - **Direction of 2026-10-19: untyped is JavaScript's number; JavaScript and npm through the
+    bundle (owner, after reviewing the number model; NOT BUILT, measure first).** The owner: "I
+    might have over thought this a bit, and should have kept the value inference intact that we
+    originally had, with the type definition helpers for the compiler as an option." Discussed and
+    agreed in shape:
+    1. **Inference returns, but an untyped number is JavaScript's `number` (f64), not an i32.**
+       The pre-2.0.3 inference guessed i32 from an integer literal (`let a = 100000; a * a`
+       wrapped); that guess, not inference, was the flaw 2.0.3 fixed by requiring types. Untyped
+       code then computes what Deno computes; `i32` / `f32` / `i64` annotations become opt-in
+       hints with wasm semantics (wasMath, D3, rule 4). Additive: every annotated program keeps
+       its meaning. Cost: speed of untyped integer code (later: infer i32 where provably exact).
+    2. **The boundary model:** `number` carries f64, f32 and i32 / u32 (all exact in an f64),
+       `bigint` carries i64 / u64 — the WebAssembly JS API's own convention and wasMath's aliases,
+       so a compiled function takes the same arguments as the same TypeScript run natively. (The
+       owner's alternative, bigint for i32 too, was weighed: it makes `result + 1` throw in
+       JavaScript and changes the call convention between native and compiled.) Only f64 and
+       in-range i64 pass the JS API as is in both directions; i32 / f32 arguments are converted
+       (ToInt32 wraps, f32 rounds); u32 / u64 results come back signed.
+    3. **u32 / u64 are the outliers:** wasm has no unsigned type, only `_u` operations. wasic's
+       `u32` is stored as an f64 (documentation only); `u64` only changes printing. The `u32.*` /
+       `u64.*` operations stay; retiring the two TYPE annotations is an open question (wasMath
+       is unreleased: added 2026-10-09, after v2.0.3).
+    4. **JavaScript and npm come in through the bundle:** jstyper runs on a `.js` import inside
+       the tsbundle step (it is a separate manual command today, needs a hand-written `.d.ts`, and
+       the bundler does not follow `.js` imports); jstyper infers types when there is no `.d.ts`;
+       an npm package is resolved, **converted from CommonJS by esbuild (owner's choice,
+       2026-10-19)**, then goes the same way. esbuild's output wraps CJS in `__commonJS` /
+       `__toESM` shims (dynamic), so jstyper must unwrap that fixed pattern or the package goes to
+       `dync`. Packages that need host APIs (fs, network, process) stay in JavaScript on the host
+       and are called as imports (bindgen already wires those).
   - **An f32 is converted at every f32 boundary, by ONE rule** (2026-10-06, ld18 / sw43):
     `emitExpr` wraps the emitter, reads the emitted WAT's result type from its outermost form
     (`watResultType`) and converts when exactly one side is f32. A new leaf path need not know
