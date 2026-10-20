@@ -112,7 +112,17 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
+## Current pass counts (2026-10-20, binaryang **1.13.0**; latest release v2.0.3)
+
+> **2026-10-20, binaryang 1.12.1 → 1.13.0 pinned, gate GREEN, nothing known-failing.** Predicted
+> from the letter (validation `result` fix + new refusals; optimizer output moves at -O2+): wast
+> unchanged or `assert_invalid` up / skips down, guard 0; goldens move only where optimized output
+> is captured. Held: wast **64,506 / 0 / 16** (every file on its pins; guard 0; nothing moved
+> either way) · golden-WAT 537, **43 moved, all PIPELINE entries merging a `-Oz` library**, each
+> only in the merged library's functions (optimizer restructuring), re-recorded; failed compiles 9 ·
+> wasi 480/480 (runs those pipelines) · cross-check 1152 on baseline · go 7 / 7 / **12** · `-Oz`
+> try_table guard passes · api-surface unchanged. The golden pass is slower: 55 s (about 35 s on
+> 1.12.1), as binaryang said (-Oz about 2–2.5× the time).
 
 > **2026-10-19, sw120 (a null string field is the 0 pointer; string field stores), gate GREEN.**
 > wasi **480/480** (+`24_NullableStringFields`, failing to compile on the old compiler;
