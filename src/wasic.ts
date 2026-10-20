@@ -6418,6 +6418,9 @@ class WasicTranspiler {
       const raw = initFields[field.name];
       if (raw === undefined) continue;
       if (field.type === "string") {
+        // A null / undefined string is the 0 pointer (the convention for pointer-valued fields,
+        // sw51): it was allocated as the TEXT "null", so `r.s === null` was false (sw120)
+        if (raw.trim() === "null" || raw.trim() === "undefined") continue;
         // String field: 8-byte pair [ptr i32][len i32]. Allocate string after the struct.
         const strVal = raw.replace(/^["']|["']$/g, ""); // strip surrounding quotes
         const [strPtr, strLen] = this.allocString(strVal);
@@ -6571,6 +6574,14 @@ class WasicTranspiler {
         stmts.push(`(${storeOp} offset=${field.offset} (local.get $__rt_struct_ptr) ${valWat})`);
         stmts.push(
           `(i32.store offset=${field.nullFlagOffset} (local.get $__rt_struct_ptr) ${flagWat})`,
+        );
+        continue;
+      }
+      // a string field is a (ptr, len) pair, built as a string (it was emitted as a number and
+      // refused: `{ s: c ? null : "lo" }`, sw120); an omitted one is the null string (0, 0)
+      if (field.type === "string") {
+        stmts.push(
+          this.emitStringFieldStore(`(local.get $__rt_struct_ptr)`, field.offset, rawFields[field.name] ?? "null", locals),
         );
         continue;
       }
@@ -6890,6 +6901,8 @@ class WasicTranspiler {
     baseWat: string,
     locals: Map<string, WatType>,
   ): string[] {
+    // a string field is a (ptr, len) pair (sw120: its run-time store was emitted as a number)
+    if (field.type === "string") return [this.emitStringFieldStore(baseWat, field.offset, expr, locals)];
     const { valWat, flagWat } = this.fieldInit(field, expr, locals);
     const out = [`(${memStoreOp(field.type)} offset=${field.offset} ${baseWat} ${valWat})`];
     if (flagWat) out.push(`(i32.store offset=${field.nullFlagOffset!} ${baseWat} ${flagWat})`);
@@ -9057,17 +9070,8 @@ ${prefixed}
       if (qi > 0) {
         const lhs = expr.slice(0, qi).trim();
         const rhs = expr.slice(qi + 2).trim();
+        // a string field's null is its 0 pointer (nullTestWat, sw120)
         const nullW = this.nullTestWat(lhs, locals);
-        // A `string | null` FIELD has no null representation yet (`null` is stored as the text
-        // "null"; the nullable gaps, next-work item 5): refused, not tested wrongly.
-        const lf = nullW ? undefined : this.fieldOfExpr(lhs, locals);
-        if (lf?.nullable && lf.type === "string") {
-          this.diagnostics.push(
-            `'${expr.slice(0, 60)}': '??' on a 'string | null' field is not supported yet (a null ` +
-              `string field is not represented); test it another way or give it a default.`,
-          );
-          return "(i32.const 0) (i32.const 0)";
-        }
         const lw = nullW === "(i32.const 1)" ? null : this.emitStringPtrLen(lhs, locals);
         const rw = this.emitStringPtrLen(rhs, locals);
         if (lw === null) return rw;
@@ -9075,13 +9079,20 @@ ${prefixed}
         return `(if (result i32 i32) ${nullW} (then ${rw}) (else ${lw}))`;
       }
     }
-    // A conditional with two string branches, one branch evaluated (2026-10-19, with sw98)
+    // A conditional with two string branches, one branch evaluated (2026-10-19, with sw98); a
+    // `null` / `undefined` branch is the null string, (0, 0) (sw120: `{ s: c ? null : "x" }`)
     {
       const tern = this.splitTernaryTop(expr);
-      if (tern && this.isStringExpr(tern[1], locals) && this.isStringExpr(tern[2], locals)) {
-        return `(if (result i32 i32) ${this.emitCond(tern[0], locals)} (then ${
-          this.emitStringPtrLen(tern[1], locals)
-        }) (else ${this.emitStringPtrLen(tern[2], locals)}))`;
+      const isNullLit = (b: string) => b.trim() === "null" || b.trim() === "undefined";
+      const strOrNull = (b: string) => isNullLit(b) || this.isStringExpr(b, locals);
+      if (
+        tern && strOrNull(tern[1]) && strOrNull(tern[2]) && !(isNullLit(tern[1]) && isNullLit(tern[2]))
+      ) {
+        const branch = (b: string) =>
+          isNullLit(b) ? "(i32.const 0) (i32.const 0)" : this.emitStringPtrLen(b, locals);
+        return `(if (result i32 i32) ${this.emitCond(tern[0], locals)} (then ${branch(tern[1])}) (else ${
+          branch(tern[2])
+        }))`;
       }
     }
     // `n.toString()` of a number or boolean is `String(n)` (ld08's value form: as an argument or in
@@ -12725,6 +12736,14 @@ ${prefixed}
         ? `(local.get $${e}__null)`
         : `(global.get $${e}__null)`;
     }
+    // A STRING field is null when its pointer is 0 (sw120: `null` is stored as (0, 0))
+    {
+      const f = /^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(e) ? this.fieldOfExpr(e, locals) : undefined;
+      if (f?.type === "string") {
+        const pl = this.quietEmit(() => this.emitStringPtrLen(e, locals));
+        if (pl !== "(i32.const 0) (i32.const 0)") return `(i32.eqz ${splitTwoWatExprs(pl)[0]})`;
+      }
+    }
     return this.arrOobTestWat(e, locals) ?? this.nullFlagLoad(e, locals);
   }
 
@@ -12781,7 +12800,9 @@ ${prefixed}
       return undefined;
     }
     const t = /^\w+$/.test(e) ? this.nullableVarInnerType.get(e) : this.fieldOfExpr(e, locals)?.type;
-    if (t !== "i32" && t !== "f64" && t !== "bool") return undefined;
+    // a `string | null` FIELD prints `null` too (sw120: its null is the 0 pointer, printed "")
+    const nullableStrField = t === "string" && !/^\w+$/.test(e) && this.fieldOfExpr(e, locals)?.nullable;
+    if (t !== "i32" && t !== "f64" && t !== "bool" && !nullableStrField) return undefined;
     return this.nullTestWat(e, locals);
   }
 
@@ -13234,6 +13255,37 @@ ${prefixed}
       }
       i++;
     }
+  }
+
+  /**
+   * Store a string into a struct / class FIELD (an 8-byte (ptr, len) slot): `null` / `undefined`
+   * is (0, 0), the null of a pointer-valued field; any other value is built by emitStringPtrLen
+   * and kept through the shared $__str_op pair, so a multi-value result works too. The field
+   * write emitted the value as a NUMBER, so `p.s = "x"` was refused (sw120, 2026-10-19).
+   */
+  private emitStringFieldStore(
+    baseWat: string,
+    offset: number,
+    rhs: string,
+    locals: Map<string, WatType>,
+  ): string {
+    const r = rhs.trim();
+    const at = `(i32.add ${baseWat} (i32.const ${offset}))`;
+    if (r === "null" || r === "undefined") {
+      return `(i32.store ${at} (i32.const 0))\n      (i32.store offset=4 ${at} (i32.const 0))`;
+    }
+    locals.set("__str_op_ptr", "i32");
+    locals.set("__str_op_len", "i32");
+    const stores = [
+      `(i32.store ${at} (local.get $__str_op_ptr))`,
+      `(i32.store offset=4 ${at} (local.get $__str_op_len))`,
+    ];
+    const pl = this.quietEmit(() => this.emitStringPtrLen(r, locals));
+    if (pl !== "(i32.const 0) (i32.const 0)" || r === '""' || r === "''") {
+      return [pl, `(local.set $__str_op_len)`, `(local.set $__str_op_ptr)`, ...stores].join("\n      ");
+    }
+    // a concatenation or a template: emitStringAssign builds those, into the same $__str_op pair
+    return [this.emitStringAssign("__str_op", r, locals), ...stores].join("\n      ");
   }
 
   private emitStatementCore(
@@ -14620,6 +14672,9 @@ ${prefixed}
           const baseWat = wCv.ptr === -1
             ? `(local.get $${structWriteMatch[1]})`
             : `(i32.const ${wCv.ptr})`;
+          if (wField.type === "string") {
+            return this.emitStringFieldStore(baseWat, wField.offset, structWriteMatch[3], locals);
+          }
           const valWat = this.emitExpr(structWriteMatch[3], locals, wField.type);
           return `(${storeOp} (i32.add ${baseWat} (i32.const ${wField.offset})) ${valWat})`;
         }
@@ -14650,6 +14705,9 @@ ${prefixed}
           const baseWat = sv.ptr < 0
             ? `(local.get $${structWriteMatch[1]})`
             : `(i32.const ${sv.ptr})`;
+          if (field.type === "string") {
+            return this.emitStringFieldStore(baseWat, field.offset, structWriteMatch[3], locals);
+          }
           const valWat = this.emitExpr(structWriteMatch[3], locals, field.type);
           return `(${storeOp} (i32.add ${baseWat} (i32.const ${field.offset})) ${valWat})`;
         }
