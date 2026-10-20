@@ -114,6 +114,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw120 (a null string field is the 0 pointer; string field stores), gate GREEN.**
+> wasi **480/480** (+`24_NullableStringFields`, failing to compile on the old compiler;
+> −`7i_NullishStringFieldRefused`, whose refusal is gone) · golden-WAT **537**, nothing else moved
+> (no corpus program assigned a string field or built one at run time: both were refused);
+> failed compiles **9** (the stale golden of the removed test deleted by hand: `--record` keeps
+> files of removed tests) · wast 64,506 / 0 / 16 · cross-check on baseline · go 7 / 7 / 12 ·
+> api-surface unchanged.
+
 > **2026-10-19, ld88 (the owner's rule 3: `wasmtk wast` exit codes), gate GREEN.** New suite
 > **`wast_cli_tests` 4 / 4** (installed wasmtk; 2 fail on the old CLI, 2 controls) · the CLI on the
 > vendored corpus: 288 files, 0 failed, 94 unbuilt modules in 21 files, all within

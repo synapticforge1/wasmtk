@@ -17,9 +17,11 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > owner-ruled ~~sw95 (array out-of-range → undefined)~~ DONE 2026-10-19, ~~sw87 (bare sort() as strings)~~ DONE 2026-10-19, sw119 (i32
 > overflow store check: MEASURED 2026-10-19 on branch `feat/i32-overflow-check`, not merged; 460 / 461
 > programs identical, 1 throws (an LCG relying on wrapping), +2.8% size, an arithmetic loop ~2.3×
-> slower; console.log / templates / `++` not covered yet; OWNER'S DECISION: finish and turn on?) and ~~ld88 (wast exit codes)~~ DONE 2026-10-19; sw120 goes with the
-> nullable gaps, item 5; then the loud rows, step 4), then items 3–5 (binaryang 1.10.0
-> items, H10, nullable gaps).
+> slower; console.log / templates / `++` not covered yet; OWNER'S DECISION: finish and turn on?) and ~~ld88 (wast exit codes)~~ DONE 2026-10-19; ~~sw120~~ DONE 2026-10-19
+> (`24_NullableStringFields`); then the loud rows, step 4), then items 3–5 (binaryang 1.10.0
+> items, H10, nullable gaps). **Owner, 2026-10-19: finish the current fixes before anything that
+> can break more, THEN scope the reversion and the inference model for all the number types**
+> (the "Owner's direction" note below).
 >
 > **Owner's direction, 2026-10-19, late: JavaScript projects and npm (design-decisions.md §
 > "Direction of 2026-10-19: untyped is JavaScript's number; JavaScript and npm through the
