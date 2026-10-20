@@ -388,7 +388,16 @@ failure and prints errors twice; ld90 bad flag values silently become defaults (
 **sw119, i32 overflow** (`65536 * 65536` → 0, Deno 4294967296): first "not counted" as the
 declared-type contract; **owner 2026-10-19: the operator gives JavaScript's result, and storing a
 value that does not fit an `i32` slot throws** (design-decisions.md § "Owner's rulings of
-2026-10-19", rule 4). Silent today, NOT BUILT; measure the corpus first. **Dead code / stale, verified by grep** (cleanup, not bugs): main.ts:418-421
+2026-10-19", rule 4). Silent today. **MEASURED 2026-10-19, built behind a switch on branch
+`feat/i32-overflow-check` (commit 435769b, NOT merged; off = byte-identical):** `--i32-check` /
+`setI32OverflowCheck(true)` computes `+ - *` of i32s in f64, keeps a chain exact, and checks only
+the store into an i32 slot (`$__i32_fit_<op>` throws a RangeError naming the operator; the host
+prints it as `Error:`); `x += e` desugars. On the 461 corpus programs that compare with Deno: 460
+identical, 1 throws (`45_random-numbers`, an LCG relying on i32 wrapping: it would need wasMath's
+`i32.add` / `i32.mul`); size +2.8% (about 150 B fixed per small module, +130% on the tiniest);
+an arithmetic-heavy loop about 2.3× slower end to end, no change on the corpus's run time. NOT
+covered yet (they still wrap with the switch on): console.log's own operator path, template
+parts, `++` / `--`. Waiting on the owner: finish those and turn it on by default? **Dead code / stale, verified by grep** (cleanup, not bugs): main.ts:418-421
 (`wast`'s unreachable `!target`); utils.ts:232-249 (Javy interception), :256-264 (`console.log`
 UTF-16 shim), :292-307 (library-call branch: REACHABLE since sw115's fix, 2026-10-19); unused
 `getImportInfo`, `v128`, `funcref`, `externref`, `applyNames` (utils.ts:33, :49-56); utils.ts:168
