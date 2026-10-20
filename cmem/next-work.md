@@ -32,8 +32,10 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > and type), i64 takes a bigint (a safe-integer number converted), f32 rounds, unsigned RESULTS
 > returned unsigned; the WIT u32 / u64 → s32 / s64 collapse (bindgen.ts:73–79) to be revisited
 > with (b). **Order (owner, 2026-10-19): AFTER the bug fixes** (the loud rows and items 3–5);
-> "do not add to the issue we are trying to fix" — no new behaviour while the fix list is open. Also still pending from before: binaryang's next release
-> (re-run wast, send numbers), the 3.0.0 release, the Deno-exit plan P0.
+> "do not add to the issue we are trying to fix" — no new behaviour while the fix list is open. **2026-10-20: binaryang 1.13.0 PINNED, gate green
+> (wast 64,506 / 0 / 16, guard 0, go 7 / 7 / 12, wasi 480/480); the reply is DRAFTED in
+> `scripts/binaryang-report.md` for the owner to send.** Still pending from before: the 3.0.0
+> release, the Deno-exit plan P0.
 >
 > **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `33b3e0e` and green on binaryang
 > 1.12.1 (wasi 466/466, golden 523, typed_decl 45, wast 64,506 / 0 / 16, go 7 / 7 / 12; nothing
@@ -420,11 +422,11 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
   `scripts/binaryang-report.md`.
 - **H4 and H11** are answered here (H4 re-verified item by item 2026-09-30); the workspace closes
   them in `../cmem/handoffs.md`.
-- **binaryang's release after 1.12.1** (the `wasmValidate` `result` fix and eight new refusals,
-  letter 2026-10-15; "Open now" above): bump, run the wast gate, explain each moved file, send the
-  numbers.
-- **binaryang: nothing of ours is open.** Every report and reply is marked SENT in
-  `scripts/binaryang-report.md` (last: 2026-10-15, the 1.12.1 count and the `wasmValidate` answer).
+- ~~binaryang's release after 1.12.1~~ **1.13.0 PINNED 2026-10-20** (letter of 2026-10-20): wast
+  64,506 / 0 / 16, guard 0, `go_asyncify` 12 / 12, 43 pipeline goldens moved (optimizer). **The
+  reply is DRAFTED** in `scripts/binaryang-report.md` (top section): the owner sends it, then flip
+  its heading to SENT.
+- **binaryang: nothing else of ours is open.**
 
 ## Deferred (no consumer)
 

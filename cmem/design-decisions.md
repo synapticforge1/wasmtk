@@ -1239,7 +1239,9 @@ silently break (all `src/wasic.ts`):
       naming a non-function type. For us that could only turn a pass into a SKIP; it could not
       manufacture one, and the guard was not affected. Fixed in binaryang's release after 1.12.1
       (`result` is `Error` whenever an error-level diagnostic exists). On that bump, expect
-      `assert_invalid` passes up and skips down, and explain each moved file.
+      `assert_invalid` passes up and skips down, and explain each moved file. **That release is
+      1.13.0 (pinned 2026-10-20): nothing moved** (the fixed shapes are not reached through the
+      second oracle in our corpus; the guard reads 0).
     - **Custom-page-sizes LOWERING in the wast runner (2026-09-30)**, `binaryenLowerCustomPageSizes`
       in `src/binaryen.ts`, driven by `WastOptions.lowerCustomPageSizes` in `src/wast.ts`. Four
       rules, each tested in `tests/wast_runner_tests.ts` and inversion-checked: (1) **gate-only**,
