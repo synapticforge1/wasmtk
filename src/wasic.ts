@@ -10791,6 +10791,9 @@ ${prefixed}
           } else {
             const key = `sort_${elemType}`;
             this.dynArrHelpers.add(key);
+            // string order (sw87): the number printers and $__str_cmp, read before the helpers are
+            this.needsNumericHelpers = true;
+            this.needsStringHelpers = true;
             return `(call $__dynarr_${key} ${this.arrGetWat(arrName)})`;
           }
         }
@@ -14951,6 +14954,8 @@ ${prefixed}
           } else {
             const key = `sort_${elemType}`;
             this.dynArrHelpers.add(key);
+            this.needsNumericHelpers = true; // string order (sw87)
+            this.needsStringHelpers = true;
             return `(drop (call $__dynarr_sort_${elemType} (local.get $${arrName})))`;
           }
         }
@@ -19445,15 +19450,32 @@ ${sum}
   )`,
         );
       } else if (method === "sort" && key !== "sort_string") {
-        const cmpOp = valType === "i32" ? "i32.gt_s" : `${valType}.gt`;
+        // A bare `sort()` compares the elements as STRINGS, as JavaScript does (the owner's rule 2:
+        // a JavaScript method does what JavaScript intends): [10, 9, 1, 100] → 1,10,100,9. It sorted
+        // numerically (sw87, 2026-10-19). `$__numstr_gt_T(a, b, buf)`: String(a) > String(b), the
+        // conversions JavaScript's sort uses ($__i32_to_str / $__f64_to_str: -0 is "0").
+        const toStr = valType === "i32" ? "$__i32_to_str" : "$__f64_to_str";
+        const toF = valType === "f32" ? (x: string) => `(f64.promote_f32 ${x})` : (x: string) => x;
+        parts.push(`  ;; String(a) > String(b) for a bare sort() (JavaScript's default order; sw87)
+  (func $__numstr_gt_${elemType} (param $a ${valType}) (param $b ${valType}) (param $buf i32) (result i32)
+    (local $la i32) (local $lb i32)
+    (local.set $la (call ${toStr} ${toF("(local.get $a)")} (local.get $buf)))
+    (local.set $lb (call ${toStr} ${toF("(local.get $b)")} (i32.add (local.get $buf) (i32.const 32))))
+    (i32.gt_s (call $__str_cmp (local.get $buf) (local.get $la)
+      (i32.add (local.get $buf) (i32.const 32)) (local.get $lb)) (i32.const 0))
+  )`);
+        this.needsNumericHelpers = true;
+        this.needsStringHelpers = true;
         parts.push(
-          `  ;; Dynamic array sort_${elemType}: in-place insertion sort (ascending), returns arr ptr.
+          `  ;; Dynamic array sort_${elemType}: in-place insertion sort in STRING order (JavaScript's default), returns arr ptr.
   (func ${name} (param $arr i32) (result i32)
     (local $i i32)
     (local $j i32)
     (local $key ${valType})
     (local $len i32)
     (local $base i32)
+    (local $sbuf i32)
+    (local.set $sbuf (call $__malloc (i32.const 64)))
     (local.set $len (i32.load (local.get $arr)))
     (local.set $base (i32.add (local.get $arr) (i32.const 8)))
     (local.set $i (i32.const 1))
@@ -19465,9 +19487,9 @@ ${sum}
         (block $inner
           (loop $ilp
             (br_if $inner (i32.lt_s (local.get $j) (i32.const 0)))
-            (if (${cmpOp}
+            (if (call $__numstr_gt_${elemType}
                   (${loadOp} (i32.add (local.get $base) (i32.shl (local.get $j) (i32.const ${shift}))))
-                  (local.get $key))
+                  (local.get $key) (local.get $sbuf))
               (then
                 (${storeOp}
                   (i32.add (local.get $base) (i32.shl (i32.add (local.get $j) (i32.const 1)) (i32.const ${shift})))
