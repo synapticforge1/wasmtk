@@ -8759,6 +8759,13 @@ class WasicTranspiler {
         if (field) return field.type as WatType;
       }
     }
+    // `arr.at(i)` → the element type (it took the f64 fallback: `${a.at(1)}` of an i32[] handed
+    // an i32 to the f64 printer, an invalid module; found with sw95)
+    {
+      const atId = e.match(/^(\w+)\.at\s*\([^()]*\)$/)?.[1];
+      const atI = atId ? this.arrayVars.get(atId) : undefined;
+      if (atI && !atI.isStringArr && atI.elemType !== "string") return atI.elemType;
+    }
     // Array element access arr[idx] → element type
     const bracketId = e.match(/^(\w+)\[/)?.[1];
     if (bracketId && this.arrayVars.has(bracketId)) {
@@ -11916,6 +11923,16 @@ ${prefixed}
             return this.convertWat(w, it, defaultType);
           }
         }
+        // An array element out of range is undefined (sw95): `a[k] ?? 42` is 42 then
+        {
+          const oob = this.arrOobTestWat(lhsQQ, locals);
+          const et = oob ? watBaseType(this.inferExprType(lhsQQ, locals)) : undefined;
+          if (oob && (et === "i32" || et === "f64" || et === "f32" || et === "i64")) {
+            const w = `(if (result ${et}) ${oob} (then ${this.emitExpr(rhsQQ, locals, et)}) ` +
+              `(else ${this.emitExpr(lhsQQ, locals, et)}))`;
+            return et === "f32" ? w : this.convertWat(w, et, defaultType);
+          }
+        }
         const qqInner = this.nullableVarInnerType.get(lhsQQ) ??
           this.fieldOfExpr(lhsQQ, locals)?.type;
         const qqFlag = qqInner ? this.nullTestWat(lhsQQ, locals) : undefined;
@@ -12705,7 +12722,52 @@ ${prefixed}
         ? `(local.get $${e}__null)`
         : `(global.get $${e}__null)`;
     }
-    return this.nullFlagLoad(e, locals);
+    return this.arrOobTestWat(e, locals) ?? this.nullFlagLoad(e, locals);
+  }
+
+  /**
+   * The owner's rule 1 of 2026-10-19 (sw95): an out-of-range ARRAY read is `undefined`, as a
+   * string's is. A number slot has no spare value to mark it, so it is this test, `index >= length`
+   * (unsigned: a negative index is out of range too), wherever JavaScript's `undefined` is visible:
+   * `a[i] === undefined`, `a[i] ?? d`, a `T | undefined` declaration from `a[i]`, and console.log.
+   * For an array or typed array read `name[idx]` whose index has no call / `++` / `--` (it is
+   * evaluated twice); undefined otherwise. (`a[5] === undefined` was false.)
+   */
+  private arrOobTestWat(expr: string, locals: Map<string, WatType>): string | undefined {
+    // `a.at(i)`: a negative i counts from the end, then the same range test
+    const atM = expr.match(/^(\w+)\.at\s*\(([^()]+)\)$/);
+    if (atM && /^[\w\s+\-*%.]+$/.test(atM[2]!) && !/\+\+|--/.test(atM[2]!)) {
+      const t = this.arrOobTestWat(`${atM[1]}[0]`, locals);
+      const ai = this.arrayVars.get(atM[1]!);
+      if (t === undefined || !ai) return undefined;
+      const base = (ai.ptr === -1 || ai.ptr === -2 || ai.dynamic || this.isModuleGlobalArr(atM[1]!))
+        ? this.arrGetWat(atM[1]!)
+        : `(i32.const ${ai.ptr})`;
+      const i = this.emitExpr(atM[2]!.trim(), locals, "i32");
+      return `(i32.ge_u (select (i32.add ${i} (i32.load ${base})) ${i} (i32.lt_s ${i} (i32.const 0))) ` +
+        `(i32.load ${base}))`;
+    }
+    const m = expr.match(/^(\w+)\[([^\[\]]+)\]$/);
+    if (!m || !/^[\w\s+\-*%.]+$/.test(m[2]!) || /\+\+|--/.test(m[2]!)) return undefined;
+    const name = m[1]!;
+    const ai = this.arrayVars.get(name);
+    let base: string | undefined;
+    if (ai) {
+      base = (ai.ptr === -1 || ai.ptr === -2 || ai.dynamic || this.isModuleGlobalArr(name))
+        ? this.arrGetWat(name)
+        : `(i32.const ${ai.ptr})`;
+    } else if (this.typedArrayVars.has(name)) {
+      base = locals.has(name) ? `(local.get $${name})` : `(global.get $${name})`;
+    }
+    if (!base) return undefined;
+    // a STATIC array (never resized) read at a literal index is decided now
+    const lit = m[2]!.trim();
+    if (ai && !ai.dynamic && ai.ptr >= 0 && /^-?\d+$/.test(lit)) {
+      const i = Number(lit);
+      return i >= 0 && i < ai.length ? `(i32.const 0)` : `(i32.const 1)`;
+    }
+    const idxW = this.emitExpr(lit, locals, "i32");
+    return `(i32.ge_u ${idxW} (i32.load ${base}))`;
   }
 
   /** sw51: the null test of a name or field access whose text form must read `null`: a nullable
@@ -12725,10 +12787,32 @@ ${prefixed}
    *  conditional. (A `-0` value prints `0` there, as `${x}` does.) */
   private nullPrintRewrite(tok: string, locals: Map<string, WatType>): string | undefined {
     const e = tok.trim();
-    if (!this.nullPrintTest(e, locals)) return undefined;
+    // An out-of-range number / boolean array element prints `undefined` (sw95)
+    const arrM = e.match(/^(\w+)(?:\[|\.at\s*\()/);
+    const ai = arrM ? this.arrayVars.get(arrM[1]!) : undefined;
+    const numElem = ai && !ai.isStringArr && !ai.structTypeName && !ai.is2D &&
+      // not i64 (a template drops a bigint's `n`) nor f32 (a template of an f32 element is not
+      // built: an f32.load reached the i32 printer, `9_F32Containers`)
+      /^(i32|f64|bool)$/.test(ai.elemType);
+    const oobT = (numElem || (arrM && this.typedArrayVars.has(arrM[1]!)))
+      ? this.arrOobTestWat(e, locals)
+      : undefined;
+    if (oobT === "(i32.const 0)") return undefined; // a static array, in range: prints as before
+    const isOob = oobT !== undefined;
+    if (!isOob && !this.nullPrintTest(e, locals)) return undefined;
     // The string conditional captures through $__str_op_ptr/len (declared after emission).
     locals.set("__str_op_ptr", "i32");
     locals.set("__str_op_len", "i32");
+    if (isOob) {
+      // In range it prints as console.log prints a number: a template is String(), which writes
+      // -0 as "0", so a float element keeps its "-0" here
+      const isFloatElem = (ai && /^f(64|32)$/.test(ai.elemType)) ||
+        (arrM && /^f(64|32)$/.test(String(this.typedArrayVars.get(arrM[1]!)?.elemType ?? "")));
+      const shown = isFloatElem
+        ? `((${e} === 0 && 1 / ${e} < 0) ? "-0" : \`\${${e}}\`)`
+        : `\`\${${e}}\``;
+      return `(${e} === undefined) ? "undefined" : ${shown}`;
+    }
     return `(${e} === null) ? "null" : \`\${${e}}\``;
   }
 
