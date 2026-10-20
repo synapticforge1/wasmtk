@@ -385,8 +385,9 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     JavaScript does), and a string compared with `undefined` / `null` calls `$__str_is_nullish`
     (no text, or that marker). Edges kept, documented in sw71: `.length` of it is 9, and it equals
     the string "undefined". `charAt` out of range stays `""`. 3 corpus programs migrated.
-  - **Owner's rulings of 2026-10-19 (rules 1 and 2 BUILT 2026-10-19 — rule 2's open case was
-    sw87, a bare `sort()` now in string order; 3–4 not yet):**
+  - **Owner's rulings of 2026-10-19 (rules 1, 2 and 3 BUILT 2026-10-19 — rule 2's open case was
+    sw87, a bare `sort()` now in string order; rule 3's known list is
+    `src/wast_known_unbuilt.ts`, per-file ceilings; rule 4 not yet):**
     1. **An out-of-range ARRAY read gives `undefined`, as for strings (sw95).** Only that half
        of the string rule: a FLOAT array index keeps D3's conversion (asked: "out-of-range
        only"; about 26 corpus programs index arrays with a `number`). Shape: mirror sw71, a

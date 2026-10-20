@@ -15,7 +15,7 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > (below). **Resume with:** the fix order below (steps 1–2b done 2026-10-19; step 3, the compiler silent
 > rows: every unruled silent row done 2026-10-19 (`4k_LastSilentRows` the last); next: the
 > owner-ruled ~~sw95 (array out-of-range → undefined)~~ DONE 2026-10-19, ~~sw87 (bare sort() as strings)~~ DONE 2026-10-19, sw119 (i32
-> overflow store check; measure the corpus first) and ld88 (wast exit codes); sw120 goes with the
+> overflow store check; measure the corpus first) and ~~ld88 (wast exit codes)~~ DONE 2026-10-19; sw120 goes with the
 > nullable gaps, item 5; then the loud rows, step 4), then items 3–5 (binaryang 1.10.0
 > items, H10, nullable gaps).
 >
