@@ -387,7 +387,8 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     the string "undefined". `charAt` out of range stays `""`. 3 corpus programs migrated.
   - **Owner's rulings of 2026-10-19 (rules 1, 2 and 3 BUILT 2026-10-19 — rule 2's open case was
     sw87, a bare `sort()` now in string order; rule 3's known list is
-    `src/wast_known_unbuilt.ts`, per-file ceilings; rule 4 not yet):**
+    `src/wast_known_unbuilt.ts`, per-file ceilings; rule 4 MEASURED, on branch
+    `feat/i32-overflow-check` behind `--i32-check`, not merged: compiler-bugs.md § sw119):**
     1. **An out-of-range ARRAY read gives `undefined`, as for strings (sw95).** Only that half
        of the string rule: a FLOAT array index keeps D3's conversion (asked: "out-of-range
        only"; about 26 corpus programs index arrays with a `number`). Shape: mirror sw71, a
