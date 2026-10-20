@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 4 | 133 | 0 | 27 |
+| SILENT-WRONG | 3 | 134 | 0 | 27 |
 | LOUD | 36 | 61 | 10 | 9 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 4; in the tools: 0** (2026-10-19, latest: sw97, sw99, sw100,
+**Open silent-wrong in the compiler: 3; in the tools: 0** (2026-10-19, latest: sw95 built, the
+owner's rule 1, `9c_ArrayOutOfRangeUndefined`; left sw87, sw119, sw120). Before that, 4 (2026-10-19, later: sw97, sw99, sw100,
 sw101, sw108, sw121 fixed, with loud ld58, ld65; `4k_LastSilentRows`. Left: the owner-ruled sw87,
 sw95, sw119, and sw120 with the nullable gaps). Before that, 10 (2026-10-19, later: the method edge
 cases sw86, sw88, sw89, sw90, sw93, sw94 fixed, with loud ld51; `28_MethodEdgeCases`). Before
@@ -308,7 +309,7 @@ overwrite user files (sw113) at the top.
 | ~~sw92~~ | ✅ FIXED 2026-10-19: an empty pad returns the string unchanged (a missing pad is still a space, from the call site). Test `28_RelativeIndexMethods`. Was: `padStart` / `padEnd` with an empty pad pads with memory bytes | ~19451, ~19492 force `padlen` 1 |
 | ~~sw93~~ | ✅ FIXED 2026-10-19 (with ld51): `$__f64_to_str_radix`, a port of V8's DoubleToRadixCString (fraction digits to the half-ulp, round-half-even with carry, zeros past 2^53, exact i64 remainders below), emitted only when used; NaN / ±Infinity texts. Matches Deno on 12 values × 4 radixes. Test `28_MethodEdgeCases`. Was: `x.toString(radix)` of an f64 truncates to i32 (`255.5` → `ff`) | ~7742 (ld51 is its trap) |
 | ~~sw94~~ | ✅ FIXED 2026-10-19: `includes` on a float array uses `sameval_T` (equal, or both NaN); `indexOf(NaN)` stays -1 (`===`). Test `28_MethodEdgeCases`. Was: `includes(NaN)` false on an f64 array (SameValueZero) | ~10110 = `indexOf != -1` |
-| sw95 | an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner 2026-10-19: give `undefined`, as for strings; a float array index keeps D3's conversion** | design-decisions.md § "Owner's rulings of 2026-10-19" |
+| ~~sw95~~ | ✅ FIXED 2026-10-19 (the owner's rule 1): `arrOobTestWat` is the out-of-range test (`index >= length`, unsigned; `at()` normalises a negative index first; a literal index into a STATIC array is decided at compile time), used by `nullTestWat`, so `a[i] === undefined`, `a[i] ?? d`, a `T \| undefined` declaration / return from `a[i]` all see it; console.log prints `undefined` through the null printer (a float element keeps its `-0`; not for i64, whose template drops the `n`, nor f32, whose template is not built: the first try broke `9_F32Containers`). A plain numeric READ out of range (`a[9] + 1`) still reads past the array: no `undefined` value exists in an i32 / f64 (sw119's store rule is the place for it). Found with it: `inferExprType` typed `a.at(i)` as f64 (an i32[]'s `${a.at(1)}` was an invalid module). Test `9c_ArrayOutOfRangeUndefined`. Was: an out-of-range array read / `at()` is never `undefined` (`a[5] === undefined` false). **Owner 2026-10-19: give `undefined`, as for strings; a float array index keeps D3's conversion** | design-decisions.md § "Owner's rulings of 2026-10-19" |
 | ~~sw96~~ | ✅ FIXED 2026-10-19: console `!` / `~` apply only with no top-level binary operator (`hasTopLevelBinaryOp`, as unary minus). Test `7i_ConsoleUnaryBoolStringFields`. Was: console: `!` and `~` take the whole binary expression (`!a && b` is `!(a && b)`, `~n + 1` is `~(n + 1)`), also in templates / concats | console_log ~3010, ~3027 lack unary minus's `!hasTopLevelBinaryOp` guard |
 | ~~sw97~~ | ✅ FIXED 2026-10-19 (with ld65): a parenthesised left operand is f64 / i64 when its contents hold a KNOWN float / bigint (a float literal, a name declared f64 / f32 / i64); not inferExprType's f64 fallback, which turned `((z + 5) % 7) + 6` of i32s into float arithmetic (the date bundle's golden caught it). Test `4k_LastSilentRows`. Was: a declaration comparing parenthesised floats truncates both to i32 (`(z / 2) === (z / 2.5)` true) | wasic ~11636 `lhsType` falls back to `defaultType` for a `(` lead (ld65: NaN traps) |
 | ~~sw98~~ | ✅ FIXED 2026-10-19: a string struct field (`p.s`, `ps[i].s`) is a string to the console's string ternary and to wasic's `isStringExpr`; `emitStringPtrLen` builds a string ternary and a string `a ?? b` (by the value's null flag); a template part that is a string ternary is one multi-value. So the ternary prints its text in console.log, in templates and in declarations (refused before). `??` on a `string \| null` FIELD is REFUSED (`7i_NullishStringFieldRefused`): such a field has no null representation (sw120). Test `7i_ConsoleUnaryBoolStringFields`. Was: console prints a string POINTER for a string `??` or ternary over struct string fields (`q.s ?? "none"` → `268`) | console numeric path |

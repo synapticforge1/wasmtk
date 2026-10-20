@@ -114,6 +114,16 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw95 (the owner's rule 1: an out-of-range array read is `undefined`), gate
+> GREEN.** wasi **479/479** (+`9c_ArrayOutOfRangeUndefined`, failing on the old compiler) ·
+> golden-WAT **536**, 32 moved (a first try also moved, and broke, `9_F32Containers`: an f32
+> element's template is not built, so f32 arrays print as before), each reviewed by function: a console.log of an array element whose
+> range is not known at compile time prints through the null printer's string conditional
+> (`_start` / the printing functions, the string helpers it needs, `$__heap_ptr` up for the
+> "undefined" text); a static array at a literal index is folded and did not move · failed
+> compiles 10 · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · api-surface
+> unchanged.
+
 > **2026-10-19, sw97 / sw99 / sw100 / sw101 / sw108 / sw121 (+ ld58, ld65), gate GREEN.** wasi
 > **478/478** (+`4k_LastSilentRows`, failing on the old compiler) · golden-WAT **535**, nothing
 > else moved (a first try moved the date and dynrt libraries: sw97's parenthesis rule took

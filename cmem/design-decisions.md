@@ -385,11 +385,15 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     JavaScript does), and a string compared with `undefined` / `null` calls `$__str_is_nullish`
     (no text, or that marker). Edges kept, documented in sw71: `.length` of it is 9, and it equals
     the string "undefined". `charAt` out of range stays `""`. 3 corpus programs migrated.
-  - **Owner's rulings of 2026-10-19 (NOT BUILT yet):**
+  - **Owner's rulings of 2026-10-19 (rule 1 BUILT 2026-10-19; 2–4 not yet):**
     1. **An out-of-range ARRAY read gives `undefined`, as for strings (sw95).** Only that half
        of the string rule: a FLOAT array index keeps D3's conversion (asked: "out-of-range
        only"; about 26 corpus programs index arrays with a `number`). Shape: mirror sw71, a
        marker the element read returns out of range, printing `undefined`, `=== undefined` true.
+       **As built:** a number slot has no spare value, so the marker is a TEST, `index >= length`
+       (`arrOobTestWat`), at every place `undefined` is observable: `=== / !== undefined`, `??`,
+       a `T | undefined` declaration or return, console.log (prints `undefined`), and `at()`. A
+       numeric read used in arithmetic out of range is unchanged (no `undefined` number exists).
     2. **Semantics follow the function's ORIGIN.** A JavaScript / TypeScript function, method or
        operator does what JavaScript intends (a bare numeric `sort()` sorts as strings, sw87; the
        round-2 method edge cases follow JavaScript); a WASM-specific function (wasMath's `i32.*`,
