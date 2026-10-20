@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, ld88 (the owner's rule 3: `wasmtk wast` exit codes), gate GREEN.** New suite
+> **`wast_cli_tests` 4 / 4** (installed wasmtk; 2 fail on the old CLI, 2 controls) · the CLI on the
+> vendored corpus: 288 files, 0 failed, 94 unbuilt modules in 21 files, all within
+> `src/wast_known_unbuilt.ts`, exit 0 (its pass count, 63,932, is below the gate's 64,506: the
+> gate lowers custom page sizes and enables more features) · wasi 480/480 · golden 537 / 0 ·
+> wast 64,506 / 0 / 16 · cross-check on baseline · go 7 / 7 / 12 · api-surface unchanged.
+
 > **2026-10-19, sw87 (the owner's rule 2: a bare `sort()` is in string order), gate GREEN.** wasi
 > **480/480** (+`28_SortDefaultStringOrder`, failing on the old compiler) · golden-WAT **537**, 2
 > moved (`28_ArrayMutationsAndSort`, `28_ExtendedArrayMethods`: `sort_i32`, `$__numstr_gt_i32`,

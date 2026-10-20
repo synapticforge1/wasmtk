@@ -221,6 +221,7 @@ deno run --allow-read --allow-write --allow-run --allow-env tests/wasi_tests.ts 
 #    outpath (2026-10-19, sw113: no command writes over its input; runs the INSTALLED wasmtk)
 #    merge_layout (2026-10-19, sw109 / sw110 / sw112 / ld86: merged and bundled data layout)
 #    tool_rows (2026-10-19, sw111 / sw115–sw118: dual exports, run argv, numeric args, Go -o, WIT names; 16)
+#    wast_cli (2026-10-19, ld88: `wasmtk wast` exits 1 on an unlisted unbuilt module / 0 files; 4)
 
 # 2b. hybrid + wasmmerge_guard are Deno.test-based — `deno run` runs NOTHING and exits 0
 deno test --no-check --allow-read --allow-write --allow-run --allow-env \
