@@ -31,7 +31,8 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 > issue**: an i32 argument must be an integer in range (else a RangeError naming the parameter
 > and type), i64 takes a bigint (a safe-integer number converted), f32 rounds, unsigned RESULTS
 > returned unsigned; the WIT u32 / u64 → s32 / s64 collapse (bindgen.ts:73–79) to be revisited
-> with (b). Order to settle with the owner on resume: these three vs the loud rows. Also still pending from before: binaryang's next release
+> with (b). **Order (owner, 2026-10-19): AFTER the bug fixes** (the loud rows and items 3–5);
+> "do not add to the issue we are trying to fix" — no new behaviour while the fix list is open. Also still pending from before: binaryang's next release
 > (re-run wast, send numbers), the 3.0.0 release, the Deno-exit plan P0.
 >
 > **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `33b3e0e` and green on binaryang
