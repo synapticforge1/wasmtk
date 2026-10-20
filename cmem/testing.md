@@ -114,6 +114,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-19, binaryang **1.12.1**; latest release v2.0.3)
 
+> **2026-10-19, sw87 (the owner's rule 2: a bare `sort()` is in string order), gate GREEN.** wasi
+> **480/480** (+`28_SortDefaultStringOrder`, failing on the old compiler) · golden-WAT **537**, 2
+> moved (`28_ArrayMutationsAndSort`, `28_ExtendedArrayMethods`: `sort_i32`, `$__numstr_gt_i32`,
+> the string helpers it needs) · failed compiles 10 · wast 64,506 / 0 / 16 · cross-check 1152 on
+> baseline · go 7 / 7 / 12 · api-surface unchanged.
+
 > **2026-10-19, sw95 (the owner's rule 1: an out-of-range array read is `undefined`), gate
 > GREEN.** wasi **479/479** (+`9c_ArrayOutOfRangeUndefined`, failing on the old compiler) ·
 > golden-WAT **536**, 32 moved (a first try also moved, and broke, `9_F32Containers`: an f32
