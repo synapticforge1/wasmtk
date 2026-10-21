@@ -114,6 +114,17 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-20, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-20, the loud rows' invalid-module group (ld48–ld50, ld52–ld57, ld59–ld61, ld63, ld64,
+> ld75; sw124, sw125), gate GREEN.** wasi **482/482** (+`4l_MixedOperandTypes`,
+> +`28_ArrayCallbackEdges`, both failing on the old compiler) · golden-WAT **539**, 4 old entries
+> moved, each intended: `26_ForOf`, `28_SpreadLiterals` (a dropped `pop()` is `popn_i32`, which
+> does not trap), `49_StringAt`, `49_Phase49Combined` (`s.at(i)` through `$__str_index`, which
+> brings the string-ext helper family, as `s[i]` does: 403 → 964 lines unoptimised); failed
+> compiles 9 · typed_decl 45 · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12
+> · api-surface unchanged · all other suites as before. emitExpr's new i32 → f64 conversion moved
+> nothing once guarded (`isI32Number`: a first try converted a struct POINTER in
+> `9b_InlineStructArrays` and a string pointer in `Number(s)`).
+
 > **2026-10-20, binaryang 1.12.1 → 1.13.0 pinned, gate GREEN, nothing known-failing.** Predicted
 > from the letter (validation `result` fix + new refusals; optimizer output moves at -O2+): wast
 > unchanged or `assert_invalid` up / skips down, guard 0; goldens move only where optimized output

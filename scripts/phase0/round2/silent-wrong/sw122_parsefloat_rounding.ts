@@ -1,0 +1,12 @@
+type f64 = number;
+console.log(parseFloat("0.1"));
+console.log(parseFloat("0.123"));
+console.log(parseFloat("1.1"));
+console.log(parseFloat("2.675"));
+console.log(parseFloat("123.456"));
+console.log(parseFloat("0.000123"));
+console.log(parseFloat("1e-7"));
+console.log(parseFloat("3.14159"));
+console.log(parseFloat("0.987654321"));
+console.log(parseFloat("1.7976931348623157e308"));
+console.log(parseFloat("5e-324"));

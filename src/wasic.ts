@@ -2069,6 +2069,7 @@ class WasicTranspiler {
   private needsJoinHelper = false;
   private needsMatrix2DPrintHelper = false; // Phase 6d
   private needsNumParsers = false; // Phase 53: $__parse_int / $__parse_float
+  private needsStrToNumber = false; // ld60: $__str_to_number (Number(string)); needs the parsers
 
   // String data section: message → [offset, byteLength]
   // Raw (non-string) data segments for arrays etc.
@@ -8069,9 +8070,13 @@ class WasicTranspiler {
       const lenW = "(local.get $" + strName + "_len)";
       const normIdx = "(select " + nWat + " (i32.add " + lenW + " " + nWat + ") (i32.ge_s " + nWat +
         " (i32.const 0)))";
+      // out of range: `undefined`, as `s[i]` is (it read past the text, ld53, 2026-10-20)
+      this.needsStringExtHelpers = true;
+      this.needsStrIndex = true;
       return [
-        "(local.set $" + varName + "_ptr (i32.add " + ptrW + " " + normIdx + "))",
-        ind + "(local.set $" + varName + "_len (i32.const 1))",
+        `(call $__str_index ${ptrW} ${lenW} ${normIdx})`,
+        ind + "(local.set $" + varName + "_len)",
+        ind + "(local.set $" + varName + "_ptr)",
       ].join("\n");
     }
 
@@ -8495,7 +8500,13 @@ class WasicTranspiler {
           const lenW = "(local.get $" + strName + "_len)";
           const normIdx = "(select " + nWat + " (i32.add " + lenW + " " + nWat + ") (i32.ge_s " +
             nWat + " (i32.const 0)))";
-          concatAppend("(i32.add " + ptrW + " " + normIdx + ")", "(i32.const 1)");
+          // out of range: "undefined" (ld53)
+          this.needsStringExtHelpers = true;
+          this.needsStrIndex = true;
+          stmts.push(`(call $__str_index ${ptrW} ${lenW} ${normIdx})`);
+          stmts.push(`(local.set $__str_op_len)`);
+          stmts.push(`(local.set $__str_op_ptr)`);
+          concatAppend(`(local.get $__str_op_ptr)`, `(local.get $__str_op_len)`);
           return;
         }
         // str.charAt(idx) in concat — single-char substring via $__str_char_at
@@ -8738,8 +8749,85 @@ class WasicTranspiler {
   }
 
   /** Infers the WAT type of an arbitrary expression, including array element access. */
+  /** `arr.pop()` / `arr.shift()` where `undefined` is representable (a nullable declaration or
+   *  reassignment): the non-trapping helper, which sets `$__nullable_ret_flag` (0 = empty). An empty
+   *  array's pop trapped (ld48, 2026-10-20). Null for anything else, and for a string array. */
+  private emitNullablePopShift(rhs: string): string | null {
+    const m = rhs.trim().match(/^(\w+)\.(pop|shift)\s*\(\s*\)$/);
+    const info = m ? (this.arrayVars.get(m[1]!) ?? this.moduleArrayVars.get(m[1]!)) : undefined;
+    if (!m || !info?.dynamic || info.isStringArr || info.elemType === "string") return null;
+    const elem = info.is2D ? "i32" : info.elemType;
+    this.dynArrHelpers.add(`${m[2]}n_${elem}`);
+    this.needsNullableResultFlag = true;
+    return `(call $__dynarr_${m[2]}n_${elem} ${this.arrGetWat(m[1]!)})`;
+  }
+
+  /** The helper key for array callback method `method` with callback `fnName`: `<method>_<T>_ix`
+   *  when the callback takes the INDEX as a second parameter, `(x, i) => …` (it was called with the
+   *  element only: a signature-mismatch trap, ld75, 2026-10-20). A third parameter (the array) is
+   *  refused. Registers the call_indirect type, `(T[, i32]) -> result`. */
+  private cbHelperKey(method: string, elemType: WatType, fnName: string, result: WatType | null): string {
+    const fn = this.functions.find((f) => f.name === fnName);
+    const n = fn ? fn.params.length - (fn.closureCaptures?.length ?? 0) : 1;
+    if (n >= 3) {
+      this.diagnostics.push(
+        `'${method}' callback '${fnName}': a third parameter (the array itself) is not supported.`,
+      );
+    }
+    const ix = n >= 2;
+    this.getOrCreateFuncType(ix ? [elemType, "i32"] : [elemType], result);
+    return ix ? `${method}_${elemType}_ix` : `${method}_${elemType}`;
+  }
+
+  /** The sortcmp helper key for comparator `fnName`: its result type rides as a third part when it
+   *  is not i32 (`(x, y): f64 => x - y` was called through an `(f64, f64) -> i32` type: a
+   *  signature-mismatch trap, ld49, 2026-10-20). Registers the call_indirect type. */
+  private sortCmpKey(elemType: WatType, fnName: string): string {
+    const r = this.functions.find((f) => f.name === fnName)?.result;
+    const res: WatType = r === "f64" || r === "f32" || r === "i64" ? r : "i32";
+    this.getOrCreateFuncType([elemType, elemType], res);
+    return res === "i32" ? `sortcmp_${elemType}` : `sortcmp_${elemType}_${res}`;
+  }
+
+  /** Is `raw` an i32 NUMBER (not a bool, and not a pointer: a string, a struct / class / array /
+   *  closure value, a struct-array element, a 2-D row, a `new`)? Used by emitExpr's i32 → f64
+   *  conversion (ld54), which must never turn a pointer into a float. */
+  private isI32Number(raw: string, locals: Map<string, WatType>): boolean {
+    const e = raw.trim();
+    if (/^new\s/.test(e) || this.isStringExpr(e, locals)) return false;
+    if (this.inferExprType(e, locals) !== "i32") return false;
+    if (/^\w+$/.test(e)) {
+      return ![this.structVars, this.classVars, this.arrayVars, this.typedArrayVars, this.closureTypedVars,
+        this.interfaceVars].some((m) => m.has(e));
+    }
+    const elem = e.match(/^(\w+)\s*\[[^\[\]]*\]$/)?.[1];
+    if (elem) {
+      const a = this.arrayVars.get(elem);
+      if (a && (a.structTypeName || a.isStringArr || a.is2D || a.isFuncPtrArr)) return false;
+    }
+    return true;
+  }
+
+  /** The type of `obj.name` when it is a class GETTER (`this.area`, `bx.area`: its function's
+   *  result) or, for `this`, a field of the method's class; else null. */
+  private classMemberType(obj: string, name: string): WatType | null {
+    const cls = obj === "this" ? this.currentMethodClass : this.classVars.get(obj)?.className;
+    const cd = cls ? this.classDefs.get(cls) : undefined;
+    if (!cd) return null;
+    if (cd.methods.some((m) => m.isGetter && m.name === name)) {
+      const r = this.functions.find((f) => f.name === `${cls}_get_${name}`)?.result;
+      if (r) return r as WatType;
+    }
+    if (obj === "this") {
+      const field = cd.struct.fields.find((f) => f.name === name);
+      if (field) return field.type as WatType;
+    }
+    return null;
+  }
+
   private inferExprType(expr: string, locals: Map<string, WatType>): WatType {
     const e = expr.trim();
+    if (/^__strnull\(\w+\)$/.test(e)) return "bool"; // ld64's internal null test
     // A top-level COMPARISON is a boolean, whatever it starts with: `ps[0].x > 1` was typed by its
     // leading array element (i32), so `ps[1].ok || ps[0].x > 1` printed `1` (sw102, 2026-10-19).
     // Not `&&` / `||` (their result is an operand) and not across a `?` (ternary, `??`).
@@ -8779,8 +8867,18 @@ class WasicTranspiler {
       const atI = atId ? this.arrayVars.get(atId) : undefined;
       if (atI && !atI.isStringArr && atI.elemType !== "string") return atI.elemType;
     }
+    // `arr.reduce(…)` → the element type ($__dynarr_reduce_<T> returns it); it was i32, so console.log
+    // printed an f64 sum through the i32 printer, an invalid module (ld61, 2026-10-20)
+    {
+      const redM = e.match(/^(\w+)\.reduce(?:Right)?\s*\(([\s\S]*)\)$/);
+      const redI = redM && parenDepthNeverNegative(redM[2]!) ? this.arrayVars.get(redM[1]!) : undefined;
+      if (redI && !redI.isStringArr && ["i32", "i64", "f64", "f32"].includes(redI.elemType)) return redI.elemType;
+    }
     // Array element access arr[idx] → element type
     const bracketId = e.match(/^(\w+)\[/)?.[1];
+    // An element's `.length` (a row, a string element) is an i32, not the element type (ld55,
+    // 2026-10-20: `m[0].length` of an f64[][] was typed f64)
+    if (bracketId && this.arrayVars.has(bracketId) && /^\w+(?:\s*\[[^\[\]]*\])+\.length$/.test(e)) return "i32";
     if (bracketId && this.arrayVars.has(bracketId)) {
       const arrI = this.arrayVars.get(bracketId)!;
       if (arrI.isStringArr || arrI.elemType === "string") return "string";
@@ -8792,6 +8890,13 @@ class WasicTranspiler {
     }
     // Struct/class field access: varName.fieldName → return actual field type
     const dotM = e.match(/^(\w+)\.(\w+)$/);
+    // A getter (`this.area`, `bx.area`) is its function's result, and `this.f` a field of the
+    // method's class: `this.area > 10` compared an f64 getter as i32, an invalid module (ld57,
+    // 2026-10-20).
+    if (dotM) {
+      const mt = this.classMemberType(dotM[1]!, dotM[2]!);
+      if (mt) return mt;
+    }
     if (dotM) {
       const sv = this.structVars.get(dotM[1]);
       if (sv) {
@@ -9299,7 +9404,10 @@ ${prefixed}
       const lenW = strAtParts.len;
       const normIdx = "(select " + nWat + " (i32.add " + lenW + " " + nWat + ") (i32.ge_s " + nWat +
         " (i32.const 0)))";
-      return "(i32.add " + ptrW + " " + normIdx + ") (i32.const 1)";
+      // out of range: "undefined", as `s[i]` (ld53)
+      this.needsStringExtHelpers = true;
+      this.needsStrIndex = true;
+      return `(call $__str_index ${ptrW} ${lenW} ${normIdx})`;
     }
 
     // str.slice(start[, end]) — returns inline multi-value call (ptr, len) for use in $__str_cmp args
@@ -9650,6 +9758,12 @@ ${prefixed}
     const wat = this.emitExprCore(raw, locals, defaultType);
     const want = defaultType === "bool" ? "i32" : defaultType;
     const have = this.watResultType(wat, locals);
+    // An i32 where an f64 is wanted (a struct field, an element, a getter's result as an operand:
+    // `p.n * p.x`, `m[1][0] === im[1][0]`) is converted; it was handed on as is, an invalid module
+    // (ld54–ld57, 2026-10-20). f64 → i32 is not guessed here (truncation is the caller's choice).
+    // Only a NUMBER: a string's, struct's or row's i32 is a pointer (`Number(s)` printed `260`;
+    // `const t: { a: i32 } = recs[1]` asks for f64 and stores the pointer).
+    if (have === "i32" && want === "f64" && this.isI32Number(raw, locals)) return `(f64.convert_i32_s ${wat})`;
     if (!have || have === want || (have !== "f32" && want !== "f32")) return wat;
     const CONV: Record<string, string> = {
       "f32>f64": "f64.promote_f32",
@@ -9739,6 +9853,11 @@ ${prefixed}
     {
       const boxRef = expr.match(/^__boxref\((\w+)\)$/);
       if (boxRef) return `(local.get $${this.boxSlot(boxRef[1])})`;
+    }
+    // ld64: nullPrintRewrite's test of a nullable string local, `null` = the 0 pointer
+    {
+      const strNull = expr.match(/^__strnull\((\w+)\)$/);
+      if (strNull && locals.get(strNull[1]!) === "string") return `(i32.eqz (local.get $${strNull[1]}_ptr))`;
     }
     // `.length` of a string-valued CALL (`s.toUpperCase().length`): the string's len, through the
     // shared $__str_op pair. It was refused here, and in console.log a sum with it printed `2` for
@@ -10742,19 +10861,17 @@ ${prefixed}
         }
         // Phase 28: every / some — predicate over all elements
         if (method === "every" || method === "some") {
-          const key = `${method}_${elemType}`;
-          this.dynArrHelpers.add(key);
-          this.getOrCreateFuncType([elemType], "i32");
           const args = this.splitArgs(argsStr);
+          const key = this.cbHelperKey(method, elemType, args[0]?.trim() ?? "", "i32");
+          this.dynArrHelpers.add(key);
           const fnIdx = this.getFuncTableIdx(args[0]?.trim() ?? "");
           return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
         }
         // Phase 28: findIndex — returns index of first match or -1
         if (method === "findIndex") {
-          const key = `findindex_${elemType}`;
-          this.dynArrHelpers.add(key);
-          this.getOrCreateFuncType([elemType], "i32");
           const args = this.splitArgs(argsStr);
+          const key = this.cbHelperKey("findindex", elemType, args[0]?.trim() ?? "", "i32");
+          this.dynArrHelpers.add(key);
           const fnIdx = this.getFuncTableIdx(args[0]?.trim() ?? "");
           return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
         }
@@ -10794,9 +10911,8 @@ ${prefixed}
           const args = this.splitArgs(argsStr);
           const fnName = args[0]?.trim() ?? "";
           if (fnName) {
-            const key = `sortcmp_${elemType}`;
+            const key = this.sortCmpKey(elemType, fnName);
             this.dynArrHelpers.add(key);
-            this.getOrCreateFuncType([elemType, elemType], "i32");
             const fnIdx = this.getFuncTableIdx(fnName);
             return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
           } else {
@@ -10810,7 +10926,8 @@ ${prefixed}
         }
         // Phase 37: flat() — one-level flatten of a 2D array
         if (method === "flat") {
-          if (!arrInfo.is2D) return `(;? flat() requires 2D array ;)`;
+          // of a 1-D array, a shallow copy (the stub emitted nothing: an invalid module, ld50)
+          if (!arrInfo.is2D) return this.emitExpr(`${arrName}.slice(0)`, locals, defaultType);
           const key = `flat_${elemType}`;
           this.dynArrHelpers.add(key);
           return `(call $__dynarr_${key} ${this.arrGetWat(arrName)})`;
@@ -10835,19 +10952,16 @@ ${prefixed}
         const args = this.splitArgs(argsStr);
         const fnName = args[0]?.trim() ?? "";
         const fnIdx = this.getFuncTableIdx(fnName);
-        const key = `${method}_${elemType}`;
+        // map / filter / find take the index too when the callback declares it (ld75); this also
+        // pre-registers the callback funtype so emitFuncTypes() includes it
+        const key = method === "map" || method === "filter" || method === "find"
+          ? this.cbHelperKey(method, elemType, fnName, method === "map" ? elemType : "i32")
+          : `${method}_${elemType}`;
         // a reduce without an initial value uses reduce1_T instead (sw89)
         if (method !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key);
         if (method === "find") this.needsNullableResultFlag = true; // its found flag (sw90)
-        // Pre-register callback funtype so emitFuncTypes() includes it
-        if (method === "map") {
-          this.getOrCreateFuncType([elemType], elemType);
-        } else if (method === "filter" || method === "find") {
-          this.getOrCreateFuncType([elemType], "i32");
-        } else if (method === "reduce") {
-          this.getOrCreateFuncType([elemType, elemType], elemType);
-        }
         if (method === "reduce") {
+          this.getOrCreateFuncType([elemType, elemType], elemType);
           // No initial value: the accumulator starts as element 0 (`reduce1_T`); it started at 0,
           // so a product was 0 (sw89, 2026-10-19).
           if (!args[1]?.trim()) {
@@ -11733,6 +11847,14 @@ ${prefixed}
         const arg = args[0] ?? "0";
         const argType = /^\w+$/.test(arg) ? (locals.get(arg) ?? defaultType) : defaultType;
         if (argType === "i64") return `(f64.convert_i64_s ${this.emitExpr(arg, locals, "i64")})`;
+        // A string converts as JavaScript's ToNumber does (the whole trimmed text, or NaN); it was
+        // emitted as its pointer (ld60, 2026-10-20).
+        if (this.isStringExpr(arg, locals)) {
+          this.needsNumParsers = true;
+          this.needsStrToNumber = true;
+          const callW = `(call $__str_to_number ${this.emitStringPtrLen(arg, locals)})`;
+          return defaultType === "i32" ? `(i32.trunc_sat_f64_s ${callW})` : callW;
+        }
         return this.emitExpr(arg, locals, "f64");
       }
 
@@ -12223,6 +12345,9 @@ ${prefixed}
                 : undefined;
               return (field?.type as WatType) ?? null;
             }
+            // A getter, or `this.field` (ld57: `this.area > 10` compared an f64 getter as i32)
+            const mt = this.classMemberType(_dotFieldLhsM[1]!, _dotFieldLhsM[3]!);
+            if (mt) return mt;
             // varName.field: struct var or class var field
             const sv = this.structVars.get(_dotFieldLhsM[1]);
             if (sv) {
@@ -12592,6 +12717,8 @@ ${prefixed}
    *  f64 is true when nonzero and not NaN (`|x| > 0`), an i64 when nonzero. Converting an f64 to i32
    *  (`trunc`) made `if (0.5)` false (sw16, 2026-10-06). */
   private emitCond(cond: string, locals: Map<string, WatType>): string {
+    // ld64: nullPrintRewrite's `__strnull(s)` (emitExprCore's form)
+    if (/^__strnull\(\w+\)$/.test(cond.trim())) return this.emitExpr(cond.trim(), locals, "i32");
     // A condition needs only truthiness: `&&` / `||` at top level is the boolean short-circuit,
     // whatever its operands (their VALUE form, sw49, is for value contexts).
     const lg = splitTopLogical(cond);
@@ -12731,6 +12858,13 @@ ${prefixed}
   private nullTestWat(expr: string, locals: Map<string, WatType>): string | undefined {
     const e = expr.trim();
     if (e === "null" || e === "undefined") return `(i32.const 1)`;
+    // A nullable STRING local is null when it holds no text (a string assignment never sets its
+    // `__null`; `c === undefined` of `s.at(10)` was false, ld53, 2026-10-20)
+    if (/^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string" && locals.get(e) === "string") {
+      this.needsStrNullish = true;
+      this.needsStringExtHelpers = true;
+      return `(call $__str_is_nullish (local.get $${e}_ptr) (local.get $${e}_len))`;
+    }
     if (/^\w+$/.test(e) && this.nullableVarInnerType.has(e)) {
       return locals.has(e) || !this.moduleNullableGlobals.has(e)
         ? `(local.get $${e}__null)`
@@ -12800,6 +12934,9 @@ ${prefixed}
       return undefined;
     }
     const t = /^\w+$/.test(e) ? this.nullableVarInnerType.get(e) : this.fieldOfExpr(e, locals)?.type;
+    // a nullable string LOCAL is null when its pointer is 0 (ld64); an out-of-range `s.at(i)`'s
+    // "undefined" text is not null here, it prints as itself
+    if (t === "string" && /^\w+$/.test(e) && locals.get(e) === "string") return `(i32.eqz (local.get $${e}_ptr))`;
     // a `string | null` FIELD prints `null` too (sw120: its null is the 0 pointer, printed "")
     const nullableStrField = t === "string" && !/^\w+$/.test(e) && this.fieldOfExpr(e, locals)?.nullable;
     if (t !== "i32" && t !== "f64" && t !== "bool" && !nullableStrField) return undefined;
@@ -12837,6 +12974,8 @@ ${prefixed}
         : `\`\${${e}}\``;
       return `(${e} === undefined) ? "undefined" : ${shown}`;
     }
+    // a nullable STRING prints its text (the template printed its pointer as a number: ld64)
+    if (/^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string") return `__strnull(${e}) ? "null" : ${e}`;
     return `(${e} === null) ? "null" : \`\${${e}}\``;
   }
 
@@ -14369,9 +14508,11 @@ ${prefixed}
         // Detect call to a nullable-returning function to propagate the flag
         const nlFnCallM = nlInitExpr.match(/^(\w+)\s*\(/);
         const nlCalledFn = nlFnCallM ? this.functions.find((f) => f.name === nlFnCallM[1]) : null;
-        const valWat = this.emitExpr(nlInitExpr, locals, nlInner);
-        // `arr.find(…)` reports found / not found through the same flag (sw90)
-        const nlIsFind = /^\w+\.find\s*\([\s\S]*\)$/.test(nlInitExpr);
+        const nlPop = this.emitNullablePopShift(nlInitExpr);
+        const valWat = nlPop ?? this.emitExpr(nlInitExpr, locals, nlInner);
+        // `arr.find(…)` reports found / not found through the same flag (sw90), as does a
+        // `pop()` / `shift()` of an empty array (ld48)
+        const nlIsFind = /^\w+\.find\s*\([\s\S]*\)$/.test(nlInitExpr) || nlPop !== null;
         if ((nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) || nlIsFind) {
           // Read the side-channel flag written by the callee
           return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
@@ -14853,7 +14994,7 @@ ${prefixed}
 
         const key = `${method}_${outerElem}`;
         const helperName = `$__dynarr_${key}`;
-        this.dynArrHelpers.add(key);
+        if (!((method === "pop" || method === "shift") && !isStrArr)) this.dynArrHelpers.add(key);
         if (method === "push" || method === "unshift") {
           // Phase 19: struct literal argument — try static data first, then runtime malloc
           let valWat: string;
@@ -14876,6 +15017,13 @@ ${prefixed}
           }
           // Push/unshift return new arr ptr (possibly grown after realloc); update local via local.set.
           return `(local.set $${arrName} (call ${helperName} (local.get $${arrName}) ${valWat}))`;
+        }
+        // A discarded `pop()` / `shift()` of an empty array does nothing, as in JavaScript (it
+        // trapped, ld48, 2026-10-20): the non-trapping variant
+        if ((method === "pop" || method === "shift") && !isStrArr) {
+          this.dynArrHelpers.add(`${method}n_${outerElem}`);
+          this.needsNullableResultFlag = true;
+          return `(drop (call $__dynarr_${method}n_${outerElem} ${getExpr}))`;
         }
         return `(drop (call ${helperName} ${getExpr}))`;
       }
@@ -14939,23 +15087,23 @@ ${prefixed}
         const fnIdx = this.getFuncTableIdx(fnName);
         // Normalize method name to lowercase for key/helper name consistency
         const methodLc = method.toLowerCase() as string;
-        const key = `${methodLc}_${elemType}`;
+        // every callback but reduce's may take the index as a second parameter (ld75); this
+        // registers the callback funtype too
+        const key = methodLc === "reduce"
+          ? `${methodLc}_${elemType}`
+          : this.cbHelperKey(
+            methodLc,
+            elemType,
+            fnName,
+            methodLc === "foreach" ? null : methodLc === "map" ? elemType : "i32",
+          );
         if (methodLc !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key); // sw89: reduce1_T
         if (methodLc === "find") this.needsNullableResultFlag = true; // sw90
         if (methodLc === "foreach") {
-          this.getOrCreateFuncType([elemType], null);
-          return `(call $__dynarr_foreach_${elemType} (local.get $${arrName}) (i32.const ${fnIdx}))`;
-        }
-        if (methodLc === "map") {
-          this.getOrCreateFuncType([elemType], elemType);
-        } else if (methodLc === "filter" || methodLc === "find") {
-          this.getOrCreateFuncType([elemType], "i32");
-        } else if (methodLc === "reduce") {
-          this.getOrCreateFuncType([elemType, elemType], elemType);
-        } else if (methodLc === "every" || methodLc === "some" || methodLc === "findindex") {
-          this.getOrCreateFuncType([elemType], "i32");
+          return `(call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx}))`;
         }
         if (methodLc === "reduce") {
+          this.getOrCreateFuncType([elemType, elemType], elemType);
           if (!args[1]?.trim()) { // sw89: element 0 starts the accumulator
             this.dynArrHelpers.add(`reduce1_${elemType}`);
             return `(drop (call $__dynarr_reduce1_${elemType} (local.get $${arrName}) (i32.const ${fnIdx})))`;
@@ -15001,13 +15149,13 @@ ${prefixed}
           const args = this.splitArgs(argsStr);
           const fnName = args[0]?.trim() ?? "";
           if (fnName) {
-            const key = `sortcmp_${elemType}`;
+            const key = this.sortCmpKey(elemType, fnName);
             this.dynArrHelpers.add(key);
-            this.getOrCreateFuncType([elemType, elemType], "i32");
             const fnIdx = this.getFuncTableIdx(fnName);
             return `(drop (call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx})))`;
           } else if (isStrArr2) {
             this.dynArrHelpers.add("sort_string");
+            this.needsStringHelpers = true; // $__str_cmp (ld52: it was undefined, 2026-10-20)
             return `(drop (call $__dynarr_sort_string (local.get $${arrName})))`;
           } else {
             const key = `sort_${elemType}`;
@@ -15196,10 +15344,12 @@ ${prefixed}
         }
         const nlFnCallM = rhs.match(/^(\w+)\s*\(/);
         const nlCalledFn = nlFnCallM ? this.functions.find((f) => f.name === nlFnCallM[1]) : null;
-        const valWat = this.emitExpr(rhs, locals, nlReassignInner);
+        const nlPop = this.emitNullablePopShift(rhs);
+        const valWat = nlPop ?? this.emitExpr(rhs, locals, nlReassignInner);
         if (
           (nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) ||
-          /^\w+\.find\s*\([\s\S]*\)$/.test(rhs) // sw90
+          /^\w+\.find\s*\([\s\S]*\)$/.test(rhs) || // sw90
+          nlPop !== null // ld48
         ) {
           return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
         }
@@ -15411,8 +15561,9 @@ ${prefixed}
           `    )`,
         ].join("\n");
       }
-      // Phase 24: nullable variable — print "null" when flag is set, else print value
-      if (this.nullableVarInnerType.has(logSingleArg)) {
+      // Phase 24: nullable variable — print "null" when flag is set, else print value. Not a
+      // string: it prints its text through nullPrintRewrite (it printed the pointer, ld64).
+      if (this.nullableVarInnerType.has(logSingleArg) && this.nullableVarInnerType.get(logSingleArg) !== "string") {
         const nlInner = this.nullableVarInnerType.get(logSingleArg)!;
         this.needsNumericHelpers = true;
         const [nullOffset, nullLen] = this.allocString("null\n");
@@ -15726,6 +15877,18 @@ ${prefixed}
             return { type: retType as string, wat: this.emitExpr(token, locals, retType) };
           }
         }
+        // `new C(…).m(…)`: m's result type. It fell to the i32 default, so a boolean method printed
+        // `0` for false (found with ld57, 2026-10-20). One call on the new object only.
+        {
+          const nm = token.match(/^new\s+([A-Z]\w*)\s*\(/);
+          const close = nm ? findMatchingBracketAware(token, token.indexOf("(")) : -1;
+          const rest = close !== -1 ? token.slice(close + 1).match(/^\.(\w+)\s*\(([\s\S]*)\)$/) : null;
+          if (nm && rest && parenDepthNeverNegative(rest[2]!) && this.classDefs.has(nm[1]!)) {
+            const mfn = this.resolveMethodFunc(nm[1]!, rest[1]!);
+            const r = mfn ? this.functions.find((f) => f.name === mfn)?.result : undefined;
+            if (r) return { type: r as string, wat: r === "i32" || r === "bool" ? result : this.emitExpr(token, locals, r) };
+          }
+        }
         const m2 = token.match(/^(?:this|\w+)\.(\w+)\s*\(/);
         if (m2) {
           const receiver2 = token.match(/^(\w+)\./)?.[1] ?? "";
@@ -15768,6 +15931,13 @@ ${prefixed}
               return { type: (field2.funcType.result ?? "i32") as string, wat: result };
             }
           }
+          // `reduce` / `reduceRight` of a numeric array: the element type (ld61, 2026-10-20)
+          if (["reduce", "reduceRight"].includes(methodName2) && this.arrayVars.has(receiver2)) {
+            const rt = this.inferExprType(token, locals);
+            if (rt === "f64" || rt === "f32" || rt === "i64") {
+              return { type: rt, wat: this.emitExpr(token, locals, rt) };
+            }
+          }
           // Boolean-returning array methods: every, some, includes
           if (
             ["every", "some", "includes"].includes(methodName2) && this.arrayVars.has(receiver2)
@@ -15782,8 +15952,11 @@ ${prefixed}
             return { type: "bool", wat: result };
           }
         }
-        // Phase 5h: emitExpr succeeded (e.g. chained factoryFn().method()) — return as i32
-        return { type: "i32", wat: result };
+        // Phase 5h: emitExpr succeeded (e.g. chained factoryFn().method()). Its type is the WAT's
+        // own: an f64 `arr.reduce(…)` went to the i32 printer as "i32", an invalid module (ld61,
+        // 2026-10-20). Unknown stays i32, as before.
+        const have = this.watResultType(result, locals);
+        return { type: have === "f64" || have === "f32" || have === "i64" ? have : "i32", wat: result };
       };
       const globalsMap: Map<string, string> = new Map(
         [...this.moduleGlobals.entries()].map(([k, v]) => [k, watBaseType(v.type)]),
@@ -16200,6 +16373,18 @@ ${prefixed}
             return { type: retType as string, wat: this.emitExpr(token, locals, retType) };
           }
         }
+        // `new C(…).m(…)`: m's result type. It fell to the i32 default, so a boolean method printed
+        // `0` for false (found with ld57, 2026-10-20). One call on the new object only.
+        {
+          const nm = token.match(/^new\s+([A-Z]\w*)\s*\(/);
+          const close = nm ? findMatchingBracketAware(token, token.indexOf("(")) : -1;
+          const rest = close !== -1 ? token.slice(close + 1).match(/^\.(\w+)\s*\(([\s\S]*)\)$/) : null;
+          if (nm && rest && parenDepthNeverNegative(rest[2]!) && this.classDefs.has(nm[1]!)) {
+            const mfn = this.resolveMethodFunc(nm[1]!, rest[1]!);
+            const r = mfn ? this.functions.find((f) => f.name === mfn)?.result : undefined;
+            if (r) return { type: r as string, wat: r === "i32" || r === "bool" ? result : this.emitExpr(token, locals, r) };
+          }
+        }
         const m2 = token.match(/^(?:this|\w+)\.(\w+)\s*\(/);
         if (m2) {
           const receiver2 = token.match(/^(\w+)\./)?.[1] ?? "";
@@ -16241,6 +16426,13 @@ ${prefixed}
               return { type: (field2.funcType.result ?? "i32") as string, wat: result };
             }
           }
+          // `reduce` / `reduceRight` of a numeric array: the element type (ld61; mirror)
+          if (["reduce", "reduceRight"].includes(methodName2) && this.arrayVars.has(receiver2)) {
+            const rt = this.inferExprType(token, locals);
+            if (rt === "f64" || rt === "f32" || rt === "i64") {
+              return { type: rt, wat: this.emitExpr(token, locals, rt) };
+            }
+          }
           // Boolean-returning array methods: every, some, includes (mirror of dotCallLookupFn)
           if (
             ["every", "some", "includes"].includes(methodName2) && this.arrayVars.has(receiver2)
@@ -16255,7 +16447,9 @@ ${prefixed}
             return { type: "bool", wat: result };
           }
         }
-        return { type: "i32", wat: result };
+        // the WAT's own type (ld61; mirror of dotCallLookupFn)
+        const haveErr = this.watResultType(result, locals);
+        return { type: haveErr === "f64" || haveErr === "f32" || haveErr === "i64" ? haveErr : "i32", wat: result };
       };
       const globalsMapErr: Map<string, string> = new Map(
         [...this.moduleGlobals.entries()].map(([k, v]) => [k, watBaseType(v.type)]),
@@ -18058,7 +18252,7 @@ ${prefixed}
     if (this.f64RadixTexts) parts.push(this.f64RadixHelperWat());
     if (this.neededEnumStrHelpers.size > 0) parts.push(this.emitEnumStrHelpers());
     if (this.mathHelpers.size > 0) parts.push(this.emitMathHelpers());
-    if (this.needsNumParsers) parts.push(this.emitNumParserHelpers());
+    if (this.needsNumParsers) parts.push(this.emitNumParserHelpers(this.needsStrToNumber));
     if (this.dynArrHelpers.size > 0) parts.push(this.emitDynArrHelpers());
     if (this.typedArrHelpers.size > 0) parts.push(this.emitTypedArrHelpers());
     if (this.needsMatrix2DPrintHelper) parts.push(this.emitMatrix2DPrintHelper());
@@ -18583,8 +18777,8 @@ ${sum}
    * is consumed when radix is 16). `$__parse_float` reads integer, fractional, and `e`-exponent
    * parts (decimal only; `Infinity`/`NaN` literals are not recognized).
    */
-  private emitNumParserHelpers(): string {
-    return [
+  private emitNumParserHelpers(withStrToNumber: boolean): string {
+    const parts = [
       `  ;; parseInt(str, radix) — (ptr,len,radix) -> f64; radix 0 defaults to 10
   (func $__parse_int (param $ptr i32) (param $len i32) (param $radix i32) (result f64)
     (local $i i32) (local $c i32) (local $dv i32) (local $digits i32)
@@ -18734,7 +18928,109 @@ ${sum}
             (local.set $expVal (i32.sub (local.get $expVal) (i32.const 1)))
             (br $e_lp)))
         (local.get $acc))))`,
-    ].join("\n\n");
+      `  ;; Number(str) — (ptr,len) -> f64; JavaScript's ToNumber of a string: surrounding whitespace
+  ;; trimmed, "" is 0, 0x / 0o / 0b integers, [+-]Infinity, else the WHOLE text must be a decimal
+  ;; literal (parseFloat reads it), or NaN
+  (func $__str_to_number (param $ptr i32) (param $len i32) (result f64)
+    (local $i i32) (local $n i32) (local $c i32) (local $radix i32) (local $dv i32)
+    (local $ds i32) (local $es i32) (local $neg i32)
+    (local.set $n (local.get $len))
+    ;; trim (space, TAB, LF, VT, FF, CR)
+    (block $l_done (loop $l
+      (br_if $l_done (i32.ge_u (local.get $i) (local.get $n)))
+      (local.set $c (i32.load8_u (i32.add (local.get $ptr) (local.get $i))))
+      (br_if $l_done (i32.eqz (i32.or (i32.eq (local.get $c) (i32.const 32))
+        (i32.and (i32.ge_u (local.get $c) (i32.const 9)) (i32.le_u (local.get $c) (i32.const 13))))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $l)))
+    (block $r_done (loop $r
+      (br_if $r_done (i32.le_u (local.get $n) (local.get $i)))
+      (local.set $c (i32.load8_u (i32.add (local.get $ptr) (i32.sub (local.get $n) (i32.const 1)))))
+      (br_if $r_done (i32.eqz (i32.or (i32.eq (local.get $c) (i32.const 32))
+        (i32.and (i32.ge_u (local.get $c) (i32.const 9)) (i32.le_u (local.get $c) (i32.const 13))))))
+      (local.set $n (i32.sub (local.get $n) (i32.const 1)))
+      (br $r)))
+    (if (i32.eq (local.get $i) (local.get $n)) (then (return (f64.const 0))))
+    ;; 0x / 0o / 0b (no sign)
+    (if (i32.and (i32.lt_u (i32.add (local.get $i) (i32.const 2)) (i32.add (local.get $n) (i32.const 1)))
+          (i32.eq (i32.load8_u (i32.add (local.get $ptr) (local.get $i))) (i32.const 48)))
+      (then
+        (local.set $c (i32.or (i32.load8_u (i32.add (local.get $ptr) (i32.add (local.get $i) (i32.const 1)))) (i32.const 32)))
+        (if (i32.eq (local.get $c) (i32.const 120)) (then (local.set $radix (i32.const 16))))
+        (if (i32.eq (local.get $c) (i32.const 111)) (then (local.set $radix (i32.const 8))))
+        (if (i32.eq (local.get $c) (i32.const 98)) (then (local.set $radix (i32.const 2))))))
+    (if (local.get $radix)
+      (then
+        (local.set $i (i32.add (local.get $i) (i32.const 2)))
+        (if (i32.ge_u (local.get $i) (local.get $n)) (then (return (f64.const nan))))
+        (local.set $ds (local.get $i))
+        (block $d_done (loop $d
+          (br_if $d_done (i32.ge_u (local.get $ds) (local.get $n)))
+          (local.set $c (i32.or (i32.load8_u (i32.add (local.get $ptr) (local.get $ds))) (i32.const 32)))
+          (local.set $dv (i32.const 99))
+          (if (i32.and (i32.ge_u (local.get $c) (i32.const 48)) (i32.le_u (local.get $c) (i32.const 57)))
+            (then (local.set $dv (i32.sub (local.get $c) (i32.const 48)))))
+          (if (i32.and (i32.ge_u (local.get $c) (i32.const 97)) (i32.le_u (local.get $c) (i32.const 102)))
+            (then (local.set $dv (i32.sub (local.get $c) (i32.const 87)))))
+          (if (i32.ge_u (local.get $dv) (local.get $radix)) (then (return (f64.const nan))))
+          (local.set $ds (i32.add (local.get $ds) (i32.const 1)))
+          (br $d)))
+        (return (call $__parse_int (i32.add (local.get $ptr) (local.get $i))
+          (i32.sub (local.get $n) (local.get $i)) (local.get $radix)))))
+    ;; sign, then Infinity
+    (local.set $ds (local.get $i))
+    (local.set $c (i32.load8_u (i32.add (local.get $ptr) (local.get $ds))))
+    (if (i32.or (i32.eq (local.get $c) (i32.const 43)) (i32.eq (local.get $c) (i32.const 45)))
+      (then
+        (local.set $neg (i32.eq (local.get $c) (i32.const 45)))
+        (local.set $ds (i32.add (local.get $ds) (i32.const 1)))))
+    (if (i32.and (i32.eq (i32.sub (local.get $n) (local.get $ds)) (i32.const 8))
+          (i64.eq (i64.load (i32.add (local.get $ptr) (local.get $ds))) (i64.const 0x7974696e69666e49)))
+      (then (return (select (f64.const -inf) (f64.const inf) (local.get $neg)))))
+    ;; the whole text a decimal literal: digits [. digits] | . digits, then [eE [+-] digits]
+    (local.set $es (local.get $ds))
+    (block $a_done (loop $a
+      (br_if $a_done (i32.ge_u (local.get $es) (local.get $n)))
+      (local.set $c (i32.load8_u (i32.add (local.get $ptr) (local.get $es))))
+      (br_if $a_done (i32.gt_u (i32.sub (local.get $c) (i32.const 48)) (i32.const 9)))
+      (local.set $es (i32.add (local.get $es) (i32.const 1)))
+      (br $a)))
+    (local.set $dv (i32.sub (local.get $es) (local.get $ds)))
+    (if (i32.lt_u (local.get $es) (local.get $n))
+      (then (if (i32.eq (i32.load8_u (i32.add (local.get $ptr) (local.get $es))) (i32.const 46))
+        (then
+          (local.set $es (i32.add (local.get $es) (i32.const 1)))
+          (local.set $ds (local.get $es))
+          (block $f_done (loop $f
+            (br_if $f_done (i32.ge_u (local.get $es) (local.get $n)))
+            (local.set $c (i32.load8_u (i32.add (local.get $ptr) (local.get $es))))
+            (br_if $f_done (i32.gt_u (i32.sub (local.get $c) (i32.const 48)) (i32.const 9)))
+            (local.set $es (i32.add (local.get $es) (i32.const 1)))
+            (br $f)))
+          (local.set $dv (i32.add (local.get $dv) (i32.sub (local.get $es) (local.get $ds))))))))
+    (if (i32.eqz (local.get $dv)) (then (return (f64.const nan))))
+    (if (i32.lt_u (local.get $es) (local.get $n))
+      (then
+        (local.set $c (i32.or (i32.load8_u (i32.add (local.get $ptr) (local.get $es))) (i32.const 32)))
+        (if (i32.ne (local.get $c) (i32.const 101)) (then (return (f64.const nan))))
+        (local.set $es (i32.add (local.get $es) (i32.const 1)))
+        (if (i32.lt_u (local.get $es) (local.get $n))
+          (then
+            (local.set $c (i32.load8_u (i32.add (local.get $ptr) (local.get $es))))
+            (if (i32.or (i32.eq (local.get $c) (i32.const 43)) (i32.eq (local.get $c) (i32.const 45)))
+              (then (local.set $es (i32.add (local.get $es) (i32.const 1)))))))
+        (local.set $ds (local.get $es))
+        (block $x_done (loop $x
+          (br_if $x_done (i32.ge_u (local.get $es) (local.get $n)))
+          (local.set $c (i32.load8_u (i32.add (local.get $ptr) (local.get $es))))
+          (br_if $x_done (i32.gt_u (i32.sub (local.get $c) (i32.const 48)) (i32.const 9)))
+          (local.set $es (i32.add (local.get $es) (i32.const 1)))
+          (br $x)))
+        (if (i32.eq (local.get $es) (local.get $ds)) (then (return (f64.const nan))))))
+    (if (i32.ne (local.get $es) (local.get $n)) (then (return (f64.const nan))))
+    (call $__parse_float (i32.add (local.get $ptr) (local.get $i)) (i32.sub (local.get $n) (local.get $i))))`,
+    ];
+    return (withStrToNumber ? parts : parts.slice(0, 2)).join("\n\n");
   }
 
   /** Phase 31: Emits TypedArray helper functions (fill, set) for each requested element type. */
@@ -18943,6 +19239,10 @@ ${sum}
       const valType = isF64 ? "f64" : elemType === "f32" ? "f32" : "i32";
       const loadOp = `${valType}.load`;
       const storeOp = `${valType}.store`;
+      // `<method>_<T>_ix`: the callback takes the index as well (ld75, see cbHelperKey)
+      const cbIx = key.endsWith("_ix");
+      const ixArg = cbIx ? " (local.get $i)" : "";
+      const cbType = (r: WatType | null) => this.getOrCreateFuncType(cbIx ? [elemType, "i32"] : [elemType], r);
       const name = `$__dynarr_${key}`;
 
       if (method === "push" && key !== "push_string") {
@@ -18978,6 +19278,37 @@ ${sum}
     (${loadOp}
       (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $newlen) (i32.const ${shift})))
     )
+  )`,
+        );
+      } else if (method === "popn" || method === "shiftn") {
+        // ld48: JavaScript's pop / shift of an empty array is `undefined`, not a trap. The value is
+        // 0 then and $__nullable_ret_flag says which (1 = an element); used where the result is
+        // dropped or lands in a nullable variable.
+        const last = method === "popn";
+        parts.push(
+          `  ;; Dynamic array ${method}_${elemType}: ${last ? "pop" : "shift"} that does not trap on an empty array
+  (func ${name} (param $arr i32) (result ${valType})
+    (local $len i32) (local $val ${valType}) (local $i i32)
+    (local.set $len (i32.load (local.get $arr)))
+    (global.set $__nullable_ret_flag (i32.ne (local.get $len) (i32.const 0)))
+    (if (i32.eqz (local.get $len)) (then (return (${valType}.const 0))))
+    (local.set $len (i32.sub (local.get $len) (i32.const 1)))
+    ${
+            last
+              ? `(local.set $val (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $len) (i32.const ${shift})))))`
+              : `(local.set $val (${loadOp} offset=8 (local.get $arr)))
+    (block $brk
+      (loop $lp
+        (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
+        (${storeOp}
+          (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift})))
+          (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8))
+            (i32.shl (i32.add (local.get $i) (i32.const 1)) (i32.const ${shift})))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $lp)))`
+          }
+    (i32.store (local.get $arr) (local.get $len))
+    (local.get $val)
   )`,
         );
       } else if (method === "shift") {
@@ -19172,8 +19503,8 @@ ${sum}
   )`,
         );
       } else if (method === "foreach") {
-        // Register callback type: (elemType) → void
-        const ftName = this.getOrCreateFuncType([elemType], null);
+        // Register callback type: (elemType[, i32]) → void
+        const ftName = cbType(null);
         parts.push(`  ;; Dynamic array foreach_${elemType}: call fn(elem) for each element.
   (func ${name} (param $arr i32) (param $fn i32)
     (local $i i32)
@@ -19183,7 +19514,7 @@ ${sum}
       (loop $lp
         (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
         (call_indirect (type ${ftName})
-          (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))
+          (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))${ixArg}
           (local.get $fn))
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $lp)
@@ -19191,8 +19522,8 @@ ${sum}
     )
   )`);
       } else if (method === "map") {
-        // Register callback type: (elemType) → elemType
-        const ftName = this.getOrCreateFuncType([elemType], elemType);
+        // Register callback type: (elemType[, i32]) → elemType
+        const ftName = cbType(elemType);
         parts.push(`  ;; Dynamic array map_${elemType}: alloc new array, fill with fn(elem) results.
   (func ${name} (param $arr i32) (param $fn i32) (result i32)
     (local $i i32)
@@ -19208,7 +19539,7 @@ ${sum}
         (${storeOp}
           (i32.add (i32.add (local.get $newptr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift})))
           (call_indirect (type ${ftName})
-            (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))
+            (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))${ixArg}
             (local.get $fn)))
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $lp)
@@ -19217,8 +19548,8 @@ ${sum}
     (local.get $newptr)
   )`);
       } else if (method === "filter") {
-        // Register callback type: (elemType) → i32
-        const ftName = this.getOrCreateFuncType([elemType], "i32");
+        // Register callback type: (elemType[, i32]) → i32
+        const ftName = cbType("i32");
         parts.push(
           `  ;; Dynamic array filter_${elemType}: alloc new array with elements where fn(elem) is truthy.
   (func ${name} (param $arr i32) (param $fn i32) (result i32)
@@ -19234,7 +19565,7 @@ ${sum}
       (loop $lp
         (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
         (local.set $val (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift})))))
-        (if (call_indirect (type ${ftName}) (local.get $val) (local.get $fn))
+        (if (call_indirect (type ${ftName}) (local.get $val)${ixArg} (local.get $fn))
           (then
             (${storeOp}
               (i32.add (i32.add (local.get $newptr) (i32.const 8)) (i32.shl (local.get $newlen) (i32.const ${shift})))
@@ -19251,8 +19582,8 @@ ${sum}
   )`,
         );
       } else if (method === "find") {
-        // Register callback type: (elemType) → i32
-        const ftName = this.getOrCreateFuncType([elemType], "i32");
+        // Register callback type: (elemType[, i32]) → i32
+        const ftName = cbType("i32");
         const notFound = valType === "i32" ? "(i32.const -1)" : `(${valType}.const nan)`;
         parts.push(
           `  ;; Dynamic array find_${elemType}: return first elem where fn(elem) is truthy, or ${
@@ -19267,7 +19598,7 @@ ${sum}
       (loop $lp
         (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
         (local.set $val (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift})))))
-        (if (call_indirect (type ${ftName}) (local.get $val) (local.get $fn))
+        (if (call_indirect (type ${ftName}) (local.get $val)${ixArg} (local.get $fn))
           (then
             (global.set $__nullable_ret_flag (i32.const 1))
             (return (local.get $val)))
@@ -19381,7 +19712,7 @@ ${sum}
     (local.get $newptr)
   )`);
       } else if (method === "every") {
-        const ftName = this.getOrCreateFuncType([elemType], "i32");
+        const ftName = cbType("i32");
         parts.push(
           `  ;; Dynamic array every_${elemType}: returns 1 if fn(elem) is truthy for all elements, else 0.
   (func ${name} (param $arr i32) (param $fn i32) (result i32)
@@ -19393,7 +19724,7 @@ ${sum}
         (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
         (if (i32.eqz
               (call_indirect (type ${ftName})
-                (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))
+                (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))${ixArg}
                 (local.get $fn)))
           (then (return (i32.const 0)))
         )
@@ -19405,7 +19736,7 @@ ${sum}
   )`,
         );
       } else if (method === "some") {
-        const ftName = this.getOrCreateFuncType([elemType], "i32");
+        const ftName = cbType("i32");
         parts.push(
           `  ;; Dynamic array some_${elemType}: returns 1 if fn(elem) is truthy for any element, else 0.
   (func ${name} (param $arr i32) (param $fn i32) (result i32)
@@ -19416,7 +19747,7 @@ ${sum}
       (loop $lp
         (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
         (if (call_indirect (type ${ftName})
-              (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))
+              (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))${ixArg}
               (local.get $fn))
           (then (return (i32.const 1)))
         )
@@ -19428,7 +19759,7 @@ ${sum}
   )`,
         );
       } else if (method === "findindex") {
-        const ftName = this.getOrCreateFuncType([elemType], "i32");
+        const ftName = cbType("i32");
         parts.push(`  ;; Dynamic array findindex_${elemType}: returns index of first match or -1.
   (func ${name} (param $arr i32) (param $fn i32) (result i32)
     (local $i i32)
@@ -19438,7 +19769,7 @@ ${sum}
       (loop $lp
         (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
         (if (call_indirect (type ${ftName})
-              (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))
+              (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))${ixArg}
               (local.get $fn))
           (then (return (local.get $i)))
         )
@@ -19570,7 +19901,10 @@ ${sum}
   )`,
         );
       } else if (method === "sortcmp") {
-        const ftName = this.getOrCreateFuncType([elemType, elemType], "i32");
+        // the comparator's result type: `sortcmp_f64_f64` for `(x, y): f64 => x - y` (ld49)
+        const cmpRes = (key.split("_")[2] ?? "i32") as WatType;
+        const ftName = this.getOrCreateFuncType([elemType, elemType], cmpRes);
+        const cmpGt = cmpRes === "i32" || cmpRes === "i64" ? `${cmpRes}.gt_s` : `${cmpRes}.gt`;
         parts.push(
           `  ;; Dynamic array sortcmp_${elemType}: in-place insertion sort with comparator, returns arr ptr.
   (func ${name} (param $arr i32) (param $fn i32) (result i32)
@@ -19592,9 +19926,9 @@ ${sum}
           (loop $ilp
             (br_if $inner (i32.lt_s (local.get $j) (i32.const 0)))
             (local.set $aj (${loadOp} (i32.add (local.get $base) (i32.shl (local.get $j) (i32.const ${shift})))))
-            (if (i32.gt_s
+            (if (${cmpGt}
                   (call_indirect (type ${ftName}) (local.get $aj) (local.get $key) (local.get $fn))
-                  (i32.const 0))
+                  (${cmpRes}.const 0))
               (then
                 (${storeOp}
                   (i32.add (local.get $base) (i32.shl (i32.add (local.get $j) (i32.const 1)) (i32.const ${shift})))
@@ -20742,6 +21076,10 @@ ${sum}
     // Re-seed module-level `T | null` globals — the reset above is per-function, but their
     // companion `$g__null` is a WASM global visible from every body.
     for (const [gn, gi] of this.moduleNullableGlobals) this.nullableVarInnerType.set(gn, gi.inner);
+    // A function-typed PARAMETER's signature is this function's own: funcTypeVars is keyed by
+    // name, so the last function parsed with a `gt` param (maxOf_f64) typed every `gt(…)` call
+    // (maxOf_i32 called it as (f64, f64): a signature-mismatch trap, ld75, 2026-10-20).
+    for (const p of fn.params) if (p.funcTypeInfo) this.funcTypeVars.set(p.name, p.funcTypeInfo);
     // #14.3.1: collect `any`-typed locals (from body `: any` declarations) so the `as`-unbox path
     // knows which i32s are boxed dynrt handles. (any-PARAM unboxing is a documented follow-up — the
     // FuncParam struct doesn't retain the raw `any` annotation; any params still work via the
@@ -21502,7 +21840,11 @@ ${sum}
         const nlInner = parseNullableAnnotation(nlPre[2]);
         if (nlInner && !locals.has(nlVarName)) {
           this.nullableVarInnerType.set(nlVarName, nlInner);
-          declaredLocals.push([nlVarName, nlInner], [`${nlVarName}__null`, "i32"]);
+          // a nullable STRING is its (ptr, len) pair; one `string` local left `$s_ptr` undeclared
+          // (ld53, ld64, 2026-10-20)
+          if (nlInner === "string") declaredLocals.push([`${nlVarName}_ptr`, "i32"], [`${nlVarName}_len`, "i32"]);
+          else declaredLocals.push([nlVarName, nlInner]);
+          declaredLocals.push([`${nlVarName}__null`, "i32"]);
           locals.set(nlVarName, nlInner);
           locals.set(`${nlVarName}__null`, "i32");
           this.needsNullableResultFlag = true;
@@ -23467,7 +23809,11 @@ ${sum}
           const nlInnerS = parseNullableAnnotation(nlPreS[2]);
           if (nlInnerS && !startLocals.has(nlVarNameS)) {
             this.nullableVarInnerType.set(nlVarNameS, nlInnerS);
-            startDeclaredLocals.push([nlVarNameS, nlInnerS], [`${nlVarNameS}__null`, "i32"]);
+            // a nullable STRING is its (ptr, len) pair (ld53, ld64)
+            if (nlInnerS === "string") {
+              startDeclaredLocals.push([`${nlVarNameS}_ptr`, "i32"], [`${nlVarNameS}_len`, "i32"]);
+            } else startDeclaredLocals.push([nlVarNameS, nlInnerS]);
+            startDeclaredLocals.push([`${nlVarNameS}__null`, "i32"]);
             startLocals.set(nlVarNameS, nlInnerS);
             startLocals.set(`${nlVarNameS}__null`, "i32");
             this.needsNullableResultFlag = true;

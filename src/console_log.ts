@@ -810,6 +810,14 @@ function hasFloatField(s: string, structLookup?: StructFieldLookup): boolean {
   return false;
 }
 
+/** Does `s` read an element of an f64 / f32 array (`fa[1]`, not `m[0].length` / `m[0][1]`)? It makes
+ *  an i32-led sum a float: `ia[1] + fa[1]` was `i32.add` over an f64 load (ld56, 2026-10-20). */
+function hasFloatElem(s: string, arrayLookup?: ArrayLookup): boolean {
+  if (!arrayLookup) return false;
+  return [...s.matchAll(/(?<![\w.])([A-Za-z_]\w*)\s*\[[^\[\]]*\](?!\s*[.\[])/g)]
+    .some((m) => ["f64", "f32"].includes(arrayLookup(m[1]!)?.elemType ?? ""));
+}
+
 /** Is `s` a boolean: `true` / `false`, a boolean variable, `!x`, or a top-level comparison? */
 function isBoolOperand(
   s: string,
@@ -1478,18 +1486,12 @@ function parseSingleArg(
     strAtConsoleM && locals.get(strAtConsoleM[1]) === "string" &&
     parenDepthNeverNegative(strAtConsoleM[2])
   ) {
-    const strName = strAtConsoleM[1];
-    const rawN = strAtConsoleM[2].trim();
-    const nNum = /^-?\d+$/.test(rawN) ? parseInt(rawN, 10) : null;
-    const nWat = nNum !== null
-      ? "(i32.const " + nNum + ")"
-      : exprToWat(rawN, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals);
-    const ptrW = "(local.get $" + strName + "_ptr)";
-    const lenW = "(local.get $" + strName + "_len)";
-    const normIdx = "(select " + nWat + " (i32.add " + lenW + " " + nWat + ") (i32.ge_s " + nWat +
-      " (i32.const 0)))";
-    const ptrWat = "(i32.add " + ptrW + " " + normIdx + ")";
-    return [{ kind: "strexpr" as const, ptrWat, lenWat: "(i32.const 1)" }];
+    // wasic's emitStringPtrLen, which gives an out-of-range index's "undefined" (ld53, 2026-10-20:
+    // this read the byte past the text, `[${s.at(5)}]` printed `[u]`)
+    const r = _stringExprResolver?.(token, locals);
+    if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+    _diagnosticSink?.(`console argument: cannot emit '${token.slice(0, 60)}'.`);
+    return [{ kind: "literal", text: "" }];
   }
 
   // ── String literal method: "TEXT".toLowerCase() / "TEXT".toUpperCase() → pre-computed literal
@@ -2157,8 +2159,13 @@ function parseSingleArg(
   const leadArr = leadId ? arrayLookup?.(leadId) : undefined;
   // A lead atom may be a function-local OR a module GLOBAL (e.g. `const a: i32 = 1` at module scope
   // → `console.log(a + b)`); consult both, else `a + b` of i32 globals would default to f64.add.
+  // A ROW's `.length` (`m[0].length + m.length`) is an i32, not the f64 element type (ld55,
+  // 2026-10-20: an f64 add over i32 loads, an invalid module).
+  const leadRowLen = leadArr && /^\w+(?:\s*\[[^\[\]]*\])+\.length(?![\w(])/.test(token);
   let leadType = leadElemDotM && leadFi
     ? leadFi.type
+    : leadRowLen
+    ? "i32"
     : leadArr
     ? leadArr.elemType
     : (leadId ? (locals.get(leadId) ?? globals?.get(leadId)) : undefined);
@@ -2190,6 +2197,16 @@ function parseSingleArg(
     if (lead2 && (/^\d+n$/.test(lead2) || (locals.get(lead2) ?? globals?.get(lead2)) === "i64")) {
       leadType = "i64";
     }
+    // ...or by a bigint ELEMENT (`-arr[0]` of a bigint[]: f64.neg of an i64 load, ld59, 2026-10-20)
+    const elem2 = rest2.match(/^(\w+)\s*\[[^\[\]]*\](?!\s*[.\[])/);
+    if (elem2 && arrayLookup?.(elem2[1]!)?.elemType === "i64") leadType = "i64";
+    // ...or by a bigint-returning CALL, or arithmetic with a bigint literal (`bg() ** 3n % 5n` was
+    // f64 ops over i64 values, ld59; wasic's inferExprType has the same literal rule)
+    const call2 = rest2.match(/^(\w+)\s*\(/)?.[1];
+    if (call2 && funcLookup?.(call2)?.result === "i64") leadType = "i64";
+    if (/(^|[^\w.])\d+n\b/.test(token) && /^[\w\s()+\-*/%&|^<>~]+$/.test(token) && !isTopLevelComparison(token)) {
+      leadType = "i64";
+    }
     // ...or by a bigint FIELD (`-h.big` printed `-12`, sw103, 2026-10-19)
     const field2 = rest2.match(/^(\w+)\.(\w+)\b/);
     if (field2 && structLookup?.(field2[1], field2[2])?.type === "i64") leadType = "i64";
@@ -2212,7 +2229,8 @@ function parseSingleArg(
   // An i32-led expression with a KNOWN float in it (`i + f`, `i * 0.5`) is a float (sw15's console
   // twin, 2026-10-06); printing an integral value as f64 gives the same text, so this is safe.
   const hasKnownFloat = [...token.matchAll(/(?<![\w.])(-?\d+\.\d*(?:[eE][+-]?\d+)?|[A-Za-z_]\w*)/g)]
-    .some((m) => isKnownFloat(m[1]!, locals, globals)) || hasFloatField(token, structLookup);
+    .some((m) => isKnownFloat(m[1]!, locals, globals)) || hasFloatField(token, structLookup) ||
+    hasFloatElem(token, arrayLookup);
   if ((leadType === "i32" || leadType === "bool") && !hasKnownFloat) {
     return [{
       kind: "i32expr",
@@ -3092,18 +3110,11 @@ function exprToWat(
   if (expr.startsWith("-") && !/^-\d/.test(expr) && !hasTopLevelBinaryOp(expr)) {
     const inner = expr.slice(1).trim();
     if (isFloat) {
-      return `(${expectedType}.neg ${
-        exprToWat(
-          inner,
-          locals,
-          numType,
-          funcLookup,
-          allocString,
-          arrayLookup,
-          structLookup,
-          globals,
-        )
-      })`;
+      const iw = exprToWat(inner, locals, numType, funcLookup, allocString, arrayLookup, structLookup, globals);
+      // an i32 operand (an element, a field: `-ia[0]`) widened first; it was `f64.neg` of an i32,
+      // an invalid module (ld55, 2026-10-20)
+      const it = watOuterType(iw, locals, globals);
+      return `(${expectedType}.neg ${it === "i32" ? (widenNumeric(iw, "i32", numType) ?? iw) : iw})`;
     }
     // a bigint (the i64 segment of `console.log(-a)`, sw64, 2026-10-13)
     if (expectedType === "i64") {
@@ -3163,8 +3174,14 @@ function exprToWat(
     if (strOpIdx === -1) continue;
     const strLhs = expr.slice(0, strOpIdx).trim();
     const strRhs = expr.slice(strOpIdx + strOp.length).trim();
-    const lStr = looksLikeString(strLhs, locals, arrayLookup);
-    const rStr = looksLikeString(strRhs, locals, arrayLookup);
+    // ...or a whole call to a string-returning function: `nm() < s` compared numbers over a `$s`
+    // that does not exist, an invalid module (ld63, 2026-10-20)
+    const strCall = (e: string) => {
+      const cm = e.match(/^(\w+)\s*\(([\s\S]*)\)$/);
+      return !!cm && parenDepthNeverNegative(cm[2]!) && funcLookup?.(cm[1]!)?.result === "string";
+    };
+    const lStr = looksLikeString(strLhs, locals, arrayLookup) || strCall(strLhs);
+    const rStr = looksLikeString(strRhs, locals, arrayLookup) || strCall(strRhs);
     const isEquality = !/^[<>]/.test(strOp);
     if (isEquality ? !lStr && !rStr : !(lStr && rStr)) break;
     // A string against `undefined` / `null` is wasic's (`$__str_is_nullish`: no text, or an
@@ -3358,7 +3375,8 @@ function exprToWat(
     // `console.log("x:", arr[0] + arr[1])` emit `i32.add` for an i32[] / `f64.add` for an f64[]
     // instead of defaulting to f64 (which produced wrong output or a type error).
     const leadArrElem = (leadM && leadM[2] === undefined && restAfterLead.startsWith("["))
-      ? arrayLookup?.(leadM[1])?.elemType
+      // a row's `.length` is an i32 (ld55)
+      ? (/^(?:\s*\[[^\[\]]*\])+\.length(?![\w(])/.test(restAfterLead) ? "i32" : arrayLookup?.(leadM[1])?.elemType)
       : undefined;
     // A boolean element is an i32 (`flags[0] === false` was f64.eq over an i32 load: an invalid
     // module; found with sw69).
@@ -3370,7 +3388,7 @@ function exprToWat(
       : undefined;
     const leadNum = (t: string | undefined) =>
       t === "i32" || t === "i64" || t === "f64" || t === "f32" || t === "bool" ? t : undefined;
-    const lhsArrNumType = leadElemField ? leadNum(leadFieldType) : leadNum(leadArrElem);
+    const lhsArrNumType = leadElemField ? (leadNum(leadFieldType) ?? leadNum(leadArrElem)) : leadNum(leadArrElem);
     const lhsLocalType = lhsArrNumType
       ? lhsArrNumType
       : !leadIsSimpleAtom || !leadM
@@ -3448,7 +3466,7 @@ function exprToWat(
       : effLhsType === "i64"
       ? "i64"
       : (effLhsType === "i32" || effLhsType === "bool") && !isKnownFloat(rhs, locals, globals) &&
-          !hasFloatField(rhs, structLookup)
+          !hasFloatField(rhs, structLookup) && !hasFloatElem(rhs, arrayLookup)
       ? "i32"
       : (effLhsType === "i32" || effLhsType === "bool")
       ? "f64"
@@ -3461,10 +3479,16 @@ function exprToWat(
     // `/` between integers: refused, as in wasic's emitExpr (owner, 2026-10-09).
     if (watOp === "i32.div_s") _diagnosticSink?.(intDivisionDiagnostic(expr));
     // The bitwise / shift operators apply ToInt32 to each operand (ld29, 2026-10-13).
-    const operand = (s: string) =>
-      alwaysI32
-        ? toInt32Wat(s, locals, funcLookup, allocString, arrayLookup, structLookup, globals)
-        : exprToWat(s, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals);
+    // An i32 operand of a float operation (an element, a row's length: `ia[1] + fa[1]`) is widened;
+    // it reached the f64 op as is, an invalid module (ld55 / ld56, 2026-10-20). Not a boolean.
+    const operand = (s: string) => {
+      if (alwaysI32) return toInt32Wat(s, locals, funcLookup, allocString, arrayLookup, structLookup, globals);
+      const w = exprToWat(s, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals);
+      return (opType === "f64" || opType === "f32") && watOuterType(w, locals, globals) === "i32" &&
+          !isBoolOperand(s, locals, globals)
+        ? (widenNumeric(w, "i32", opType) ?? w)
+        : w;
+    };
     const lW = operand(lhs);
     const rW = operand(rhs);
     // A float `%`: WebAssembly has no `f64.rem` (an invalid module, ld02). The same formula as
