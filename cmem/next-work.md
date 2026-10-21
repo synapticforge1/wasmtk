@@ -7,6 +7,16 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **2026-10-20, the loud rows, group 1 DONE: every round-2 row that built an INVALID module or
+> trapped** (ld48–ld50, ld52–ld57, ld59–ld61, ld63, ld64, ld75; ld46, ld62 found already passing;
+> silent sw124, sw125 found and fixed). Gate green: wasi 482/482, golden 539, wast 64,506 / 0 / 16,
+> go 7 / 7 / 12. Tests `4l_MixedOperandTypes`, `28_ArrayCallbackEdges`. Found and OPEN: sw122
+> (`parseFloat` not correctly rounded; silent, so ahead of the loud rows in the owner's order),
+> sw123 (`T | undefined` holding undefined prints `null`; with the nullable gaps, item 5), loud
+> ld91–ld93. **Next:** sw122, then the 22 remaining loud compiler rows (all clean refusals: ld38,
+> ld41–ld43, ld45, ld66–ld74, ld76–ld80, ld91–ld93), then the 9 tool rows (ld81–ld85, ld87,
+> ld89, ld90), then items 3–5.
+
 > **PAUSED 2026-10-19, end of day (owner).** `main` is clean at `fcb2a259e99` and green on
 > binaryang 1.12.1: wasi **480/480**, golden **537** (9 fail on purpose), typed_decl 45, wast
 > 64,506 / 0 / 16, cross-check 1152 on baseline, go 7 / 7 / 12, outpath 12, merge_layout 7,

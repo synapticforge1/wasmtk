@@ -1,0 +1,10 @@
+type i32 = number;
+const s: string = "abc";
+const c: string | undefined = s.at(10);
+console.log(c);
+const u: string | undefined = undefined;
+console.log(u);
+const n: i32 | undefined = undefined;
+console.log(n);
+const m: i32 | null = null;
+console.log(m);
