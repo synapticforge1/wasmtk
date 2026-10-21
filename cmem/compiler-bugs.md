@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 1 | 136 | 0 | 27 |
-| LOUD | 36 | 61 | 9 | 10 |
+| SILENT-WRONG | 3 | 138 | 0 | 27 |
+| LOUD | 22 | 78 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,7 +22,10 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 1; in the tools: 0** (2026-10-19, latest: sw120 fixed, a null
+**Open silent-wrong in the compiler: 3; in the tools: 0** (2026-10-20, the loud rows' invalid-module
+group: 16 loud rows fixed (ld48–ld50, ld52–ld57, ld59–ld61, ld63, ld64, ld75) and ld46, ld62 found
+already passing, 22 loud open; tests `4l_MixedOperandTypes`, `28_ArrayCallbackEdges`. Found on the
+way: sw122 and sw123 OPEN, sw124 and sw125 FIXED; loud ld91–ld93 open). Before that, 1 (2026-10-19, latest: sw120 fixed, a null
 string field is the 0 pointer, `24_NullableStringFields`; left only sw119, measured on a branch,
 the owner's decision pending). Before that, 2 (2026-10-19, later: sw87 built, the
 owner's rule 2, `28_SortDefaultStringOrder`; left sw119, sw120). Before that, 3 (2026-10-19, later: sw95 built, the
@@ -234,7 +237,7 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~ld37~~ | ✅ FIXED 2026-10-15 (batch 2): `$__arr_elem_str` writes booleans (kind 8), bigints with their `n` (9) and strings (10, quoted and escaped as `scripts/console/inspect_array_ref.ts`); `$__arr_inspect` aligns booleans and strings LEFT in columns (padEnd), counts a string's width in characters, and reserves room for the strings' text. A string array, returned or a variable, prints. Struct arrays stay refused (sw74, ld45); a typed or 2D array beside other arguments too. Golden: only the two helpers grew (+106 lines) in 7 entries. Test `7h_ConsoleWholeArrays`. Was OPEN (opened by the sw66 fix, 2026-10-13): a WHOLE string / boolean / bigint (or struct) array as a console.log argument, and a typed or 2D array beside other arguments, is refused ("printing a whole string[] array is not supported yet; print its elements"); before sw66 they printed an address or element bits. Deno prints `[ "a", "b" ]`, `[ true, false ]`, `[ 1n, 2n ]`. Needs element writers in `$__arr_elem_str` (a string quoted as util.inspect quotes it: `"` unless the text holds one, then `'`, then `` ` ``; booleans and strings align with padEnd, not padStart). Repro `ld37_console_whole_nonnumeric_array.ts` | console array writer |
 | ~~sw71~~ | ✅ FIXED 2026-10-15 under the owner's ruling (the same day): an out-of-range `s[i]` gave `""` (and in a concat a GARBAGE byte, `$__str_char_code_at`'s); JavaScript gives `undefined`. Now `$__str_index` returns a static "undefined" text out of range, which prints, concatenates and interpolates as JavaScript's does; a string compared with `undefined` / `null` calls `$__str_is_nullish` (no text, or that marker). `charAt` keeps `""`, as JavaScript. **And a FLOAT string index is a compile error** (`error[float-index]`, owner: "refuse float index"; it narrows D3 for strings: a fractional index is `undefined` in JavaScript and wasm would truncate). Judged by the emitted index (truncated = a float). 3 corpus programs migrated (`i32` counters, `f64.toI32(v % 16)`). Known edges, documented: `s[10].length` is 9 (JavaScript throws), `s[10] === "undefined"` is true (JavaScript false). Tests `7f_ConsoleStringIndex`; typed_decl (4 refusals, 1 accepted) | wasic string index |
 | ~~sw75~~ | ✅ FIXED 2026-10-19 with sw102 (a top-level comparison through the dot-call path prints as a boolean; test `7i_ConsoleUnaryBoolStringFields`). Was (found with sw71, 2026-10-15; the same on main): `console.log(s.charAt(far) === "")` prints `1` for `true` (the comparison takes a numeric segment; not the string-method branch, which now needs the whole argument to be one call) | console_log |
-| ld46 | OPEN (found with sw71, 2026-10-15; the same on main): `console.log(s.charAt(far).length)` builds an invalid module (an i32 block where an f64 is expected); `const c: string = s.charAt(far)` then `c.length` works | console_log |
+| ~~ld46~~ | ✅ FOUND FIXED 2026-10-20 (it passes; closed by sw100's `.length` of a string-valued call, 2026-10-19). Was (found with sw71, 2026-10-15; the same on main): `console.log(s.charAt(far).length)` builds an invalid module (an i32 block where an f64 is expected); `const c: string = s.charAt(far)` then `c.length` works | console_log |
 | ~~sw72~~ | ✅ FIXED 2026-10-15 (found with ld22; the same on main): a function-typed declaration whose initialiser was neither a closure-factory call nor a plain function name EMITTED NOTHING (`return ""`): the local stayed 0, and a call through it reached table slot 0, whatever function that was (an assembler error only when the table was empty). Any other initialiser is now a compile error; ld39 and ld01 closed the forms that reached it | wasic function-typed declaration |
 | ~~sw73~~ | ✅ FIXED 2026-10-15 (found with ld12; the same on main): a function's local array named like a top-level array (`function mk() { const m: i32[][] = …; }` beside a top-level `m`) made the top-level one a module global, because `detectModuleArrayGlobals` counted the function's OWN `m` as a use; _start then initialised it as a local and read the global: `3 7 9` → `3 0 0`. A name the function declares (param, `const` / `let` / `var`) no longer counts. `13_variadic-functions`' `nums` became a plain local (golden re-recorded) | wasic module arrays |
 | ld38 | OPEN (found 2026-10-15): `Number.prototype.toFixed` is not implemented: `console.log(x.toFixed(1))` and `const t: string = x.toFixed(2)` are refused (only a user function named `toFixed` exists in the library code). A capability gap, loud | wasic numbers |
@@ -343,17 +346,28 @@ overwrite user files (sw113) at the top.
 | ~~sw116~~ | ✅ FIXED 2026-10-19: a non-numeric argument exits 1 with "'abc' is not a number", in `mod` and `run`'s library call. Test `tests/tool_rows_tests.ts`. Was: `mod lib.wasm add abc 5` turns `abc` into 0 | utils.ts:437 (also `runWasi` :299) |
 | ~~sw117~~ | ✅ FIXED 2026-10-19: the output path is resolved against the working directory before the toolchain runs (`cwd: baseDir`), and `report()` checks the artifact as zigwasic's does (missing or empty: `success: false`). Test `tests/tool_rows_tests.ts` (needs TinyGo; skipped and said so without it). Was: Go `build -o out/x.wasm` (relative) writes beside the SOURCE and reports success at the given path | gowasic.ts ~203/241/426 unresolved; `report()` ~573 unchecked (Zig's was fixed 2026-08-24) |
 | ~~sw118~~ | ✅ FIXED 2026-10-19: the first export keeps a WIT name, a later one kebabing to it is listed as `// skipped export foo_bar: its WIT name 'foo-bar' is already fooBar's`; `witPackageName` makes the package a WIT identifier (`2048` → `m2048`). The orphaned doc comment at witgen.ts:35 went with it. Test `tests/tool_rows_tests.ts`. Was: `witgen` writes duplicate exports (`fooBar`, `foo_bar` → `foo-bar` twice); package names unchecked (`local:2048`) | witgen.ts ~98, ~86 |
+| sw122 | OPEN (found with ld60, 2026-10-20; the same on main): `parseFloat` (and now `Number(string)`, which validates the text and calls it) is not correctly rounded: `$__parse_float` adds digit / 10ⁿ, so `parseFloat("0.123")` is `0.12300000000000001`, `"3.14159"` `3.1415900000000003`, `"1e-7"` `1.0000000000000002e-7`, `"1.7976931348623157e308"` `1.7976931348623145e+308`. Needs a correct decimal → double (Clinger's exact fast path for ≤ 15 digits and \|exp\| ≤ 22 covers most input; the rest needs big-number arithmetic or Eisel-Lemire) | wasic `emitNumParserHelpers` |
+| sw123 | OPEN (found with ld64, 2026-10-20; the same on main for numbers): a `T \| undefined` local holding `undefined` prints `null` (`const n: i32 \| undefined = undefined; console.log(n)`); one flag holds null and undefined alike. A string's `s.at(10)` "undefined" text prints right. The nullable-gaps item (next-work.md item 5) | wasic nullable locals |
+| ~~sw124~~ | ✅ FIXED 2026-10-20 (found with ld57; the same on main): `console.log(new Box(1, 2).isBig())` printed `0` for `false`: the console's dot-call lookup typed a `new C(…).m(…)` chain as i32. It takes m's result type now (both lookups, console.log and console.error). Test `4l_MixedOperandTypes` | wasic dotCallLookup |
+| ~~sw125~~ | ✅ FIXED 2026-10-20 with ld53: `s.at(i)` out of range read past the text (length 1, a garbage byte; `` `[${s.at(5)}]` `` printed `[u]`). All four at() paths (declaration, concat, comparison operand, console) go through `$__str_index`: "undefined", as `s[i]`. Test `28_ArrayCallbackEdges` | wasic / console_log string at() |
 
-**Loud, compiler** (`round2/loud/`): ~~ld47~~ FIXED 2026-10-19 with sw84 (the count is clamped) `splice(3, 10)` traps (count unclamped); ld48 `pop()` of
-an empty array traps; ld49 an f64 comparator in `sort` (signature mismatch); ld50 `flat()` on 1-D
-(the stub at ~10198 has no diagnostic); ~~ld51~~ FIXED 2026-10-19 with sw93 `(2**32).toString(16)` traps; ld52 `string[].sort()`
-(`$__str_cmp` undefined); ld53 `s.at(9)` (IR error); ld54 a struct FIELD operand never converted
+**Loud, compiler** (`round2/loud/`): ~~ld47~~ FIXED 2026-10-19 with sw84 (the count is clamped) `splice(3, 10)` traps (count unclamped); ~~ld48~~ FIXED 2026-10-20 `pop()` of
+an empty array traps (now `popn_T` / `shiftn_T`, flag-reporting, where the value is dropped or nullable; a
+plain numeric use still traps, loud); ~~ld49~~ FIXED 2026-10-20 an f64 comparator in `sort` (signature
+mismatch; `sortcmp_T_<result>`); ~~ld50~~ FIXED 2026-10-20 `flat()` on 1-D (a `slice(0)` copy now)
+; ~~ld51~~ FIXED 2026-10-19 with sw93 `(2**32).toString(16)` traps; ~~ld52~~ FIXED 2026-10-20 `string[].sort()`
+(`$__str_cmp` undefined); ~~ld53~~ FIXED 2026-10-20 `s.at(9)` (IR error: a `string | undefined` local
+undeclared; and the at() itself read past the text, sw125); ~~ld54~~ FIXED 2026-10-20 a struct FIELD operand never converted
 (`p.n * p.x`, `p.x > p.n`, `Math.max(p.n, p.x)`, 2-D mixed compare: invalid modules, declaration
-path); ld55 console unary minus of an i32 element / a 2-D row's `.length` in a sum; ld56 console
-`ia[1] + fa[1]`; ld57 a getter returning f64 compared in a method (`i32.gt_s`); ~~ld58~~ FIXED 2026-10-19 with sw100 console
-`.length` of a method result (with ld43, ld46); ld59 console bigint operands in f64 ops; ld60
-`Number(stringVar)`; ld61 console `reduce` returning f64; ld62 console `s.length > 2 && arr[1] > 1`;
-ld63 console `nm() < s` (bad local); ld64 a nullable string local (`$s_ptr` unresolved); ~~ld65~~ FIXED 2026-10-19 with sw97 a NaN
+path; emitExpr converts an i32 NUMBER to an asked-for f64, never a pointer, `isI32Number`);
+~~ld55~~ FIXED 2026-10-20 console unary minus of an i32 element / a 2-D row's `.length` in a sum; ~~ld56~~ FIXED 2026-10-20 console
+`ia[1] + fa[1]` (`hasFloatElem`); ~~ld57~~ FIXED 2026-10-20 a getter returning f64 compared in a method (`i32.gt_s`;
+`classMemberType`); ~~ld58~~ FIXED 2026-10-19 with sw100 console
+`.length` of a method result (with ld43, ld46); ~~ld59~~ FIXED 2026-10-20 console bigint operands in f64 ops; ~~ld60~~ FIXED 2026-10-20
+`Number(stringVar)` (`$__str_to_number`, JavaScript's ToNumber of a string; it rides on sw122's parser);
+~~ld61~~ FIXED 2026-10-20 console `reduce` returning f64; ~~ld62~~ FOUND FIXED 2026-10-20 console `s.length > 2 && arr[1] > 1`;
+~~ld63~~ FIXED 2026-10-20 console `nm() < s` (bad local); ~~ld64~~ FIXED 2026-10-20 a nullable string local (`$s_ptr` unresolved;
+prints `null` / its text); ~~ld65~~ FIXED 2026-10-19 with sw97 a NaN
 parenthesised compare traps (sw97); ld66 `1e-7 * 1.5` in a declaration (the `-` of the exponent
 splits); ld67 console `n ** 2` of an i32; ld68 console `typeof b === "boolean"`; ld69 console
 `x > 1 || s === "q"` (splits at `===` first); ld70 `users[0].name.length` in a declaration; ld71
@@ -361,14 +375,19 @@ splits); ld67 console `n ** 2` of an i32; ld68 console `typeof b === "boolean"`;
 on an array element or element field (`arr[i] += 1`, `ps[1].x += 5`; README claims support);
 ld73 one-line `do { … } while (…)`; ld74 classes: inherited getter, `return this`, a method
 returning string, `super()` with no base constructor, a struct alias's field store, generic and
-abstract classes; ld75 callbacks: a generic function's callback, `map((x, i) => …)` (signature
-mismatch); ld76 destructuring from a call, a tuple holding a string; ld77 a string literal in
+abstract classes; ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
+per function), `map((x, i) => …)` (signature mismatch; `<method>_<T>_ix` helpers for forEach, map,
+filter, find, findIndex, every, some; a third parameter is refused); ld76 destructuring from a call, a tuple holding a string; ld77 a string literal in
 expression position (`"abc" > "ab"`, nested string ternary, object with a string and a function
 field); ld78 a default parameter using an earlier one, `for (let i = 0, j = 10; …)`, chained
 `filter().map().reduce()`, a function array called through a local; ld79 `for…of` over class /
 struct arrays (documented limit; virtual dispatch inside it); ld80 missing methods: `substring`,
 `lastIndexOf` (string, array), `splice` as a value, `(e as Error).message`, ~~`string[].join` into a
 declaration (README says assignable)~~ (done 2026-10-19 with sw76).
+Found 2026-10-20 (all the same on main): ld91 a MULTI-LINE arrow callback at top level,
+`xs.forEach((x) => {` … `});`, is "Unsupported statement: });"; ld92 an expression-bodied arrow
+whose body is `console.log(…)` is "Unsupported expression"; ld93 `for (const s of xs)` over a
+`string[]` at top level leaves `$s_ptr` unresolved (an IR error).
 
 **Loud, tools** (`round2/tools/`): ld81 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
 to 131072 in a 1-page bundle: out of bounds); ld82 `bindgen` host imports with a camelCase method
