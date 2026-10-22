@@ -2511,14 +2511,18 @@ class WasicTranspiler {
   // was `null`. Persistent (unlike nullableVarInnerType, which is per-function), because the
   // companion `$name__null` is a WASM global rather than a local; nullableVarInnerType is
   // re-seeded from this after each per-function reset so `g ??= v` resolves inside any body.
-  private moduleNullableGlobals: Map<string, { inner: WatType; initiallyNull: boolean }> =
-    new Map();
+  private moduleNullableGlobals: Map<
+    string,
+    { inner: WatType; initiallyNull: boolean; initiallyUndefined?: boolean }
+  > = new Map();
   // Phase 26: current `for…of` nesting depth, so each loop gets its OWN index local.
   // A single shared `$__forof_idx` made an inner loop clobber its outer loop's cursor —
   // the outer loop then re-tested an already-exhausted index and ran exactly one iteration.
   private forOfDepth = 0;
   // Phase 24: functions returning T|null — funcName → inner WAT type.
   private nullableFuncReturnType: Map<string, WatType> = new Map();
+  /** sw123: a nullable function's empty result as a `__null` kind: 1 null, 2 undefined. */
+  private nullableFuncReturnKind = new Map<string, 1 | 2>();
   // Phase 24: set to true when the function currently being emitted returns T|null.
   private currentFuncIsNullableReturn = false;
   // Phase 13 (#13 async): inner promise type of the async fn currently being emitted
@@ -3671,6 +3675,8 @@ class WasicTranspiler {
       const nullableRetInner = parseNullableAnnotation(rawResult);
       if (nullableRetInner !== null) {
         this.nullableFuncReturnType.set(name, nullableRetInner);
+        // the kind of its empty result (sw123): `T | undefined` gives undefined, else null
+        this.nullableFuncReturnKind.set(name, /\bnull\b/.test(rawResult) ? 1 : 2);
         rawResult = rawResult.split("|")[0].trim(); // e.g. "i32 | null" → "i32"
       }
       // Phase 23: if return type is a tuple "[T1, T2, ...]", create/register the synthetic StructDef
@@ -4544,6 +4550,7 @@ class WasicTranspiler {
             this.moduleNullableGlobals.set(name, {
               inner: mgNullInner,
               initiallyNull: isNullInit,
+              initiallyUndefined: initExpr === "undefined", // its flag starts at 2 (sw123)
             });
             continue;
           }
@@ -12915,7 +12922,13 @@ ${prefixed}
           // A value with a flag (a nullable local / global, or a flagged field, sw51): 1 = null.
           const nullFlag = this.nullTestWat(varName, locals);
           if (nullFlag && varName !== "null" && varName !== "undefined") {
-            return (op === "===" || op === "==") ? nullFlag : `(i32.eqz ${nullFlag})`;
+            // A STRICT test of a value that knows its kind tells null from undefined:
+            // `n === null` of an undefined `n` was true (sw123, 2026-10-22). `==` is either.
+            const lit = varName === lhs ? rhs : lhs;
+            const test = (op === "===" || op === "!==") && this.nullTestIsKind(nullFlag)
+              ? this.nullKindIs(nullFlag, lit === "undefined" ? 2 : 1)
+              : nullFlag;
+            return (op === "===" || op === "==") ? test : `(i32.eqz ${test})`;
           }
           // String type: no text (ptr 0), or an out-of-range `s[i]`'s "undefined" (sw71) when
           // this module builds one ($__str_is_nullish; else the plain ptr test, as before)
@@ -13482,12 +13495,15 @@ ${prefixed}
     return `(i32.load offset=${off} ${lm[2].trim()})`;
   }
 
-  /** sw51: an i32 that is 1 when `expr` is null, for every null that HAS a flag: a nullable local
-   *  or module global (`__null`), a flagged field, the literals. undefined when `expr` carries no
-   *  null of its own (a plain value, or a pointer whose null is 0). */
+  /** sw51: an i32 that is NONZERO when `expr` is null or undefined, for every null that HAS a flag:
+   *  a nullable local or module global (`__null`), a flagged field, the literals. undefined when
+   *  `expr` carries no null of its own (a plain value, or a pointer whose null is 0). The nonzero
+   *  value is the KIND where it is known (sw123, 2026-10-22): 1 null, 2 undefined (an out-of-range
+   *  read is 2); a string's test is 1 for either. Truth tests treat both alike. */
   private nullTestWat(expr: string, locals: Map<string, WatType>): string | undefined {
     const e = expr.trim();
-    if (e === "null" || e === "undefined") return `(i32.const 1)`;
+    if (e === "null") return `(i32.const 1)`;
+    if (e === "undefined") return `(i32.const 2)`;
     // A nullable STRING local is null when it holds no text (a string assignment never sets its
     // `__null`; `c === undefined` of `s.at(10)` was false, ld53, 2026-10-20)
     if (/^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string" && locals.get(e) === "string") {
@@ -13508,7 +13524,36 @@ ${prefixed}
         if (pl !== "(i32.const 0) (i32.const 0)") return `(i32.eqz ${splitTwoWatExprs(pl)[0]})`;
       }
     }
-    return this.arrOobTestWat(e, locals) ?? this.nullFlagLoad(e, locals);
+    const oob = this.arrOobTestWat(e, locals);
+    if (oob !== undefined) {
+      // an out-of-range read is undefined: kind 2
+      return oob === "(i32.const 0)" ? oob : oob === "(i32.const 1)" ? `(i32.const 2)` : `(i32.shl ${oob} (i32.const 1))`;
+    }
+    return this.nullFlagLoad(e, locals);
+  }
+
+  /** 1 when kind `w` is `k`: folded where the kind is known now (a constant, or an out-of-range
+   *  test, which is only ever undefined), else `(i32.eq w k)`. */
+  private nullKindIs(w: string, k: 1 | 2): string {
+    const shl = w.match(/^\(i32\.shl ([\s\S]*) \(i32\.const 1\)\)$/);
+    if (shl) return k === 2 ? shl[1]! : `(i32.const 0)`;
+    const c = w.match(/^\(i32\.const (\d)\)$/);
+    if (c) return `(i32.const ${Number(c[1]) === k ? 1 : 0})`;
+    return `(i32.eq ${w} (i32.const ${k}))`;
+  }
+
+  /** The `__null` kind of a callee's result: `$__nullable_ret_flag` is 1 for a value, 0 for empty,
+   *  and an empty one is null (1) or undefined (2) as its source says (sw123). */
+  private retFlagKind(kind: 1 | 2): string {
+    const empty = `(i32.eqz (global.get $__nullable_ret_flag))`;
+    return kind === 1 ? empty : `(i32.shl ${empty} (i32.const 1))`;
+  }
+
+  /** Whether `nullTestWat`'s result is a KIND (0, 1 null, 2 undefined) that a strict `=== null` /
+   *  `=== undefined` can tell apart (sw123): a nullable local's or global's `__null`, a literal, an
+   *  out-of-range test. A string's test and a field's flag word only say "nullish". */
+  private nullTestIsKind(w: string): boolean {
+    return /^\((?:local|global)\.get \$\w+__null\)$/.test(w) || /^\(i32\.(?:const \d|shl )/.test(w);
   }
 
   /**
@@ -13606,7 +13651,13 @@ ${prefixed}
     }
     // a nullable STRING prints its text (the template printed its pointer as a number: ld64)
     if (/^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string") return `__strnull(${e}) ? "null" : ${e}`;
-    return `(${e} === null) ? "null" : \`\${${e}}\``;
+    // a value that knows its kind prints `undefined` for undefined (it printed `null`, sw123);
+    // a field's flag word only says "nullish" and prints `null`, as before
+    const t = this.nullTestWat(e, locals);
+    if (t && this.nullTestIsKind(t)) {
+      return `(${e} === undefined) ? "undefined" : (${e} === null) ? "null" : \`\${${e}}\``;
+    }
+    return `(${e} == null) ? "null" : \`\${${e}}\``;
   }
 
   /** sw51: the flag to store with a value `rhs`: 1 for null, the source's own flag when it has one,
@@ -15132,8 +15183,8 @@ ${prefixed}
             locals.set(nlVarName, "string");
             return this.emitStringAssign(nlVarName, nlInitExpr, locals);
           }
-          // Value type: clear value, set null flag
-          return `(local.set $${nlVarName}__null (i32.const 1))`;
+          // Value type: clear value, set null flag (2 for undefined, sw123)
+          return `(local.set $${nlVarName}__null (i32.const ${nlInitExpr === "undefined" ? 2 : 1}))`;
         }
         if (nlInner === "string") {
           locals.set(nlVarName, "string");
@@ -15153,8 +15204,10 @@ ${prefixed}
         // `pop()` / `shift()` of an empty array (ld48)
         const nlIsFind = /^\w+\.find\s*\([\s\S]*\)$/.test(nlInitExpr) || nlPop !== null;
         if ((nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) || nlIsFind) {
-          // Read the side-channel flag written by the callee
-          return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
+          // Read the side-channel flag written by the callee, as a kind (sw123)
+          return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null ${
+            this.retFlagKind(nlIsFind ? 2 : this.nullableFuncReturnKind.get(nlCalledFn!.name) ?? 1)
+          })`;
         }
         // A nullable source (local, global, flagged field) passes its null on (sw51).
         return `(local.set $${nlVarName} ${valWat})\n      (local.set $${nlVarName}__null ${
@@ -16021,18 +16074,17 @@ ${prefixed}
       if (nlReassignInner) {
         const rhs = assignMatch[2].trim();
         if (rhs === "null" || rhs === "undefined") {
-          return `(local.set $${varName}__null (i32.const 1))`;
+          return `(local.set $${varName}__null (i32.const ${rhs === "undefined" ? 2 : 1}))`; // sw123
         }
         const nlFnCallM = rhs.match(/^(\w+)\s*\(/);
         const nlCalledFn = nlFnCallM ? this.functions.find((f) => f.name === nlFnCallM[1]) : null;
         const nlPop = this.emitNullablePopShift(rhs);
         const valWat = nlPop ?? this.emitExpr(rhs, locals, nlReassignInner);
-        if (
-          (nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) ||
-          /^\w+\.find\s*\([\s\S]*\)$/.test(rhs) || // sw90
-          nlPop !== null // ld48
-        ) {
-          return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null (i32.eqz (global.get $__nullable_ret_flag)))`;
+        const nlIsFindR = /^\w+\.find\s*\([\s\S]*\)$/.test(rhs) || nlPop !== null; // sw90, ld48
+        if ((nlCalledFn && this.nullableFuncReturnType.has(nlCalledFn.name)) || nlIsFindR) {
+          return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null ${
+            this.retFlagKind(nlIsFindR ? 2 : this.nullableFuncReturnKind.get(nlCalledFn!.name) ?? 1)
+          })`;
         }
         return `(local.set $${varName} ${valWat})\n      (local.set $${varName}__null ${
           this.nullFlagOf(rhs, locals)
@@ -16249,6 +16301,11 @@ ${prefixed}
         const nlInner = this.nullableVarInnerType.get(logSingleArg)!;
         this.needsNumericHelpers = true;
         const [nullOffset, nullLen] = this.allocString("null\n");
+        const [undOffset, undLen] = this.allocString("undefined\n"); // kind 2 (sw123)
+        const flagGet = locals.has(`${logSingleArg}__null`) || !this.moduleNullableGlobals.has(logSingleArg)
+          ? `(local.get $${logSingleArg}__null)`
+          : `(global.get $${logSingleArg}__null)`;
+        const isUnd = `(i32.eq ${flagGet} (i32.const 2))`;
         const isF64 = nlInner === "f64";
         const normalSegs: LogSegment[] = isF64
           ? [{ kind: "f64var" as const, name: logSingleArg }, {
@@ -16276,10 +16333,10 @@ ${prefixed}
         if (naph2) this.needsArrPrintHelper = true;
         if (njh2) this.needsJoinHelper = true;
         return [
-          `    (if (local.get $${logSingleArg}__null)`,
+          `    (if ${flagGet}`,
           `      (then`,
-          `        (i32.store (i32.const ${this.iovBase}) (i32.const ${nullOffset}))`,
-          `        (i32.store (i32.const ${this.iovBase + 4}) (i32.const ${nullLen}))`,
+          `        (i32.store (i32.const ${this.iovBase}) (select (i32.const ${undOffset}) (i32.const ${nullOffset}) ${isUnd}))`,
+          `        (i32.store (i32.const ${this.iovBase + 4}) (select (i32.const ${undLen}) (i32.const ${nullLen}) ${isUnd}))`,
           `        (drop (call $fd_write (i32.const 1) (i32.const ${this.iovBase}) (i32.const 1) (i32.const ${
             this.iovBase + 128
           })))`,
@@ -25475,9 +25532,9 @@ ${sum}
     );
     // Phase 24: companion null-flag global for each module-level `T | null` global
     // (1 = is-null, 0 = has-value) — the global-scope counterpart of the `$x__null` local.
-    for (const [name, { initiallyNull }] of this.moduleNullableGlobals) {
+    for (const [name, { initiallyNull, initiallyUndefined }] of this.moduleNullableGlobals) {
       moduleGlobalDecls.push(
-        `  (global $${name}__null (mut i32) (i32.const ${initiallyNull ? 1 : 0}))`,
+        `  (global $${name}__null (mut i32) (i32.const ${initiallyUndefined ? 2 : initiallyNull ? 1 : 0}))`,
       );
     }
     // Mutable module-level string globals: one (mut i32) for the ptr, one for the len.

@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, sw123 (null vs undefined), gate GREEN.** wasi **492/492** (+`24_NullVersusUndefined`,
+> failing on the old compiler) · golden-WAT **549**, 9 existing entries moved and reviewed (find /
+> pop / out-of-range results carry kind 2; strict tests compare the kind; prints choose `null` or
+> `undefined`; a first try moved 41, the out-of-range strict tests then folded) · wast 64,506 /
+> 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface
+> unchanged.
+
 > **2026-10-22, loud tool rows group 3 (ld81 wasmbundle, ld82 / ld83 bindgen bindings), gate
 > GREEN; all loud tool rows closed.** tool_rows **34** (+1) · merge_layout **10** (+1) · bindgen
 > 142 (8 fixtures regenerated: the binding's env Proxy and loader) · wasi 491/491 · golden-WAT 548,
