@@ -1602,7 +1602,9 @@ function parseSingleArg(
     const sig = funcLookup?.(callee);
     // Not a function: a function-typed VARIABLE (`const op: (x: i32) => i32 = …`), which wasic
     // calls through call_indirect. A direct `call $op` was an undefined function (ld01).
-    if (!sig && _exprFallbackResolver) {
+    // ...and a call with an inline ARRAY LITERAL argument, which wasic lays out by the
+    // parameter's element type (`first([1, 2, 3])` of an f64[] read garbage here, sw128)
+    if ((!sig || argList.some((a) => a.trim().startsWith("["))) && _exprFallbackResolver) {
       const r = _exprFallbackResolver(token, locals);
       if (r) {
         const kind = r.type === "f64" ? "f64expr" as const : r.type === "i64" ? "i64expr" as const : "i32expr" as const;
@@ -3010,8 +3012,8 @@ function exprToWat(
     const argList = rawArgs ? splitTopLevelArgs(rawArgs) : [];
     const sig = funcLookup?.(callee);
     // Not a function: a function-typed variable, called through call_indirect (ld01; the twin
-    // in parseSingleArg).
-    if (!sig && _exprFallbackResolver) {
+    // in parseSingleArg); or a call with an inline array literal argument (sw128)
+    if ((!sig || argList.some((a) => a.trim().startsWith("["))) && _exprFallbackResolver) {
       const r = _exprFallbackResolver(expr, locals);
       const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
       if (widened !== null) return widened;
