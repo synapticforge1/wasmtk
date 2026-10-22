@@ -6,6 +6,8 @@
  *   sw116  `mod lib.wasm f abc` turned `abc` into 0 (also the `run` library-call branch).
  *   sw117  Go `modc -o out/x.wasm` (relative) wrote beside the SOURCE, success at the path given.
  *   sw118  witgen listed `fooBar` and `foo_bar` both as `foo-bar`; `package local:2048;` unchecked.
+ *   ld82   a bindgen binding never linked a camelCase host import (`display_showValue`).
+ *   ld83   the Deno binding could not load a relative path; a typed-array view lost its offset.
  *   ld87   `mod` / `run` could not call an i64 function: every argument was a Number.
  *   ld89   a failed `dync` left `<name>.__dync.ts` and printed the error twice (so did `wasic`).
  *   ld90   a bad flag value became its default; `-o` on run / info / mod was ignored; a command
@@ -92,6 +94,16 @@ const FILES: Record<string, string> = {
   // ld87: an i64 library function
   "i64.wat": `(module (func $add64 (param $a i64) (param $b i64) (result i64) local.get $a local.get $b i64.add)\n` +
     `  (export "add64" (func $add64)))\n`,
+  // ld82 / ld83: a library calling a camelCase host method, driven through its Deno binding by a
+  // relative path and by a typed-array view with an offset
+  "hostlib.ts": `type i32 = number;\ndeclare interface Display {\n  showValue(value: i32): void;\n}\n` +
+    `declare const display: Display;\nexport function go(n: i32): void {\n  display.showValue(n * 2);\n}\n`,
+  "drive.ts": `import { loadModule } from "./hostlib.bindings.ts";\nconst got: number[] = [];\n` +
+    `const host = { env: { displayShowValue: (v: number) => { got.push(v); } } };\n` +
+    `const m1 = await loadModule("hostlib.wasm", host);\nm1.go(1);\n` +
+    `const bytes = await Deno.readFile("hostlib.wasm");\nconst padded = new Uint8Array(bytes.length + 16);\n` +
+    `padded.set(bytes, 16);\nconst m2 = await loadModule(padded.subarray(16), host);\nm2.go(2);\n` +
+    `console.log(got.join(" "));\n`,
   // ld89: a dync program (its compile is made to fail by an output path that is a directory)
   "prog.js": `console.log("hello", 1 + 2);\n`,
 };
@@ -149,6 +161,16 @@ try {
   await expectOut("mod: i64 add, beyond 2^53", ["mod", "i64.wasm", "add64", "9007199254740993", "1"], dir, "9007199254740994");
   await expectOut("run (library call): i64 add", ["run", "i64.wasm", "add64", "2", "3"], dir, "5");
   await expectExit("mod: a fraction for an i64 is refused", ["mod", "i64.wasm", "add64", "2.5", "1"], dir, 1, /is not an integer/);
+
+  console.log("── a bindgen binding links a camelCase host import and loads a path or a view (ld82, ld83) ──");
+  await step(["modc", "hostlib.ts"], dir);
+  await step(["bindgen", "hostlib.wit"], dir);
+  {
+    const o = await new Deno.Command("deno", { args: ["run", "-A", "drive.ts"], cwd: dir, stdout: "piped", stderr: "piped" })
+      .output();
+    const out = (dec.decode(o.stdout) + dec.decode(o.stderr)).trim();
+    check("the host method is called, from a path and from an offset view", o.code === 0 && out === "2 4", out);
+  }
 
   console.log("── a failed dync removes its scaffold and reports once (ld89) ──");
   await Deno.mkdir(join(dir, "adir"));

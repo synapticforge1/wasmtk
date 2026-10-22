@@ -7,6 +7,7 @@
  *   sw110  a wasic merge seated the heap INSIDE a merged library's data (it advanced by global
  *          0's initial value, else 260), so the program's pushes overwrote the library's bytes.
  *   ld86   the merge scanners counted `(` / `)` inside data strings ("expected EOF, got )").
+ *   ld81   `wasmbundle` made a 1-page bundle of a library whose cursor sat at 131072 (2026-10-22).
  *   ld84   the bundler handled neither `export class` nor `export { name }` (2026-10-22).
  *   ld85   two imports with one basename collided (`duplicate func $util_add`, 2026-10-22).
  *
@@ -40,6 +41,10 @@ const FILES: Record<string, string> = {
   "entry2.ts": `type i32 = number;\nimport { helper } from "./dep.ts";\nconst scale: i32 = 100;\nconsole.log(helper(2), scale);\n`,
   // ...and no refusal when the names differ (`scale` private to the dependency only)
   "entry3.ts": `type i32 = number;\nimport { helper } from "./dep.ts";\nconst factor: i32 = 100;\nconsole.log(helper(2), factor);\n`,
+  // ld81: a library whose mutable cursor sits at 131072, in the 3 pages it declares
+  "stk.wat": `(module (memory 3) (global $sp (mut i32) (i32.const 131072))\n` +
+    `  (func $put (param $v i32) (result i32) (i32.store (global.get $sp) (local.get $v)) (i32.load (global.get $sp)))\n` +
+    `  (export "memory" (memory 0)) (export "put" (func $put)))\n`,
   // ld85: two imports with one basename
   "a/util.ts": `type i32 = number;\nexport function add(a: i32, b: i32): i32 {\n  return a + b;\n}\n`,
   "b/util.ts": `type i32 = number;\nexport function add(a: i32, b: i32): i32 {\n  return a * 10 + b;\n}\n`,
@@ -78,7 +83,7 @@ try {
     if (f.includes("/")) await Deno.mkdir(join(dir, f.slice(0, f.lastIndexOf("/"))), { recursive: true });
     await Deno.writeTextFile(join(dir, f), body);
   }
-  for (const w of ["dlib", "elib", "plib2"]) await step(["convert", `${w}.wat`], dir);
+  for (const w of ["dlib", "elib", "plib2", "stk"]) await step(["convert", `${w}.wat`], dir);
 
   console.log("── merged and bundled modules keep their own data (sw109, sw110, ld86) ──");
   await step(["wasmbundle", "dlib.wasm", "elib.wasm", "-o", "de.wasm"], dir);
@@ -90,6 +95,8 @@ try {
   await expectOut("wasic merge: a `(` inside a data string (ld86)", ["run", "usep2.wasm"], dir, "40");
   await step(["wasmbundle", "plib2.wasm", "-o", "p2b.wasm"], dir);
   await expectOut("wasmbundle: a `(` inside a data string (ld86)", ["mod", "p2b.wasm", "get"], dir, "40");
+  await step(["wasmbundle", "stk.wasm", "-o", "stkb.wasm"], dir);
+  await expectOut("wasmbundle: a module's memory and its cursor at 131072 (ld81)", ["mod", "stkb.wasm", "put", "7"], dir, "7");
 
   // sw112: the same top-level value name in two files is refused (it was silently ONE name)
   const r = await wasmtk(["wasic", "entry2.ts", "-o", "entry2.wasm"], dir);

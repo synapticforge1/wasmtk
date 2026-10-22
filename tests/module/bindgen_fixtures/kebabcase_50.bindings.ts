@@ -44,15 +44,15 @@ export async function loadModule(
   const _wasi = new Proxy(_wasiBase, { get: (t, k: string) => Object.prototype.hasOwnProperty.call(t, k) ? t[k] : () => 0 });
 
   const importObj: Record<string, Record<string, unknown>> = { wasi_snapshot_preview1: _wasi };
-  let raw: ArrayBuffer;
-  if (source instanceof ArrayBuffer) {
+  let raw: BufferSource;
+  if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
     raw = source;
-  } else if (ArrayBuffer.isView(source)) {
-    raw = (source as Uint8Array).buffer as ArrayBuffer;
-  } else {
+  } else if (/^(?:https?|data|blob):/i.test(String(source))) {
     raw = await (await fetch(String(source))).arrayBuffer();
+  } else {
+    raw = await Deno.readFile(source instanceof URL || /^file:/i.test(source) ? new URL(source) : source);
   }
-  const { instance } = await WebAssembly.instantiate(raw, importObj);
+  const { instance } = await WebAssembly.instantiate(raw, importObj as unknown as WebAssembly.Imports);
   const exp = instance.exports as Record<string, unknown>;
   const _kebab = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/_/g, "-").toLowerCase();
   const _exCache: Record<string, unknown> = {};
