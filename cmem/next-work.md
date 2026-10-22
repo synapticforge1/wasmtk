@@ -27,6 +27,9 @@ the workspace pulls it on its sweep.
   441). Relevant to any repo comparing console output with Deno's.
 - **W3. Rule slips to watch for** (recorded honestly, 2026-10-21): one `sed -i` on a scratch file
   and one inline `git commit -m` in this repo (the latter amended from a file before merging).
+  2026-10-22: one scratch probe written by a shell redirect (`grep -v … > file`) instead of
+  `Write`; scratch only, nothing in the repo. The pattern: a quick "this file minus one line"
+  probe reaches for the shell.
 
 ## Open now
 
@@ -42,7 +45,11 @@ the workspace pulls it on its sweep.
 > array-method callback), both open and refused with a message. Group 6 (classes: ld74, ld79)
 > DONE, `29_ClassDispatchAndChaining`; found and fixed sw126 (silent: overridden methods ran the
 > base's version through `this` or a base-typed parameter); generic classes split off as ld100.
-> Next: struct-array printing (ld45), then ld94–ld96, ld100. Open: loud 5 compiler + 9 tool.
+> ld45 (struct-array printing) looked at: a SINGLE struct printed its address (sw127, silent);
+> now refused, as the array is. ld45 is the object writer (util.inspect's `{ k: v }` and its line
+> breaking), a feature, NOT started. The loud compiler groups are done; left: ld45, ld94–ld96,
+> ld100 (features / gaps, each refused with a message), then the 9 tool rows. Open: loud 5
+> compiler + 9 tool.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule

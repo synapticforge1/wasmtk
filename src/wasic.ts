@@ -6490,6 +6490,23 @@ class WasicTranspiler {
   }
 
   /** Find all class names that are (or transitively extend) baseClass in this module. */
+  /** A whole struct / class instance as a console argument, `console.log(p)`, printed its ADDRESS
+   *  (`260` for Deno's `{ x: 1, y: 2.5 }`; sw127, found with ld45, 2026-10-22). Refused until an
+   *  object writer exists (ld45); a field (`p.x`) prints as before. */
+  private refuseWholeObjectArgs(argsStr: string, locals: Map<string, WatType>): void {
+    for (const raw of this.splitArgs(argsStr)) {
+      const a = raw.trim();
+      if (!/^\w+$/.test(a) || this.arrayVars.has(a) || this.stringVars.has(a)) continue;
+      if (locals.get(a) === "string") continue;
+      const what = this.classVars.has(a) ? "class instance" : this.structVars.has(a) ? "struct" : null;
+      if (what) {
+        this.diagnostics.push(
+          `console argument: printing a whole ${what} is not supported yet; print its fields (${a})`,
+        );
+      }
+    }
+  }
+
   /** A `for (const p of ps)` item over a class or struct array is that element: its pointer is in
    *  the item's local. It was a plain i32, so `p.v` and `s.area()` were refused (ld79, 2026-10-22). */
   private registerForOfInstance(item: string, elemTypeName: string | undefined): void {
@@ -16066,6 +16083,7 @@ ${prefixed}
     const logMatch = line.match(/^console\.log\s*\((.+)\)\s*;?$/);
     if (logMatch) {
       this.hasConsoleLog = true;
+      this.refuseWholeObjectArgs(logMatch[1], locals);
       // Phase 6d: console.log of a 2D i32 array variable → call $__print_2d_i32_arr helper
       const log2DArg = logMatch[1].trim();
       const log2DInfo = this.arrayVars.get(log2DArg);
@@ -16805,6 +16823,7 @@ ${prefixed}
     const errMatch = line.match(/^console\.(error|warn)\s*\((.+)\)\s*;?$/);
     if (errMatch) {
       this.hasConsoleLog = true;
+      this.refuseWholeObjectArgs(errMatch[2], locals);
       const allocator: DataAllocator = (text) => this.allocString(text);
       const lookup: FuncLookup = (name) => this.functions.find((f) => f.name === name);
       const enumLookup = (key: string) => this.enumValues.get(key);
