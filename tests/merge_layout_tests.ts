@@ -7,6 +7,8 @@
  *   sw110  a wasic merge seated the heap INSIDE a merged library's data (it advanced by global
  *          0's initial value, else 260), so the program's pushes overwrote the library's bytes.
  *   ld86   the merge scanners counted `(` / `)` inside data strings ("expected EOF, got )").
+ *   ld84   the bundler handled neither `export class` nor `export { name }` (2026-10-22).
+ *   ld85   two imports with one basename collided (`duplicate func $util_add`, 2026-10-22).
  *
  * Runs the INSTALLED wasmtk in a temp directory. Usage: deno run -A tests/merge_layout_tests.ts
  */
@@ -38,6 +40,18 @@ const FILES: Record<string, string> = {
   "entry2.ts": `type i32 = number;\nimport { helper } from "./dep.ts";\nconst scale: i32 = 100;\nconsole.log(helper(2), scale);\n`,
   // ...and no refusal when the names differ (`scale` private to the dependency only)
   "entry3.ts": `type i32 = number;\nimport { helper } from "./dep.ts";\nconst factor: i32 = 100;\nconsole.log(helper(2), factor);\n`,
+  // ld85: two imports with one basename
+  "a/util.ts": `type i32 = number;\nexport function add(a: i32, b: i32): i32 {\n  return a + b;\n}\n`,
+  "b/util.ts": `type i32 = number;\nexport function add(a: i32, b: i32): i32 {\n  return a * 10 + b;\n}\n`,
+  "twoutil.ts": `type i32 = number;\nimport { add } from "./a/util.ts";\nimport { add as addB } from "./b/util.ts";\n` +
+    `const x: i32 = add(2, 3);\nconst y: i32 = addB(2, 3);\nconsole.log(x, y);\n`,
+  // ld84: `export class` and an export list (with an alias, and a class in it)
+  "shapes.ts": `type i32 = number;\nexport class Box {\n  w: i32;\n  constructor(w: i32) {\n    this.w = w;\n  }\n` +
+    `  area(): i32 {\n    return this.w * this.w;\n  }\n}\nclass Pt {\n  x: i32;\n  constructor(x: i32) {\n` +
+    `    this.x = x;\n  }\n}\nfunction triple(n: i32): i32 {\n  return n * 3;\n}\nconst LIMIT: i32 = 7;\n` +
+    `export { triple, LIMIT as MAX, Pt };\n`,
+  "useshapes.ts": `type i32 = number;\nimport { Box, triple, MAX, Pt } from "./shapes.ts";\nconst b: Box = new Box(4);\n` +
+    `const a: i32 = b.area();\nconst p: Pt = new Pt(6);\nconst px: i32 = p.x;\nconsole.log(a, triple(5), MAX, px);\n`,
 };
 
 /** One step's output must equal `want` (trimmed) with exit 0. */
@@ -60,7 +74,10 @@ async function step(args: string[], dir: string): Promise<void> {
 
 const dir = await Deno.makeTempDir({ prefix: "wasmtk_layout_" });
 try {
-  for (const [f, body] of Object.entries(FILES)) await Deno.writeTextFile(join(dir, f), body);
+  for (const [f, body] of Object.entries(FILES)) {
+    if (f.includes("/")) await Deno.mkdir(join(dir, f.slice(0, f.lastIndexOf("/"))), { recursive: true });
+    await Deno.writeTextFile(join(dir, f), body);
+  }
   for (const w of ["dlib", "elib", "plib2"]) await step(["convert", `${w}.wat`], dir);
 
   console.log("── merged and bundled modules keep their own data (sw109, sw110, ld86) ──");
@@ -85,6 +102,13 @@ try {
   }
   await step(["wasic", "entry3.ts", "-o", "entry3.wasm"], dir);
   await expectOut("bundler: a private name of its own still compiles (sw112)", ["run", "entry3.wasm"], dir, "6 100");
+
+  // ld85: `a/util.ts` and `b/util.ts` each keep their `add` (both were `util_add`: refused)
+  await step(["wasic", "twoutil.ts", "-o", "twoutil.wasm"], dir);
+  await expectOut("bundler: two imports with one basename (ld85)", ["run", "twoutil.wasm"], dir, "5 23");
+  // ld84: `export class`, and `export { a, b as c, Class }` without `from`
+  await step(["wasic", "useshapes.ts", "-o", "useshapes.wasm"], dir);
+  await expectOut("bundler: export class and an export list (ld84)", ["run", "useshapes.wasm"], dir, "16 15 7 6");
 } finally {
   await Deno.remove(dir, { recursive: true });
 }
