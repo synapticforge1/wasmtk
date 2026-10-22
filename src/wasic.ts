@@ -1283,21 +1283,32 @@ function parse2DArrayLiteral(str: string): string[][] {
   const s = str.trim();
   if (!s.startsWith("[")) return [];
   const inner = s.slice(1, s.lastIndexOf("]")).trim();
+  // String-aware: a `,` or bracket inside a string element is text (`["d,e"]` was two elements, ld94)
+  const mask = buildStringLiteralMask(inner);
   const rows: string[][] = [];
   let depth = 0;
   let rowStart = -1;
+  let cells: string[] = [];
+  let cellStart = -1;
   for (let i = 0; i < inner.length; i++) {
+    if (mask[i]) continue;
     if (inner[i] === "[") {
-      if (depth === 0) rowStart = i + 1;
+      if (depth === 0) {
+        rowStart = i + 1;
+        cellStart = i + 1;
+        cells = [];
+      }
       depth++;
     } else if (inner[i] === "]") {
       depth--;
       if (depth === 0 && rowStart !== -1) {
-        rows.push(
-          inner.slice(rowStart, i).split(",").map((e) => e.trim()).filter((e) => e.length > 0),
-        );
+        cells.push(inner.slice(cellStart, i));
+        rows.push(cells.map((e) => e.trim()).filter((e) => e.length > 0));
         rowStart = -1;
       }
+    } else if (inner[i] === "," && depth === 1) {
+      cells.push(inner.slice(cellStart, i));
+      cellStart = i + 1;
     }
   }
   return rows;
@@ -4735,7 +4746,7 @@ class WasicTranspiler {
       if (this.moduleGlobals.has(varName)) continue; // already registered
       // A 2D array, T[][]: the outer array holds row pointers, as _start's pre-scan lays it out. It
       // was registered as a 1D T[], so a function's `grid[r][c]` was refused (ld41, 2026-10-22).
-      if (m[3] === "[][]" && m[2] !== "string" && !this.structDefs.has(m[2]!)) {
+      if (m[3] === "[][]" && !this.structDefs.has(m[2]!)) {
         const rhs2D = line.slice(line.indexOf("=") + 1).trim().replace(/;$/, "");
         this.moduleGlobals.set(varName, { type: "i32", mutable: true, initExpr: "0" });
         this.moduleArrayVars.set(varName, {
@@ -6240,6 +6251,19 @@ class WasicTranspiler {
     return ret && this.classDefs.has(ret) ? ret : undefined;
   }
 
+  /** The address of a 2D STRING array's element, `names[r][c]`: its (ptr, len) pair (ld94,
+   *  2026-10-22). null for anything else. */
+  private str2DElemAddr(expr: string, locals: Map<string, WatType>): string | null {
+    const m = expr.trim().match(/^(\w+)\[(.+?)\]\[(.+)\]$/);
+    if (!m || !parenDepthNeverNegative(m[2]!) || !parenDepthNeverNegative(m[3]!)) return null;
+    const ai = this.arrayVars.get(m[1]!);
+    if (!ai?.is2D || ai.elemType !== "string") return null;
+    const r = this.emitArrayIndex(m[2]!.trim(), locals);
+    const c = this.emitArrayIndex(m[3]!.trim(), locals);
+    const row = `(i32.load (i32.add (i32.add ${this.arrGetWat(m[1]!)} (i32.const 8)) (i32.shl ${r} (i32.const 2))))`;
+    return `(i32.add (i32.add ${row} (i32.const 8)) (i32.shl ${c} (i32.const 3)))`;
+  }
+
   /** The getter function for `obj.name` on a `className` instance, its own or INHERITED (`B extends A`
    *  reading A's `get double()` was "Unsupported expression: b.double", ld74, 2026-10-22). */
   private getterFunc(className: string, name: string): string | null {
@@ -7591,8 +7615,10 @@ class WasicTranspiler {
     const outerLen = info.rows.length;
     const outerCap = Math.max(outerLen * 2, 8);
     const outerSize = outerCap * 4 + 8; // outer elements are i32 ptrs (4 bytes each)
-    const elemSize = (info.elemType === "f64" || info.elemType === "i64") ? 8 : 4;
-    const storeOp = memStoreOp(info.elemType);
+    // a string element is a (ptr, len) pair, as in a 1D string array (ld94)
+    const isStr = info.elemType === "string";
+    const elemSize = (info.elemType === "f64" || info.elemType === "i64" || isStr) ? 8 : 4;
+    const storeOp = isStr ? "i32.store" : memStoreOp(info.elemType);
     const stmts: string[] = [];
 
     // Allocate outer array (into the global for a module 2D array a function reads, ld41)
@@ -7616,6 +7642,23 @@ class WasicTranspiler {
       for (let j = 0; j < row.length; j++) {
         const raw = row[j].trim();
         const off = 8 + j * elemSize;
+        if (isStr) {
+          // a string literal or a string variable; anything else is refused (its two words would
+          // need a temporary pair here)
+          const pl = /^(["'])(?:\\.|(?!\1).)*\1$/.test(raw) || (locals?.get(raw) === "string")
+            ? this.emitStringPtrLen(raw, locals ?? new Map())
+            : null;
+          if (!pl) {
+            this.diagnostics.push(
+              `unsupported: the string[][] '${varName}' element '${raw.slice(0, 40)}' is not a string literal or variable`,
+            );
+            continue;
+          }
+          const [ptrW, lenW] = splitTwoWatExprs(pl);
+          stmts.push(`(i32.store offset=${off} (local.get $__2d_tmp) ${ptrW})`);
+          stmts.push(`(i32.store offset=${off + 4} (local.get $__2d_tmp) ${lenW})`);
+          continue;
+        }
         const val = this.arrayElemWat(raw, info.elemType, locals); // sw69
         stmts.push(`(${storeOp} offset=${off} (local.get $__2d_tmp) ${val})`);
       }
@@ -8445,6 +8488,16 @@ class WasicTranspiler {
       ].join("\n");
     }
 
+    // a 2D string array's element, `names[r][c]` (ld94)
+    {
+      const a2 = this.str2DElemAddr(initExpr, locals);
+      if (a2) {
+        return [
+          `(local.set $${varName}_ptr (i32.load ${a2}))`,
+          `${ind}(local.set $${varName}_len (i32.load offset=4 ${a2}))`,
+        ].join("\n");
+      }
+    }
     // String array element: arr[idx] where arr is string[] — load ptr and len pair.
     const strArrElemMatch = initExpr.match(/^(\w+)\[([^\]]+)\]$/);
     if (strArrElemMatch) {
@@ -9141,7 +9194,11 @@ class WasicTranspiler {
     const bracketStrM = e.match(/^(\w+)\[/);
     if (bracketStrM) {
       const bArrInfo = this.arrayVars.get(bracketStrM[1]);
-      if (bArrInfo && (bArrInfo.isStringArr || bArrInfo.elemType === "string")) return true;
+      // a 2D string array's element needs both indexes (`names[1]` is a row, ld94)
+      if (
+        bArrInfo && (bArrInfo.isStringArr || bArrInfo.elemType === "string") &&
+        (!bArrInfo.is2D || /^\w+\[[^\]]+\]\[[^\]]+\]$/.test(e))
+      ) return true;
     }
     // String method calls on a string variable (slice, trim, charAt, case, replace, pad, repeat)
     const strMethodM = e.match(
@@ -9870,12 +9927,18 @@ ${prefixed}
       const lenW = sc ? `(i32.const ${sc[1]})` : `(local.get $${strCharSub[1]}_len)`;
       return `(call $__str_index ${ptrW} ${lenW} ${idxWat})`; // out of range: "undefined" (sw71)
     }
+    // a 2D string array's element, `names[r][c]` (ld94)
+    {
+      const a2 = this.str2DElemAddr(expr, locals);
+      if (a2) return `(i32.load ${a2}) (i32.load offset=4 ${a2})`;
+    }
     // String array element access: arr[idx] where arr is string[] (isStringArr or elemType=string)
     const strArrBracket = expr.match(/^(\w+)\[([^\]]+)\]$/);
     if (strArrBracket) {
       const [, arrN, idxRaw] = strArrBracket;
       const arrInfoSA = this.arrayVars.get(arrN);
-      if (arrInfoSA && (arrInfoSA.isStringArr || arrInfoSA.elemType === "string")) {
+      // (one index of a 2D string array is a ROW, not text: ld94)
+      if (arrInfoSA && !arrInfoSA.is2D && (arrInfoSA.isStringArr || arrInfoSA.elemType === "string")) {
         const idxWat = this.emitArrayIndex(idxRaw.trim(), locals);
         const baseWat = (arrInfoSA.ptr === -1 || arrInfoSA.ptr === -2 || arrInfoSA.dynamic)
           ? this.arrGetWat(arrN)
@@ -10844,8 +10907,9 @@ ${prefixed}
       const arrName = idxLenMatch[1];
       const arrInfo = this.arrayVars.get(arrName);
       const idxWat = this.emitArrayIndex(idxLenMatch[2], locals);
-      // String array element .length: arr[i].length → len field of the 8-byte ptr+len pair
-      if (arrInfo && (arrInfo.isStringArr || arrInfo.elemType === "string")) {
+      // String array element .length: arr[i].length → len field of the 8-byte ptr+len pair. Of a
+      // 2D string array `arr[i]` is a ROW: its length, below (ld94).
+      if (arrInfo && !arrInfo.is2D && (arrInfo.isStringArr || arrInfo.elemType === "string")) {
         const baseWat = (arrInfo.ptr === -1 || arrInfo.ptr === -2 || arrInfo.dynamic)
           ? this.arrGetWat(arrName)
           : `(i32.const ${arrInfo.ptr})`;
@@ -12225,6 +12289,24 @@ ${prefixed}
           );
           return `(call $${sdFuncName} (local.get $__self) ${sdEmitted.join(" ")})`.trim();
         }
+      }
+    }
+
+    // A call of a function array's element, `ops[0](1, 2)`: its slot holds the table index, as
+    // `const f: Op = ops[i]; f(…)` reads it (ld95, 2026-10-22; it was "Unsupported expression")
+    {
+      const fe = expr.match(/^(\w+)\[([^\[\]]+)\]\s*\(([\s\S]*)\)$/);
+      const sig = fe ? (this.arrayVars.get(fe[1]!) ?? this.moduleArrayVars.get(fe[1]!))?.isFuncPtrArr : undefined;
+      if (fe && sig && parenDepthNeverNegative(fe[3]!)) {
+        const typeName = this.getOrCreateFuncType(sig.params, sig.result);
+        const args = fe[3]!.trim() ? this.splitArgs(fe[3]!.trim()) : [];
+        const argW = args.map((a, i) => {
+          const pt = sig.params[i] ?? defaultType;
+          return pt === "string" ? this.emitStringPtrLen(a, locals) : this.emitExpr(a, locals, pt);
+        });
+        const idxW = this.emitArrayIndex(fe[2]!, locals);
+        const slot = `(i32.load (i32.add (i32.add ${this.arrGetWat(fe[1]!)} (i32.const 8)) (i32.shl ${idxW} (i32.const 2))))`;
+        return `(call_indirect (type ${typeName}) ${[...argW, slot].join(" ")})`;
       }
     }
 
@@ -15981,6 +16063,18 @@ ${prefixed}
       const arrInfo = this.arrayVars.get(arrWriteMatch[1]);
       if (arrInfo) {
         // Phase 6d: 2D array write — twoD[row][col] = val (index captured as "row][col" by regex)
+        if (arrInfo.is2D && arrWriteMatch[2].includes("][") && arrInfo.elemType === "string") {
+          // a 2D string array's element: its (ptr, len) pair (ld94)
+          const a2 = this.str2DElemAddr(`${arrWriteMatch[1]}[${arrWriteMatch[2]}]`, locals);
+          const rhs2 = arrWriteMatch[3].trim();
+          const pl2 = this.quietEmit(() => this.emitStringPtrLen(rhs2, locals));
+          if (a2 && pl2 !== "(i32.const 0) (i32.const 0)") {
+            const [p2, l2] = splitTwoWatExprs(pl2);
+            return `(i32.store ${a2} ${p2})\n      (i32.store offset=4 ${a2} ${l2})`;
+          }
+          this.diagnostics.push(`unsupported: a string[][] element store of '${rhs2.slice(0, 40)}'`);
+          return "";
+        }
         if (arrInfo.is2D && arrWriteMatch[2].includes("][")) {
           const [rowRaw, colRaw] = arrWriteMatch[2].split("][");
           const rowIdxWat = this.emitArrayIndex(rowRaw, locals);
@@ -24527,6 +24621,22 @@ ${sum}
           )
         );
       }
+      // A LITERAL array of functions, `const ops: Op[] = [add, mul]` (or `Array<(…) => T>`): the
+      // empty function array and one push per element, the form Phase 44 builds. It was no function
+      // array at all, so `const f: Op = ops[i]` was refused (ld95, 2026-10-22).
+      this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
+        code.replace(
+          /^([ \t]*)(const|let|var)\s+(\w+)\s*:\s*(?:(\w+)\[\]|Array<(\([^)]*\)\s*=>\s*\w+)>)\s*=\s*\[([^\[\]]+)\]\s*;?[ \t]*$/gm,
+          (whole, ind: string, kw: string, name: string, alias: string | undefined, inline: string | undefined, elems: string) => {
+            const sig = inline ?? (alias ? aliasText.get(alias) : undefined);
+            if (!sig) return whole;
+            const items = elems.split(",").map((s) => s.trim()).filter(Boolean);
+            if (!items.every((s) => /^\w+$/.test(s))) return whole; // function names only
+            return [`${ind}${kw} ${name}: Array<${sig}> = [];`, ...items.map((s) => `${ind}${name}.push(${s});`)]
+              .join("\n");
+          },
+        )
+      );
     }
     // Phase 18 fix: replace Array.from({ length: N }, () => []) with __arr_from_2d__(N)
     // Must run BEFORE parseFunctions() so that collected bodyLines don't still contain

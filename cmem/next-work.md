@@ -55,8 +55,9 @@ the workspace pulls it on its sweep.
 > (ld89 `dync`, ld90 CLI flags) DONE; group 2 (ld84 bundler exports, ld85 same-basename imports,
 > ld87 `mod` i64) DONE; group 3 (ld81 wasmbundle memory, ld82 bindgen camelCase, ld83 deno
 > binding) DONE: **all loud tool rows closed**. Owner 2026-10-22: "fix the compiler issues first":
-> sw123 DONE (null vs undefined, `24_NullVersusUndefined`); next ld94 (`string[][]`), ld95, ld96,
-> ld100, ld45; sw119 waits for the owner. Then items 3–5.
+> sw123 DONE (null vs undefined, `24_NullVersusUndefined`); ld94 (`string[][]`) and ld95 (function
+> array literals) DONE; next ld96 (capturing callbacks), ld100 (generic classes), ld45 (object
+> printing); sw119 waits for the owner. Then items 3–5.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule
