@@ -337,43 +337,53 @@ function genLoadModule(parsed: ParsedWit, runtime: "deno" | "node" | "bun"): str
         `  env["__host_print"] = (ptr: number, len: number) => _hostPrintImpl(ptr, len);`,
       );
     }
-    lines.push(`  const importObj = { env, wasi_snapshot_preview1: _wasi };`);
+    // A WIT name is lower-kebab, so the module's own spelling of an import is lost: wasic imports
+    // `display.showValue()` as `display_showValue`, the binding offered `display_show_value`, and
+    // the module never linked (ld82, 2026-10-22). An import is found by its name with case, `_`
+    // and `-` ignored.
+    lines.push(`  const _norm = (k: string) => k.toLowerCase().replace(/[-_]/g, "");`);
+    lines.push(`  const _envByNorm = new Map(Object.entries(env).map(([k, v]) => [_norm(k), v]));`);
+    lines.push(
+      `  const _env = new Proxy(env, { get: (t, k: string) => Object.prototype.hasOwnProperty.call(t, k) ? t[k] : _envByNorm.get(_norm(String(k))) });`,
+    );
+    lines.push(`  const importObj = { env: _env, wasi_snapshot_preview1: _wasi };`);
   } else {
     lines.push(
       `  const importObj: Record<string, Record<string, unknown>> = { wasi_snapshot_preview1: _wasi };`,
     );
   }
 
-  // Load raw bytes
+  // Load raw bytes. Bytes are passed to instantiate AS GIVEN: a typed-array view is a valid
+  // BufferSource, and taking its `.buffer` read the whole backing buffer, ignoring byteOffset
+  // (a Node Buffer from readFileSync shares a pool). A path is read from disk; Deno's `fetch`
+  // cannot read a relative path ("Invalid URL: 'hostlib.wasm'"). ld83, 2026-10-22.
   if (runtime === "node") {
     lines.push(`  // deno-lint-ignore-file`);
     lines.push(`  const { readFileSync } = await import("node:fs");`);
     lines.push(
-      `  const raw: ArrayBuffer = typeof source === "string" ? readFileSync(source).buffer`,
+      `  const raw: BufferSource = typeof source === "string" || source instanceof URL ? readFileSync(source)`,
     );
-    lines.push(
-      `    : source instanceof URL ? readFileSync(source.pathname).buffer : source as ArrayBuffer;`,
-    );
+    lines.push(`    : source;`);
   } else if (runtime === "bun") {
     lines.push(`  const _src = String(source);`);
-    lines.push(`  const raw: ArrayBuffer = typeof source === "string" || source instanceof URL`);
+    lines.push(`  const raw: BufferSource = typeof source === "string" || source instanceof URL`);
     lines.push(
-      `    ? await (globalThis as unknown as { Bun: { file(p: string): { arrayBuffer(): Promise<ArrayBuffer> } } }).Bun.file(_src).arrayBuffer()`,
+      `    ? await (globalThis as unknown as { Bun: { file(p: string): { arrayBuffer(): Promise<ArrayBuffer> } } }).Bun.file(source instanceof URL ? source.pathname : _src).arrayBuffer()`,
     );
-    lines.push(`    : source instanceof ArrayBuffer ? source : (source as Uint8Array).buffer;`);
+    lines.push(`    : source;`);
   } else {
-    // deno (default) — use readFile for file:// paths, fetch for http
-    lines.push(`  let raw: ArrayBuffer;`);
-    lines.push(`  if (source instanceof ArrayBuffer) {`);
+    // deno (default): a file path or file: URL from disk, an http(s) / data / blob URL by fetch
+    lines.push(`  let raw: BufferSource;`);
+    lines.push(`  if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {`);
     lines.push(`    raw = source;`);
-    lines.push(`  } else if (ArrayBuffer.isView(source)) {`);
-    lines.push(`    raw = (source as Uint8Array).buffer as ArrayBuffer;`);
-    lines.push(`  } else {`);
+    lines.push(`  } else if (/^(?:https?|data|blob):/i.test(String(source))) {`);
     lines.push(`    raw = await (await fetch(String(source))).arrayBuffer();`);
+    lines.push(`  } else {`);
+    lines.push(`    raw = await Deno.readFile(source instanceof URL || /^file:/i.test(source) ? new URL(source) : source);`);
     lines.push(`  }`);
   }
 
-  lines.push(`  const { instance } = await WebAssembly.instantiate(raw, importObj);`);
+  lines.push(`  const { instance } = await WebAssembly.instantiate(raw, importObj as unknown as WebAssembly.Imports);`);
   lines.push(`  const exp = instance.exports as Record<string, unknown>;`);
   if (exportedFns.length > 0) {
     // Resolve an export by name, tolerating the lossy WIT kebab<->camel round-trip:
