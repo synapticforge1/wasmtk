@@ -2269,6 +2269,8 @@ class WasicTranspiler {
   // Tracks variable names declared with a function type (e.g. let f: (a: i32) => i32)
   // Stored as Map<name, signature> — the i32 local holds the funcref table index.
   private funcTypeVars: Map<string, { params: WatType[]; result: WatType | null }> = new Map();
+  /** A class method's declared return type name, by function name (`C_bump` → `C`): classOfExpr. */
+  private methodResultTsNames = new Map<string, string>();
   // Named function type aliases: "Scaler" → {params:[i32], result:i32}  (from `type Scaler = (v:i32)=>i32`)
   private namedFuncTypeAliases: Map<string, { params: WatType[]; result: WatType | null }> =
     new Map();
@@ -6174,6 +6176,10 @@ class WasicTranspiler {
                       className: isStatic ? undefined : className,
                     });
                   }
+                  // the declared return type's NAME, for a chained call on the result (ld74)
+                  if (!isConstructor && /^[A-Za-z_]\w*$/.test(rawResult)) {
+                    this.methodResultTsNames.set(funcName, rawResult);
+                  }
 
                   classDef.methods.push({
                     name: methodName,
@@ -6213,6 +6219,26 @@ class WasicTranspiler {
   }
 
   /** Phase 47: Walk the classInheritance chain to find the WAT function implementing a method. */
+  /** The class of an instance expression: a class variable, `this` in a method, or a method call
+   *  whose declared return type is a class (`c.bump()` for `bump(): C`), chained to any depth. */
+  private classOfExpr(e: string): string | undefined {
+    const t = e.trim();
+    if (t === "this") return this.currentMethodClass ?? undefined;
+    if (/^\w+$/.test(t)) return this.classVars.get(t)?.className;
+    const parsed = t.endsWith(")") ? this.splitLastMethodCall(t) : null;
+    if (!parsed) return undefined;
+    const cls = this.classOfExpr(parsed.receiver);
+    const fnName = cls ? this.resolveMethodFunc(cls, parsed.method) : null;
+    const ret = fnName ? this.methodResultTsNames.get(fnName) : undefined;
+    return ret && this.classDefs.has(ret) ? ret : undefined;
+  }
+
+  /** The getter function for `obj.name` on a `className` instance, its own or INHERITED (`B extends A`
+   *  reading A's `get double()` was "Unsupported expression: b.double", ld74, 2026-10-22). */
+  private getterFunc(className: string, name: string): string | null {
+    return this.resolveMethodFunc(className, `get_${name}`);
+  }
+
   private resolveMethodFunc(className: string, methodName: string): string | null {
     let current: string | undefined = className;
     while (current !== undefined) {
@@ -6464,6 +6490,76 @@ class WasicTranspiler {
   }
 
   /** Find all class names that are (or transitively extend) baseClass in this module. */
+  /** A `for (const p of ps)` item over a class or struct array is that element: its pointer is in
+   *  the item's local. It was a plain i32, so `p.v` and `s.area()` were refused (ld79, 2026-10-22). */
+  private registerForOfInstance(item: string, elemTypeName: string | undefined): void {
+    if (!elemTypeName) return;
+    if (this.classDefs.has(elemTypeName)) {
+      this.classVars.set(item, { className: elemTypeName, ptr: -1 });
+    } else {
+      const def = this.structDefs.get(elemTypeName);
+      if (def) this.structVars.set(item, { def, ptr: -1 });
+    }
+  }
+
+  /** Whether a call of `method` on a `cls`-typed instance must dispatch on the instance's class
+   *  tag: a subclass overrides it, or `cls` has no implementation of its own (abstract). */
+  private needsTagDispatch(cls: string, method: string): boolean {
+    if (this.classHeaderSize === 0) return false;
+    const own = this.resolveMethodFunc(cls, method);
+    return !own || this.findSubclasses(cls).some((s) => {
+      const r = this.resolveMethodFunc(s, method);
+      return r !== null && r !== own;
+    });
+  }
+
+  /** A method call on an instance whose class is `stn` or a subclass of it, chosen at run time by
+   *  the class tag at offset 0 (Phase 47's vtable dispatch, which only an array element's call
+   *  had; ld74 abstract methods and ld79 for…of / `this` calls use it too, 2026-10-22). Classes
+   *  with no implementation (an abstract base) are skipped. `objWat` is evaluated per use: pass a
+   *  local or a pure load. */
+  private emitTagDispatch(
+    stn: string,
+    method: string,
+    objWat: string,
+    args: string[],
+    locals: Map<string, WatType>,
+  ): string {
+    const emitCall = (cls: string): string => {
+      const fn2 = this.resolveMethodFunc(cls, method) ?? `${cls}_${method}`;
+      const fn2Def = this.functions.find((f) => f.name === fn2);
+      const eArgs = args.map((a, i) =>
+        this.emitExpr(a, locals, fn2Def?.params[i + 1]?.type ?? ("i32" as WatType))
+      );
+      return `(call $${fn2} ${objWat} ${eArgs.join(" ")})`.trim();
+    };
+    if (this.classHeaderSize === 0) return emitCall(stn);
+    const subs = this.findSubclasses(stn).filter((s) => this.resolveMethodFunc(s, method) !== null);
+    subs.sort((a, b) => (this.classTags.get(a) ?? 0) - (this.classTags.get(b) ?? 0));
+    if (subs.length === 0) {
+      // No class implements it — a mis-registered hierarchy. Fail loud rather than dispatch to 0.
+      this.diagnostics.push(`No subclass found for '${stn}.${method}()' method dispatch`);
+      return `(i32.const 0)`;
+    }
+    if (subs.length === 1) return emitCall(subs[0]);
+    const anyImpl = this.functions.find((f) => f.name === this.resolveMethodFunc(subs[0], method));
+    const result = anyImpl?.result ?? null;
+    const resultWat = result === null || result === "string" || result === "never"
+      ? null
+      : watBaseType(result as WatType);
+    // if-else from the last class outward (the last is the default)
+    let dispatch = emitCall(subs[subs.length - 1]);
+    for (let k = subs.length - 2; k >= 0; k--) {
+      const cls = subs[k];
+      const tag = this.classTags.get(cls) ?? (k + 1);
+      const cond = `(i32.eq (i32.load ${objWat}) (i32.const ${tag}))`;
+      dispatch = resultWat
+        ? `(if (result ${resultWat}) ${cond} (then ${emitCall(cls)}) (else ${dispatch}))`
+        : `(if ${cond} (then ${emitCall(cls)}) (else ${dispatch}))`;
+    }
+    return dispatch;
+  }
+
   private findSubclasses(baseClass: string): string[] {
     const result: string[] = [];
     for (const name of this.classDefs.keys()) {
@@ -8146,6 +8242,30 @@ class WasicTranspiler {
       }
     }
 
+    // A string-returning METHOD, `a.name()` (or a chain, `c.bump().name()`): the instance is its
+    // first argument, the result comes back through the same globals. It was "Unsupported string
+    // assignment" (ld74, 2026-10-22).
+    {
+      const mc = initExpr.endsWith(")") ? this.splitLastMethodCall(initExpr.replace(/;$/, "")) : null;
+      const cls = mc ? this.classOfExpr(mc.receiver) : undefined;
+      const fnName = cls ? this.resolveMethodFunc(cls, mc!.method) : null;
+      const strFn = fnName ? this.functions.find((f) => f.name === fnName && f.result === "string") : undefined;
+      if (mc && strFn && parenDepthNeverNegative(mc.args)) {
+        const argList = mc.args.trim() ? this.splitArgs(mc.args.trim()) : [];
+        const watArgs = argList.map((a, i) => {
+          const p = strFn.params[i + 1];
+          if (p?.type === "string") return this.emitStringPtrLen(a.trim(), locals);
+          return this.emitExpr(a.trim(), locals, p?.type ?? "i32");
+        });
+        const recvWat = this.emitExpr(mc.receiver, locals, "i32");
+        return [
+          `(call $${fnName} ${recvWat} ${watArgs.join(" ")})`.trim(),
+          `${ind}(local.set $${varName}_ptr (global.get $__str_ret_ptr))`,
+          `${ind}(local.set $${varName}_len (global.get $__str_ret_len))`,
+        ].join("\n");
+      }
+    }
+
     // String literal — escape-aware so `\"` / `\\` inside the literal (e.g. an embedded JSON
     // document) don't terminate the match early; allocString → unescapeString decodes them.
     const litMatch = initExpr.match(/^"((?:[^"\\]|\\.)*)"$/) ??
@@ -9130,8 +9250,9 @@ class WasicTranspiler {
     const cls = obj === "this" ? this.currentMethodClass : this.classVars.get(obj)?.className;
     const cd = cls ? this.classDefs.get(cls) : undefined;
     if (!cd) return null;
-    if (cd.methods.some((m) => m.isGetter && m.name === name)) {
-      const r = this.functions.find((f) => f.name === `${cls}_get_${name}`)?.result;
+    const getterFn = this.getterFunc(cls!, name); // its own or inherited (ld74)
+    if (getterFn) {
+      const r = this.functions.find((f) => f.name === getterFn)?.result;
       if (r) return r as WatType;
     }
     if (obj === "this") {
@@ -11058,45 +11179,8 @@ ${prefixed}
         const amcObjPtr =
           `(i32.load (i32.add (i32.add ${amcBase} (i32.const 8)) (i32.shl ${amcIdxWat} (i32.const 2))))`;
         const amcArgs = amcArgsStr ? this.splitArgs(amcArgsStr) : [];
-        const amcEmitCall = (cls: string): string => {
-          const fn2 = this.resolveMethodFunc(cls, amcMethod) ?? `${cls}_${amcMethod}`;
-          const fn2Def = this.functions.find((f) => f.name === fn2);
-          const eArgs = amcArgs.map((a, i) =>
-            this.emitExpr(a, locals, fn2Def?.params[i + 1]?.type ?? ("i32" as WatType))
-          );
-          return `(call $${fn2} ${amcObjPtr} ${eArgs.join(" ")})`.trim();
-        };
-        if (this.classHeaderSize === 0) {
-          return amcEmitCall(amcStn);
-        }
         // Runtime vtable dispatch: read class tag at offset 0, dispatch to matching method
-        const amcSubs = this.findSubclasses(amcStn);
-        amcSubs.sort((a, b) => (this.classTags.get(a) ?? 0) - (this.classTags.get(b) ?? 0));
-        if (amcSubs.length === 0) {
-          // No concrete subclass found for the element's declared type — a mis-registered class
-          // hierarchy. Fail loud rather than silently dispatching to 0.
-          this.diagnostics.push(
-            `No subclass found for '${amcStn}.${amcMatch[3]}()' element method dispatch`,
-          );
-          return `(i32.const 0)`;
-        }
-        if (amcSubs.length === 1) return amcEmitCall(amcSubs[0]);
-        const amcBaseFunc = this.resolveMethodFunc(amcStn, amcMethod);
-        const amcBaseFnDef = amcBaseFunc
-          ? this.functions.find((f) => f.name === amcBaseFunc)
-          : null;
-        const amcResult = amcBaseFnDef?.result ?? null;
-        // Build if-else dispatch from last class outward (last is the default)
-        let amcDispatch = amcEmitCall(amcSubs[amcSubs.length - 1]);
-        for (let k = amcSubs.length - 2; k >= 0; k--) {
-          const cls = amcSubs[k];
-          const tag = this.classTags.get(cls) ?? (k + 1);
-          const cond = `(i32.eq (i32.load ${amcObjPtr}) (i32.const ${tag}))`;
-          amcDispatch = amcResult
-            ? `(if (result ${amcResult}) ${cond} (then ${amcEmitCall(cls)}) (else ${amcDispatch}))`
-            : `(if ${cond} (then ${amcEmitCall(cls)}) (else ${amcDispatch}))`;
-        }
-        return amcDispatch;
+        return this.emitTagDispatch(amcStn, amcMethod, amcObjPtr, amcArgs, locals);
       }
     }
 
@@ -11526,11 +11610,19 @@ ${prefixed}
     }
 
     // this.field (read) or this.method(args) — inside a class instance method
+    // `this` as a value inside a method, `return this` for chaining: the instance pointer (ld74)
+    if (expr === "this" && this.currentMethodClass) return `(local.get $__self)`;
     if (expr.startsWith("this.") && this.currentMethodClass) {
       const dotMethodMatch = expr.match(/^this\.(\w+)\s*\(([\s\S]*)\)$/);
       if (dotMethodMatch) {
         const methodName = dotMethodMatch[1];
         const argsStr = dotMethodMatch[2].trim();
+        // A method a subclass overrides, or an abstract one, runs the INSTANCE's version: it ran
+        // the base's (or was refused, abstract), whatever `this` was (ld74, ld79, 2026-10-22).
+        if (this.needsTagDispatch(this.currentMethodClass!, methodName)) {
+          const args = argsStr ? this.splitArgs(argsStr) : [];
+          return this.emitTagDispatch(this.currentMethodClass!, methodName, `(local.get $__self)`, args, locals);
+        }
         // Phase 47: walk inheritance chain to find overriding or inherited method
         const funcName = this.resolveMethodFunc(this.currentMethodClass!, methodName) ??
           `${this.currentMethodClass}_${methodName}`;
@@ -11547,11 +11639,9 @@ ${prefixed}
       const dotFieldMatch = expr.match(/^this\.(\w+)$/);
       if (dotFieldMatch) {
         const cd = this.classDefs.get(this.currentMethodClass);
-        // Phase 29: getter dispatch before raw field load
-        const getter = cd?.methods.find((m) => m.isGetter && m.name === dotFieldMatch[1]);
-        if (getter) {
-          return `(call $${this.currentMethodClass}_get_${dotFieldMatch[1]} (local.get $__self))`;
-        }
+        // Phase 29: getter dispatch before raw field load (an inherited one too, ld74)
+        const getterFn = this.getterFunc(this.currentMethodClass, dotFieldMatch[1]);
+        if (getterFn) return `(call $${getterFn} (local.get $__self))`;
         const field = cd?.struct.fields.find((f) => f.name === dotFieldMatch[1]);
         if (field) {
           const loadOp = memLoadOp(field.type);
@@ -11600,13 +11690,13 @@ ${prefixed}
             : `(i32.const ${cv.ptr})`;
           return `(${loadOp} (i32.add ${baseWat} (i32.const ${field.offset})))`;
         }
-        // Phase 29: getter dispatch
-        const getter = cd?.methods.find((m) => m.isGetter && m.name === structFieldMatch[2]);
-        if (getter) {
+        // Phase 29: getter dispatch (an inherited one too, ld74)
+        const getterFn = this.getterFunc(cv.className, structFieldMatch[2]);
+        if (getterFn) {
           const baseWat = cv.ptr < 0
             ? `(local.get $${structFieldMatch[1]})`
             : `(i32.const ${cv.ptr})`;
-          return `(call $${cv.className}_get_${structFieldMatch[2]} ${baseWat})`;
+          return `(call $${getterFn} ${baseWat})`;
         }
       }
       const sv = this.structVars.get(structFieldMatch[1]);
@@ -12114,6 +12204,24 @@ ${prefixed}
       }
     }
 
+    // A method called on a method's RESULT, `c.bump().bump()`: the inner call returns an instance
+    // of the class its declared return type names (`bump(): C { …; return this; }`). Refused before
+    // (ld74, 2026-10-22).
+    {
+      const chained = expr.endsWith(")") ? this.splitLastMethodCall(expr) : null;
+      if (chained && chained.receiver.endsWith(")") && parenDepthNeverNegative(chained.args)) {
+        const cls = this.classOfExpr(chained.receiver);
+        const funcName = cls ? this.resolveMethodFunc(cls, chained.method) : null;
+        const fn = funcName ? this.functions.find((f) => f.name === funcName) : undefined;
+        if (fn && fn.result !== "string") {
+          const recvWat = this.emitExpr(chained.receiver, locals, "i32");
+          const cArgs = chained.args.trim() ? this.splitArgs(chained.args.trim()) : [];
+          const emitted = cArgs.map((a, i) => this.emitExpr(a, locals, fn.params[i + 1]?.type ?? defaultType));
+          return `(call $${funcName} ${recvWat} ${emitted.join(" ")})`.trim();
+        }
+      }
+    }
+
     // instance.method(args) or ClassName.staticMethod(args) dot-call in expression position.
     // Guard the greedy args capture so a compound expr like `a.unwrap() + b.unwrap()` (where the
     // capture would grab `) + b.unwrap(`) falls through to the binary-op loop instead of mis-parsing
@@ -12128,6 +12236,13 @@ ${prefixed}
       // Instance method call
       const cv = this.classVars.get(receiver);
       if (cv) {
+        // An instance whose class has subclasses that override the method (a for…of item, a
+        // parameter): the instance's version, by its tag (ld79, sw126, 2026-10-22). A static
+        // instance (`new X`, ptr ≥ 0) is exactly its class.
+        if (cv.ptr < 0 && this.needsTagDispatch(cv.className, methodName)) {
+          const baseWat = cv.ptr < 0 ? `(local.get $${receiver})` : `(i32.const ${cv.ptr})`;
+          return this.emitTagDispatch(cv.className, methodName, baseWat, args, locals);
+        }
         // Phase 47: walk inheritance chain to find overriding or inherited method
         const funcName = this.resolveMethodFunc(cv.className, methodName) ??
           `${cv.className}_${methodName}`;
@@ -16236,14 +16351,12 @@ ${prefixed}
               watLoad: `(${loadOp} (i32.add (local.get $__self) (i32.const ${f.offset})))`,
             };
           }
-          const getter = cd?.methods.find((m) => m.isGetter && m.name === fn);
-          if (getter) {
-            const getFn = this.functions.find((gf) =>
-              gf.name === `${this.currentMethodClass}_get_${fn}`
-            );
+          const getterName = this.getterFunc(this.currentMethodClass, fn); // or inherited (ld74)
+          if (getterName) {
+            const getFn = this.functions.find((gf) => gf.name === getterName);
             return {
               type: getFn?.result ?? "f64",
-              watLoad: `(call $${this.currentMethodClass}_get_${fn} (local.get $__self))`,
+              watLoad: `(call $${getterName} (local.get $__self))`,
             };
           }
         }
@@ -16340,9 +16453,8 @@ ${prefixed}
             };
           }
           // Phase 29: getter dispatch
-          const getter = cd?.methods.find((m) => m.isGetter && m.name === fn);
-          if (getter) {
-            const getFuncName = `${cv.className}_get_${fn}`;
+          const getFuncName = this.getterFunc(cv.className, fn); // or inherited (ld74)
+          if (getFuncName) {
             const getFn = this.functions.find((gf) => gf.name === getFuncName);
             const retType = getFn?.result ?? "f64";
             const baseWat = cv.ptr < 0 ? `(local.get $${vn})` : `(i32.const ${cv.ptr})`;
@@ -16741,14 +16853,12 @@ ${prefixed}
               watLoad: `(${loadOp} (i32.add (local.get $__self) (i32.const ${f.offset})))`,
             };
           }
-          const getter = cd?.methods.find((m) => m.isGetter && m.name === fn);
-          if (getter) {
-            const getFn = this.functions.find((gf) =>
-              gf.name === `${this.currentMethodClass}_get_${fn}`
-            );
+          const getterName = this.getterFunc(this.currentMethodClass, fn); // or inherited (ld74)
+          if (getterName) {
+            const getFn = this.functions.find((gf) => gf.name === getterName);
             return {
               type: getFn?.result ?? "f64",
-              watLoad: `(call $${this.currentMethodClass}_get_${fn} (local.get $__self))`,
+              watLoad: `(call $${getterName} (local.get $__self))`,
             };
           }
         }
@@ -16844,9 +16954,8 @@ ${prefixed}
             };
           }
           // Phase 29: getter dispatch
-          const getter = cd?.methods.find((m) => m.isGetter && m.name === fn);
-          if (getter) {
-            const getFuncName = `${cv.className}_get_${fn}`;
+          const getFuncName = this.getterFunc(cv.className, fn); // or inherited (ld74)
+          if (getFuncName) {
             const getFn = this.functions.find((gf) => gf.name === getFuncName);
             const retType = getFn?.result ?? "f64";
             const baseWat = cv.ptr < 0 ? `(local.get $${vn})` : `(i32.const ${cv.ptr})`;
@@ -17278,6 +17387,22 @@ ${prefixed}
       return `(local.set $${v} (${vt}.sub (local.get $${v}) (${vt}.const 1)))`;
     }
 
+    // A chained method call as a statement, `c.bump().bump();` (ld74): the expression form, its
+    // result dropped. The lazy capture below took `).bump(` as the arguments.
+    {
+      const stmtExpr = line.trim().replace(/;$/, "").trim();
+      const chained = stmtExpr.endsWith(")") ? this.splitLastMethodCall(stmtExpr) : null;
+      if (chained && chained.receiver.endsWith(")") && this.classOfExpr(chained.receiver)) {
+        const cls = this.classOfExpr(chained.receiver)!;
+        const fnName = this.resolveMethodFunc(cls, chained.method);
+        const fn = fnName ? this.functions.find((f) => f.name === fnName) : undefined;
+        if (fn && fn.result !== "string") {
+          const call = this.emitExpr(stmtExpr, locals, (fn.result ?? "i32") as WatType);
+          return fn.result !== null && fn.result !== "never" ? `(drop ${call})` : call;
+        }
+      }
+    }
+
     // Dot-method call as statement: instance.method(args) / this.method(args) / ClassName.staticMethod(args)
     const dotCallStmt = line.match(/^(this|\w+)\.(\w+)\s*\(([\s\S]*?)\)\s*;?$/);
     if (dotCallStmt) {
@@ -17290,13 +17415,20 @@ ${prefixed}
         // Phase 47: walk inheritance chain to find overriding or inherited method
         const funcName = this.resolveMethodFunc(this.currentMethodClass, methodName) ??
           `${this.currentMethodClass}_${methodName}`;
-        const fn = this.functions.find((f) => f.name === funcName);
+        const fn = this.functions.find((f) => f.name === funcName) ??
+          this.functions.find((f) =>
+            f.name === this.resolveMethodFunc(this.findSubclasses(this.currentMethodClass!)
+              .find((s) => this.resolveMethodFunc(s, methodName)) ?? "", methodName)
+          );
         if (fn) {
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? ("i32" as WatType);
             return [this.emitExpr(a, locals, pt)];
           });
-          const call = `(call $${funcName} (local.get $__self) ${emittedArgs.join(" ")})`.trim();
+          // the instance's version of an overridden or abstract method (ld74, ld79)
+          const call = this.needsTagDispatch(this.currentMethodClass, methodName)
+            ? this.emitTagDispatch(this.currentMethodClass, methodName, `(local.get $__self)`, args, locals)
+            : `(call $${funcName} (local.get $__self) ${emittedArgs.join(" ")})`.trim();
           const hasResult1 = fn.result !== null && fn.result !== "never" && fn.result !== "string";
           return hasResult1 ? `(drop ${call})` : call;
         }
@@ -17304,6 +17436,16 @@ ${prefixed}
 
       const cv = this.classVars.get(receiver);
       if (cv) {
+        // the instance's version of an overridden or abstract method (ld79, see the expression form)
+        if (cv.ptr < 0 && this.needsTagDispatch(cv.className, methodName)) {
+          const baseWat = cv.ptr < 0 ? `(local.get $${receiver})` : `(i32.const ${cv.ptr})`;
+          const impl = this.findSubclasses(cv.className).map((s) => this.resolveMethodFunc(s, methodName))
+            .find((n) => n !== null);
+          const implFn = impl ? this.functions.find((f) => f.name === impl) : undefined;
+          const call = this.emitTagDispatch(cv.className, methodName, baseWat, args, locals);
+          const hasR = implFn && implFn.result !== null && implFn.result !== "never" && implFn.result !== "string";
+          return hasR ? `(drop ${call})` : call;
+        }
         // Phase 47: walk inheritance chain to find overriding or inherited method
         const funcName = this.resolveMethodFunc(cv.className, methodName) ??
           `${cv.className}_${methodName}`;
@@ -17479,7 +17621,20 @@ ${prefixed}
     // Phase 47: super(...) — constructor chaining from derived class to parent
     const superCallMatch = line.match(/^super\s*\((.*)\)\s*;?$/);
     if (superCallMatch && this.currentMethodClass) {
-      const parentName = this.classInheritance.get(this.currentMethodClass);
+      // A parent without a constructor has JavaScript's implicit one, which passes its arguments
+      // on: the nearest ancestor that HAS one runs; with none, `super()` does nothing. It was
+      // "Unknown function 'super'" (ld74, 2026-10-22).
+      let parentName = this.classInheritance.get(this.currentMethodClass);
+      while (parentName && !this.functions.some((f) => f.name === `${parentName}_constructor`)) {
+        parentName = this.classInheritance.get(parentName);
+      }
+      if (!parentName && this.classInheritance.has(this.currentMethodClass)) {
+        if (!superCallMatch[1].trim()) return "";
+        this.diagnostics.push(
+          `super(${superCallMatch[1].trim().slice(0, 40)}): no base class has a constructor to take the arguments`,
+        );
+        return "";
+      }
       if (parentName) {
         const parentCtorFn = this.functions.find((f) => f.name === `${parentName}_constructor`);
         if (parentCtorFn) {
@@ -22962,6 +23117,27 @@ ${sum}
             }
           }
         }
+        // A struct ALIAS, `const q: P = p` (ld74; see the _start pre-scan)
+        {
+          const aliasDef = typeStr ? this.structDefs.get(typeStr) : undefined;
+          const srcSv = /^\w+$/.test(initExpr) ? this.structVars.get(initExpr) : undefined;
+          if (aliasDef && srcSv && srcSv.def === aliasDef && !locals.has(m[1])) {
+            this.structVars.set(m[1], { def: aliasDef, ptr: -1 });
+            declaredLocals.push([m[1], "i32"]);
+            locals.set(m[1], "i32");
+            continue;
+          }
+          // …and a class instance a method returns (ld74; see the _start pre-scan)
+          if (
+            typeStr && this.classDefs.has(typeStr) && initExpr.endsWith(")") && this.classOfExpr(initExpr) &&
+            !locals.has(m[1])
+          ) {
+            this.classVars.set(m[1], { className: typeStr, ptr: -1 });
+            declaredLocals.push([m[1], "i32"]);
+            locals.set(m[1], "i32");
+            continue;
+          }
+        }
         // Phase 18 fix: const target = arr[i] where arr has a structTypeName → register
         // target in structVars so subsequent target.field access can resolve field offsets.
         if (!typeStr && initExpr) {
@@ -23022,6 +23198,7 @@ ${sum}
           declaredLocals.push([foItemName, foElemType]);
           locals.set(foItemName, foElemType);
         }
+        this.registerForOfInstance(foItemName, foArrInfo?.structTypeName);
         // One cursor local per for…of statement — an upper bound on nesting depth, so the
         // name forOfIdxLocal() resolves to at any depth is always declared.
         for (let fi = 0;; fi++) {
@@ -24190,6 +24367,15 @@ ${sum}
     this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
       code.replace(/\(\s*([A-Za-z_$][\w$]*)\s+as\s+[A-Z][\w$]*\s*\)(?=\s*[.[])/g, "$1")
     );
+    // `abstract class A { abstract m(): T; … }` (ld74, 2026-10-22): an ordinary class whose abstract
+    // members are declarations only. A call to one dispatches on the instance's class (see
+    // emitTagDispatch); a field keeps its type.
+    this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
+      code
+        .replace(/\babstract\s+class\b/g, "class")
+        .replace(/^[ \t]*abstract\s+\w+\s*\([^)]*\)\s*(?::\s*[\w\[\]]+)?\s*;[ \t]*$/gm, "")
+        .replace(/^([ \t]*)abstract\s+(\w+\s*[?:])/gm, "$1$2")
+    );
     this.src = this.src.replace(/(?:export\s+)?type\s+\w+\s*=\s*keyof\s+\w+\s*;?/gm, "");
     // Phase 51.4: pass-through utility types (Partial/Readonly/Required/NonNullable) → inner type,
     // before parseStructs so the unwrapped type is seen everywhere (incl. interface field types).
@@ -24975,6 +25161,25 @@ ${sum}
               continue;
             }
           }
+          // A struct ALIAS, `const q: P = p`: the same object, its pointer in a local. It was no
+          // struct at all, so `q.x = 9` was refused (ld74, 2026-10-22).
+          {
+            const aliasDef = typeStr ? this.structDefs.get(typeStr) : undefined;
+            const srcSv = /^\w+$/.test(initExpr) ? this.structVars.get(initExpr) : undefined;
+            if (aliasDef && srcSv && srcSv.def === aliasDef) {
+              this.structVars.set(m[1], { def: aliasDef, ptr: -1 });
+              startLocals.set(m[1], "i32");
+              startDeclaredLocals.push([m[1], "i32"]);
+              continue;
+            }
+            // …and a class instance a method returns, `const again: Counter = c.bump()` (ld74)
+            if (typeStr && this.classDefs.has(typeStr) && initExpr.endsWith(")") && this.classOfExpr(initExpr)) {
+              this.classVars.set(m[1], { className: typeStr, ptr: -1 });
+              startLocals.set(m[1], "i32");
+              startDeclaredLocals.push([m[1], "i32"]);
+              continue;
+            }
+          }
           const t = typeStr
             ? mapType(typeStr)
             : inferInitType(initExpr, startLocals, this.enumValues, this.functions);
@@ -25018,6 +25223,7 @@ ${sum}
             startDeclaredLocals.push([foItemName2, foElemType2]);
             startLocals.set(foItemName2, foElemType2);
           }
+          this.registerForOfInstance(foItemName2, foArrInfo2?.structTypeName);
           // One cursor local per for…of statement (see the matching emitFunction pre-scan).
           for (let fi = 0;; fi++) {
             const foIdxName2 = fi === 0 ? "__forof_idx" : `__forof_idx${fi}`;

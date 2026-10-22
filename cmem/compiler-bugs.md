@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 2 | 139 | 0 | 27 |
-| LOUD | 6 | 100 | 9 | 10 |
+| SILENT-WRONG | 2 | 140 | 0 | 27 |
+| LOUD | 5 | 102 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,10 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud refusals, group 6 (classes) FIXED 2026-10-22:** ld74 (but generic classes, now ld100, open),
+ld79; found and fixed **sw126** (silent: a base method calling an overridden one through `this`,
+or a call on a base-typed parameter, ran the base's version); open loud 5 compiler + 9 tool; test
+`29_ClassDispatchAndChaining`.
 **Loud refusals, group 5 (callbacks and loops) FIXED 2026-10-22:** ld78 (its last two forms), ld91,
 ld92, ld93; found and fixed ld97, ld98, ld99; found ld95, ld96 (open); open loud 6 compiler + 9
 tool; test `5h_CallbacksChainsAndLoops`.
@@ -392,9 +396,18 @@ module global, prefix `local.tee`, postfix the old value; the scanners no longer
 on an array element or element field (`arr[i] += 1`, `ps[1].x += 5`; README claims support; written
 out as `X = X op E`, an index with a side effect refused; a string element's store of a concatenation
 goes through `emitStringFieldStore`);
-~~ld73~~ FIXED 2026-10-22 one-line `do { … } while (…)` (and a brace-less `do x; while (…);`); ld74 classes: inherited getter, `return this`, a method
-returning string, `super()` with no base constructor, a struct alias's field store, generic and
-abstract classes; ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
+~~ld73~~ FIXED 2026-10-22 one-line `do { … } while (…)` (and a brace-less `do x; while (…);`); ~~ld74~~ FIXED 2026-10-22 classes: inherited getter
+(`getterFunc` walks the inheritance chain, at the expression, `this.`, classMemberType and four
+console sites), `return this` (`this` is `$__self`; a chained call on a method's result types its
+receiver by the method's declared return class, `classOfExpr`, in expression and statement form,
+and `const again: C = c.bump()` is an instance), a method
+returning string (through `$__str_ret_*`, as a function does), `super()` with no base constructor
+(the nearest ancestor that has one; none: a no-op), a struct alias's field store (`const q: P = p`
+is the same struct, its pointer in a local), ~~generic and~~
+abstract classes (`abstract` stripped in a pre-pass, abstract members declarations only; a call
+dispatches on the class tag, `emitTagDispatch`, Phase 47's array-element dispatch made general);
+generic classes are **ld100**, OPEN: `class Box<T>` / `new Box<i32>(7)` is "Unsupported statement"
+(classes are not monomorphized as functions are); ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
 per function), `map((x, i) => …)` (signature mismatch; `<method>_<T>_ix` helpers for forEach, map,
 filter, find, findIndex, every, some; a third parameter is refused); ~~ld76~~ FIXED 2026-10-22 destructuring from a call, a tuple holding a string
 (`destructSourceDef` / `destructSource`: a struct variable or a struct- / tuple-returning call,
@@ -415,8 +428,16 @@ the one-array path; reduce, find, at, indexOf, lastIndexOf, includes, every, som
 ~~a function array called through a local~~ (FIXED 2026-10-22: the top-level arrow pass stripped
 the annotation of `const f: () => i32 = fns[i]`, now only of an arrow initialiser; a
 function-type alias on a local (`const f: Fn`) and an empty alias array (`const fns: Fn[] = []`)
-expand to the inline forms in a pre-pass; a function-array element is a valid initialiser); ld79 `for…of` over class /
-struct arrays (documented limit; virtual dispatch inside it); ~~ld80~~ FIXED 2026-10-22 missing methods: `substring`
+expand to the inline forms in a pre-pass; a function-array element is a valid initialiser); ~~ld79~~ FIXED 2026-10-22 `for…of` over class /
+struct arrays (documented limit; virtual dispatch inside it) (`registerForOfInstance`: the item is
+a class or struct instance in both pre-scans; a call on an instance held in a local, a parameter,
+a `for…of` item or a method result, dispatches on its tag when a subclass overrides the method, a
+static `new X` instance stays a direct call);
+**sw126** FIXED 2026-10-22 (found with ld79; the same on main): a base method calling an
+overridden one through `this` (`describe() { return this.area() + 1 }`), or a call on a base-typed
+PARAMETER (`function areaOf(s: Shape) { return s.area() }`), ran the BASE's version: "1 0" for
+JavaScript's "10 9" (`needsTagDispatch` / `emitTagDispatch`; one golden moved,
+`16_DeepGenericConstraintResolution`, its parameter call now dispatches, the same output); ~~ld80~~ FIXED 2026-10-22 missing methods: `substring`
 (`$__str_substring`, clamped and swapped), `lastIndexOf` (string `$__str_lastindexof`, array
 `lastindexof_T` with `from`), `splice` as a value (the removed elements via the slice helper from
 the normalised start and clamped count, a side-effecting start / count refused),
