@@ -39,8 +39,10 @@ the workspace pulls it on its sweep.
 > ld42) DONE, `63_ModuleGlobals2DAndBoolean`, found ld94 (`string[][]`, refused everywhere).
 > Group 5 (callbacks / loops: ld78's last forms, ld91–ld93) DONE, `5h_CallbacksChainsAndLoops`;
 > found and fixed ld97–ld99, found ld95 (a literal array of functions) and ld96 (a capturing
-> array-method callback), both open and refused with a message. Next: classes (ld74, ld79),
-> struct-array printing (ld45), then ld94–ld96. Open: loud 6 compiler + 9 tool.
+> array-method callback), both open and refused with a message. Group 6 (classes: ld74, ld79)
+> DONE, `29_ClassDispatchAndChaining`; found and fixed sw126 (silent: overridden methods ran the
+> base's version through `this` or a base-typed parameter); generic classes split off as ld100.
+> Next: struct-array printing (ld45), then ld94–ld96, ld100. Open: loud 5 compiler + 9 tool.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule
