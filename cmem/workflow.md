@@ -233,7 +233,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
   tests/hybrid_tests.ts tests/wasmmerge_guard_tests.ts     # expect 17 passed (13 + 4; 2026-10-13)
 #     A hand-rolled gate script must switch to `deno test` for any file containing `Deno.test(`.
 
-# 2c. typed_decl_tests + engine_tests + wast_runner_tests + golden_wat_tests (`deno run`); golden expects 541 / 0 diverged (2026-10-22, +`4m_ExpressionGaps`; 2026-10-21, +`53_NumberParseRounding`; 2026-10-20, +`4l_MixedOperandTypes`, +`28_ArrayCallbackEdges`), 9 entries that fail on purpose (2026-10-19, +`28_SpliceItemReadsArrayRefused`, +`28_SpreadOfExpressionRefused`, +`15_FinallyStringReturnRefused`; `7i_NullishStringFieldRefused` removed with sw120 — `--record` does NOT delete a removed test's golden, delete it by hand); typed_decl 45
+# 2c. typed_decl_tests + engine_tests + wast_runner_tests + golden_wat_tests (`deno run`); golden expects 543 / 0 diverged (2026-10-22, +`5f_IncrementsAndCompoundForms`, +`5f_CompoundIndexSideEffectRefused` (fails on purpose: 10), +`4m_ExpressionGaps`; 2026-10-21, +`53_NumberParseRounding`; 2026-10-20, +`4l_MixedOperandTypes`, +`28_ArrayCallbackEdges`), 9 entries that fail on purpose (2026-10-19, +`28_SpliceItemReadsArrayRefused`, +`28_SpreadOfExpressionRefused`, +`15_FinallyStringReturnRefused`; `7i_NullishStringFieldRefused` removed with sw120 — `--record` does NOT delete a removed test's golden, delete it by hand); typed_decl 45
 
 # 3. the Go suites — ONE AT A TIME (see traps)
 #    go_bindgen go_merge go_asyncify
@@ -302,6 +302,14 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 ```
 
 ## Traps that have actually bitten
+
+- **A branch switch can fail half-way on this machine** (2026-10-22): `git checkout main` moved HEAD,
+  deleted `cmem/workflow.md`, then could not write it back ("unable to create file …: File exists",
+  most likely a Windows file lock held by an editor or indexer). The working tree was the BRANCH's
+  files minus that one, under a `main` HEAD. Nothing was lost (the commit was already made); the
+  repair was `git diff <commit> --stat` to prove the only difference was the missing file, then
+  `git checkout -f <branch>`. **Fast-forward `main` without switching to it:**
+  `git fetch . <branch>:main` (fast-forward only, never touches the working tree).
 
 - **Untracking a file AFTER switching branches deletes it.** `git rm --cached` correctly keeps the
   file on disk, but a later `git checkout main` restores the still-tracked file and the

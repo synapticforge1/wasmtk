@@ -30,6 +30,7 @@
  */
 
 import { implicitTruncDiagnostic, intDivisionDiagnostic } from "./wasmath_lower.ts";
+import { bindDefaultParam } from "./default_params.ts";
 
 // ---------------------------------------------------------------------------
 // Memory layout constants
@@ -1660,9 +1661,17 @@ function parseSingleArg(
       for (let i = argList.length; i < baseParamCount; i++) {
         const param = sig.params[i];
         if (param.defaultValue !== undefined) {
+          // an earlier parameter in the default is that argument (ld78)
+          const bound = bindDefaultParam(sig.params, argList, i);
+          if (bound.unsafe) {
+            _diagnosticSink?.(
+              `'${callee}(…)': the default of an omitted parameter reads an argument with a side effect ` +
+                `('${bound.unsafe.slice(0, 40)}'), which it would evaluate twice; pass the parameter.`,
+            );
+          }
           watArgsList.push(
             exprToWat(
-              param.defaultValue,
+              bound.expr,
               locals,
               param.type,
               funcLookup,
@@ -3021,9 +3030,17 @@ function exprToWat(
       for (let i = argList.length; i < baseParamCount; i++) {
         const param = sig.params[i];
         if (param.defaultValue !== undefined) {
+          // an earlier parameter in the default is that argument (ld78)
+          const bound = bindDefaultParam(sig.params, argList, i);
+          if (bound.unsafe) {
+            _diagnosticSink?.(
+              `'${callee}(…)': the default of an omitted parameter reads an argument with a side effect ` +
+                `('${bound.unsafe.slice(0, 40)}'), which it would evaluate twice; pass the parameter.`,
+            );
+          }
           watArgsList.push(
             exprToWat(
-              param.defaultValue,
+              bound.expr,
               locals,
               param.type,
               funcLookup,
@@ -3113,7 +3130,8 @@ function exprToWat(
   // Unary - on a non-literal (e.g. -x, -(a+b)). Unary minus binds tighter than every binary
   // operator, so it applies only when none sits at top level: `-n + m` is `(-n) + m`, not
   // `-(n + m)` (an invalid module: `f64.neg` of an i32 sum; H12, found with sw23, 2026-09-30).
-  if (expr.startsWith("-") && !/^-\d/.test(expr) && !hasTopLevelBinaryOp(expr)) {
+  // (Not `--x`, a decrement: wasic's emitExpr owns it through the fallback below; ld71.)
+  if (expr.startsWith("-") && !expr.startsWith("--") && !/^-\d/.test(expr) && !hasTopLevelBinaryOp(expr)) {
     const inner = expr.slice(1).trim();
     if (isFloat) {
       const iw = exprToWat(inner, locals, numType, funcLookup, allocString, arrayLookup, structLookup, globals);
@@ -3458,6 +3476,14 @@ function exprToWat(
         effLhsType = firstTypedAtom(rhs);
       }
     }
+    // Integer literals only, where an i32 is wanted (`1 * 2` for an i32 parameter, a default
+    // filled in): i32 arithmetic. It took the f64 default, an invalid module (found with ld78).
+    if (
+      effLhsType === undefined && expectedType === "i32" &&
+      /^[\d\s+\-*%()]+$/.test(lhs) && /^[\d\s+\-*%()]+$/.test(rhs)
+    ) {
+      effLhsType = "i32";
+    }
     // An i32 left operand meeting a KNOWN float right one computes in f64 (sw15's console twin,
     // 2026-10-06): `i + f` was `i32.add` over an f64 global, an invalid module.
     // bigint `&` `|` `^` `<<` `>>` (ld31, 2026-10-13): wasic's emitExpr owns the i64 forms (and the
@@ -3765,6 +3791,8 @@ function findTopLevelOp(expr: string, op: string): number {
       if (op === "-" || op === "+") {
         const prev = expr.slice(0, i).trimEnd();
         if (prev === "" || /[-+*/%<>=!&|^~?:(,[]$/.test(prev) || /\d[eE]$/.test(prev)) continue;
+        // either character of `++` / `--` (ld71, 2026-10-22)
+        if (after === op || before === op) continue;
       }
       if (op === ">" && (after === "=" || after === ">" || before === ">")) continue;
       if (op === "=" && after === "=") continue;

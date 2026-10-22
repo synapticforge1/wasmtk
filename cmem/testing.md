@@ -114,6 +114,16 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, loud refusals group 2 (ld71–ld73, ld78's default and `for` forms), gate GREEN.**
+> wasi **486/486** (+`5f_IncrementsAndCompoundForms`, failing on the old compiler;
+> +`5f_CompoundIndexSideEffectRefused`, expect-fail) · golden-WAT **543**, one existing entry moved
+> and reviewed (`7g_ConsoleConcatAndCompare`: `2 < 3` over integer literals is now `i32.lt_s`, was
+> `f64.lt`, the same truth); a first try that sent every string-element store through `$__str_op`
+> moved 3 sorting programs and was narrowed to the stores that need it · wast 64,506 / 0 / 16 ·
+> cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface unchanged
+> (a first try exported `bindDefaultParam` from `./console_log` and widened `FuncLookup`: the
+> check said MAJOR; it moved to the internal `src/default_params.ts`).
+
 > **2026-10-22, loud refusals group 1 (ld38 toFixed, ld43, ld66–ld70), gate GREEN.** wasi
 > **484/484** (+`4m_ExpressionGaps`, failing to compile on the old compiler) · golden-WAT **541**,
 > nothing else moved (the wider `.length` handler and `isStringExpr`'s `L + R` rule moved no

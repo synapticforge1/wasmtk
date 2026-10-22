@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 139 | 0 | 27 |
-| LOUD | 15 | 85 | 9 | 10 |
+| LOUD | 12 | 88 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud refusals, group 2 (statements) FIXED 2026-10-22:** ld71, ld72, ld73, and ld78's default-from-
+an-earlier-parameter and two-declaration `for` (ld78 stays open for its callback forms); open loud
+12 compiler + 9 tool; tests `5f_IncrementsAndCompoundForms`, `5f_CompoundIndexSideEffectRefused`.
 **Loud refusals, group 1 (expressions) FIXED 2026-10-22:** ld38, ld43, ld66–ld70; open loud 15
 compiler + 9 tool; test `4m_ExpressionGaps`.
 **Open silent-wrong in the compiler: 2; in the tools: 0** (2026-10-21: sw122 fixed, parseFloat /
@@ -374,16 +377,23 @@ path; emitExpr converts an i32 NUMBER to an asked-for f64, never a pointer, `isI
 prints `null` / its text); ~~ld65~~ FIXED 2026-10-19 with sw97 a NaN
 parenthesised compare traps (sw97); ~~ld66~~ FIXED 2026-10-22 `1e-7 * 1.5` in a declaration (the `-` of the exponent
 splits; `isLiteralExponentSign` in findBinaryOp); ~~ld67~~ FIXED 2026-10-22 console `n ** 2` of an i32 (`**` makes it a float); ~~ld68~~ FIXED 2026-10-22 console `typeof b === "boolean"` (wasic's compile-time boolean); ~~ld69~~ FIXED 2026-10-22 console
-`x > 1 || s === "q"` (splits at `===` first; the string comparison waits for `&&` / `||` / `??` / `?:`); ~~ld70~~ FIXED 2026-10-22 `users[0].name.length` in a declaration (with ld43); ld71
-`++` / `--` as a value (console and declaration; `while (m-- > 0)`); ld72 compound assignment / `++`
-on an array element or element field (`arr[i] += 1`, `ps[1].x += 5`; README claims support);
-ld73 one-line `do { … } while (…)`; ld74 classes: inherited getter, `return this`, a method
+`x > 1 || s === "q"` (splits at `===` first; the string comparison waits for `&&` / `||` / `??` / `?:`); ~~ld70~~ FIXED 2026-10-22 `users[0].name.length` in a declaration (with ld43); ~~ld71~~ FIXED 2026-10-22
+`++` / `--` as a value (console and declaration; `while (m-- > 0)`; `incDecParts`: a number local or
+module global, prefix `local.tee`, postfix the old value; the scanners no longer take `++` / `--` for
+`+` / `-`); ~~ld72~~ FIXED 2026-10-22 compound assignment / `++`
+on an array element or element field (`arr[i] += 1`, `ps[1].x += 5`; README claims support; written
+out as `X = X op E`, an index with a side effect refused; a string element's store of a concatenation
+goes through `emitStringFieldStore`);
+~~ld73~~ FIXED 2026-10-22 one-line `do { … } while (…)` (and a brace-less `do x; while (…);`); ld74 classes: inherited getter, `return this`, a method
 returning string, `super()` with no base constructor, a struct alias's field store, generic and
 abstract classes; ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
 per function), `map((x, i) => …)` (signature mismatch; `<method>_<T>_ix` helpers for forEach, map,
 filter, find, findIndex, every, some; a third parameter is refused); ld76 destructuring from a call, a tuple holding a string; ld77 a string literal in
 expression position (`"abc" > "ab"`, nested string ternary, object with a string and a function
-field); ld78 a default parameter using an earlier one, `for (let i = 0, j = 10; …)`, chained
+field); ld78 ~~a default parameter using an earlier one~~ (FIXED 2026-10-22, `bindDefaultParam`: the
+earlier arguments substituted at the call site, a side-effecting one refused), ~~`for (let i = 0, j =
+10; …)`~~ (FIXED 2026-10-22: `splitForInit` in both pre-scans and all three `for` emitters, a comma
+list of updates in `emitUpdate`, each declarator counter-checked), still OPEN: chained
 `filter().map().reduce()`, a function array called through a local; ld79 `for…of` over class /
 struct arrays (documented limit; virtual dispatch inside it); ld80 missing methods: `substring`,
 `lastIndexOf` (string, array), `splice` as a value, `(e as Error).message`, ~~`string[].join` into a
