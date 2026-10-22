@@ -1390,6 +1390,20 @@ function parseSingleArg(
 
   // ── Dot-call expression: receiver.method(args) or this.method(args) — class/static calls
   // Skip Math.* and Number.* tokens — they have their own dedicated handlers below.
+  // A class method returning a STRING, `n.label()`: wasic's string resolver (the void call and its
+  // return globals). Emitted here as an i32 call it was an invalid module (ld102, 2026-10-22). Only
+  // for an instance receiver (not a string or an array, whose methods console builds itself); the
+  // resolver answers only for a string-valued form.
+  {
+    const recv = token.match(/^(this|\w+)(?:\.\w+\s*\([^()]*\))+$/)?.[1];
+    if (
+      recv && _stringExprResolver && locals.get(recv) !== "string" && !arrayLookup?.(recv) &&
+      !globals?.get(recv)?.startsWith("string")
+    ) {
+      const r = _stringExprResolver(token, locals);
+      if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+    }
+  }
   if (
     dotCallLookup && !token.startsWith("Math.") && !token.startsWith("Number.") &&
     /^(?:this|\w+(?:\[[^\]]*\])?)\.(\w+)\s*\(/.test(token)

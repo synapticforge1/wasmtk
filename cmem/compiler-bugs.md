@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 1 | 143 | 0 | 27 |
-| LOUD | 2 | 105 | 0 | 19 |
+| LOUD | 4 | 108 | 0 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**ld100 FIXED 2026-10-22, ld101 and ld102 found and fixed; ld103–ld105 found, OPEN:** generic
+classes; a class's string fields and string arguments; a string method in console.log; open loud 4
+compiler (ld45, ld103–ld105), silent 1 (sw119); test `29_GenericAndStringClasses`.
 **ld96 FIXED 2026-10-22, sw128 found and fixed:** capturing array-method callbacks; an inline array
 literal for an `f64[]` parameter (silent); open loud 2 compiler (ld45, ld100), silent 1 (sw119);
 tests `5h_CapturingCallbacks`, `9_ArrayLiteralArguments`.
@@ -425,8 +428,20 @@ returning string (through `$__str_ret_*`, as a function does), `super()` with no
 is the same struct, its pointer in a local), ~~generic and~~
 abstract classes (`abstract` stripped in a pre-pass, abstract members declarations only; a call
 dispatches on the class tag, `emitTagDispatch`, Phase 47's array-element dispatch made general);
-generic classes are **ld100**, OPEN: `class Box<T>` / `new Box<i32>(7)` is "Unsupported statement"
-(classes are not monomorphized as functions are); ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
+generic classes are ~~**ld100**~~ FIXED 2026-10-22: `class Box<T>` / `new Box<i32>(7)` is "Unsupported statement"
+(classes are not monomorphized as functions are) (`expandGenericClasses`, before expandGenerics:
+each `Name<args>` use is a copy `Name_args` with the parameters substituted, written where the
+template stood; two parameters, a string argument, a subclass, `return this`, a parameter and a
+result type; a bare `new Box(7)` is refused by name); found and FIXED with it, both the same on
+main: **ld101** a class STRING field was one word (the next field sat on its length, "hihihih"),
+and a string constructor / method argument, `new Item("hi", 7)`, was refused (8-byte string
+fields; `this.name = …` through emitStringFieldStore; `this.name` reads; string arguments in the
+two `new` handlers and the four method-call sites); **ld102** a string-returning method in
+console.log, `console.log(n.label())`, was an invalid module (emitStringPtrLen calls it and reads
+the return globals; console routes an instance's method call there); found, OPEN: **ld103**
+`this.items.push(x)` on a class's array field is "Unsupported statement"; **ld104** a field of a
+call's result, `c.bump().n`, is "Unsupported expression"; **ld105** `xs.filter(…).length` inside
+console.log is refused (as a declaration it works); ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
 per function), `map((x, i) => …)` (signature mismatch; `<method>_<T>_ix` helpers for forEach, map,
 filter, find, findIndex, every, some; a third parameter is refused); ~~ld76~~ FIXED 2026-10-22 destructuring from a call, a tuple holding a string
 (`destructSourceDef` / `destructSource`: a struct variable or a struct- / tuple-returning call,
