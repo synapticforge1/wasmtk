@@ -1225,6 +1225,8 @@ function parseSingleArg(
       if (gType === "f64") return [{ kind: "f64expr", wat }];
       // An f32 reaches the f64 printer PROMOTED: the raw f32 was an invalid module (ld17).
       if (gType === "f32") return [{ kind: "f64expr", wat: `(f64.promote_f32 ${wat})` }];
+      // A boolean global prints `true` / `false`, as a boolean local does (ld42).
+      if (gType === "bool") return [{ kind: "boolexpr", wat }];
       return [{ kind: "i32expr", wat }];
     }
     const wtype = locals.get(token);

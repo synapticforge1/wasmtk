@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, loud refusals group 4 (ld41, ld42: module 2D arrays and booleans), gate GREEN.**
+> wasi **488/488** (+`63_ModuleGlobals2DAndBoolean`, failing on the old compiler) · golden-WAT
+> **545**, 11 existing entries moved and reviewed (a top-level boolean is now a global:
+> `local.get` → `global.get` and its `local.set` init dropped, nothing else) · wast 64,506 / 0 /
+> 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface
+> unchanged.
+
 > **2026-10-22, loud refusals group 3 (ld76, ld77, ld80: strings, tuples, objects), gate GREEN.**
 > wasi **487/487** (+`28_StringsTuplesAndObjects`, failing on the old compiler) · golden-WAT
 > **544**, no existing entry moved · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 /
