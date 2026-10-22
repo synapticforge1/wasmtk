@@ -49,14 +49,14 @@
   "tasks": {
     "dev": "deno run --watch main.ts",
     "cache": "deno cache main.ts",
-    "update-version": "deno run --allow-read --allow-write scripts/sync-version.ts",
-    "bump": "deno run --allow-read --allow-write --allow-run --allow-env scripts/bump.ts",
-    "api-surface": "deno run --allow-read --allow-write --allow-run --allow-env scripts/api-surface.ts",
-    "upstream:link": "deno run --allow-read --allow-write --allow-run scripts/upstream-link.ts",
+    "update-version": "bun scripts/sync-version.ts",
+    "bump": "bun scripts/bump.ts",
+    "api-surface": "bun scripts/api-surface.ts",
+    "upstream:link": "bun scripts/upstream-link.ts",
     "upstream:install": "deno task upstream:link && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.upstream.json --force -n wasmtk-upstream main.ts",
     "install": "deno task update-version && deno task cache && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.json --force -n wasmtk main.ts",
     "compile": "deno compile -A --output wasmtk main.ts",
-    "publish": "deno run --allow-read --allow-write --allow-run --allow-env scripts/publish.ts"
+    "publish": "bun scripts/publish.ts"
   },
   "nodeModulesDir": "none",
   "minimumDependencyAge": "PT1M",
