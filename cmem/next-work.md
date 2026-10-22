@@ -36,6 +36,15 @@ the workspace pulls it on its sweep.
 
 ## Open now
 
+> **PAUSED 2026-10-22 (owner: "update the project memory files and pause until later today").**
+> Branch `fix/loud-refusals` = main (local, NOT pushed), last commit "fix(wasic): generic classes
+> (ld100) …", every gate green, wasi 497/497, golden 554. **Resume at ld45** (an object writer for
+> `console.log(p)` / `console.log(ps)`: util.inspect's `{ k: v }` and its line breaking; a whole
+> struct is refused today, sw127), then ld103 (`this.items.push(x)` on an array field), ld104 (a
+> field of a call's result, `c.bump().n`), ld105 (`xs.filter(…).length` in console.log). sw119
+> (i32 overflow) waits for the owner. Then items 3–5 (binaryang 1.10.0 items, H10, nullable gaps).
+> Workspace-review notes W1–W3 (rule slips logged under W3) stay on HOLD until wasmtk is done.
+
 > **2026-10-22, the loud refusals in progress, branch `fix/loud-refusals`, one commit per group:**
 > group 1 (expressions: ld38 `toFixed`, ld43, ld66–ld70) DONE, gate green, `4m_ExpressionGaps`;
 > group 2 (statements: ld71 `++` / `--` as a value, ld72 compound assignment on elements, ld73
@@ -56,8 +65,11 @@ the workspace pulls it on its sweep.
 > ld87 `mod` i64) DONE; group 3 (ld81 wasmbundle memory, ld82 bindgen camelCase, ld83 deno
 > binding) DONE: **all loud tool rows closed**. Owner 2026-10-22: "fix the compiler issues first":
 > sw123 DONE (null vs undefined, `24_NullVersusUndefined`); ld94 (`string[][]`) and ld95 (function
-> array literals) DONE; ld96 (capturing callbacks) DONE, sw128 found and fixed; next ld100
-> (generic classes), ld45 (object printing); sw119 waits for the owner. Then items 3–5.
+> array literals) DONE; ld96 (capturing callbacks) DONE, sw128 found and fixed; ld100 (generic
+> classes) DONE, ld101 (class string fields) and ld102 (string method in console) found and fixed;
+> found and open: ld103 (array-field push), ld104 (field of a call's result), ld105 (`.length` of a
+> method result in console). Next ld45 (object printing), then ld103–ld105; sw119 waits for the
+> owner. Then items 3–5.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule
