@@ -69,7 +69,8 @@ Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full
 4. **Pin all three specifiers together** (`compat/binaryen`, `wasm-validate`, `compat/wabt`, exact)
    plus the `src/binaryen.ts` comment; `deno cache --reload=jsr:@jrmarcum/binaryang main.ts
    src/wast.ts`; the lock must then hold only the new version. `deno task install`.
-5. **`deno run -A scripts/check_try_table_oz.ts`** (the `-Oz` guard: 42 / 42).
+5. **`deno run -A scripts/check_try_table_oz.ts`** (the `-Oz` guard: 42 / 42; still RUN with Deno:
+   it imports binaryang through deno.json's import map, which Bun does not read).
 6. **At-risk suites first** (what the changelog touches; for a printer change, the merge paths:
    merge, bundle, mod, go_merge, wasmmerge_guard), then **the full gate in order** (§ The full gate).
    Golden-WAT changes must be checked token by token against a snapshot of the old goldens before
@@ -265,8 +266,8 @@ git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
 #    tag with the symbols that set it, and refuses a kind below it. `deno task api-surface --floor`
 #    previews it. A compatible change the diff calls CHANGED can be reviewed:
 #    `deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>` (committed).
-#    If api-surface.ts or bump.ts changed: `deno run -A scripts/check_compat_gate.ts`.
-#    Before a PATCH or MINOR bump (Rule 3, H6.5a): `deno run -A scripts/check_prev_tests.ts`
+#    If api-surface.ts or bump.ts changed: `bun scripts/check_compat_gate.ts`.
+#    Before a PATCH or MINOR bump (Rule 3, H6.5a): `bun scripts/check_prev_tests.ts`
 #    (~25–30 min; the last tag's tests/ against today's src/ in a fresh clone). Classify every red
 #    suite: regression (fix first) / intended surface change (raises the floor) / improvement.
 deno task bump patch|minor|major

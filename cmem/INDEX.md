@@ -59,11 +59,16 @@ ones, and keep every suite green (**output-diff, not just exit codes**).
 
 ### 🔒 Two HARD RULES for tooling (owner directive 2026-09-19, binding on every agent)
 
-1. **Scripting is Deno/TypeScript ONLY.** Ad-hoc probes, migrations and repairs are written as
-   `.ts` in the scratchpad and run with `deno run -A <file>`. **No `python3`**, no inline
-   `python3 -c`, no `node -e`. It is the language the repo is already in, a TS probe can import
-   the real modules instead of reimplementing them, and python brought a second encoding regime
-   (cp1252 stdout) and a second escape pass into a UTF-8 repo.
+1. **Scripting is TypeScript ONLY, run with Bun** (owner, 2026-10-21: "deno is going away";
+   before that, Deno, 2026-09-19). Ad-hoc probes, migrations and repairs are written as `.ts` in
+   the scratchpad, on `node:` builtins (`node:fs`, `node:child_process`, `process`; not `Bun.*`, not
+   `Deno.*`), and run with `bun <file>`. The repo's `scripts/` are the same (Deno-exit plan P5,
+   done 2026-10-21). **Until the product moves (P2), a probe that imports `src/` through deno.json's
+   import map** (binaryang, `@std/path`: the compiler, `src/binaryen.ts`) **runs with
+   `deno run -A --config deno.json <file>`**; Bun does not read that map. **No `python3`**, no inline
+   `python3 -c`, no `node -e`, no `bun -e`. A TS probe can import the real modules instead of
+   reimplementing them, and python brought a second encoding regime (cp1252 stdout) and a second
+   escape pass into a UTF-8 repo.
 2. **No heredocs. Ever, in any language.** Not `<<'EOF'`, not `@'…'@`, and **not for commit
    messages** — write the message with `Write` and use `git commit -F <file>`, never `-F-`.
    Five content corruptions trace to heredoc transport, including a literal NUL byte written into
@@ -109,7 +114,7 @@ phase filter IS the whole gate. Full-suite runs cost >10 minutes and buy nothing
 | [offload-inventory.md](offload-inventory.md) | What wasmtk does that binaryang, a runtime or a loader could own (letter H11), each with its trigger. 2026-10-06: the owner decided `wasmbundle` → binaryang's `wasm-bundle` (exact relocation via `linking` / `reloc.*`); nothing has moved yet. 2026-10-13: binaryang 1.12.0's optimizer broke the regex merge twice (block types by index, `$__malloc` inlined), more evidence for offload #1. |
 | [vision.md](vision.md) | Polyglot ecosystem vision; "TypeScript as a DLL"; loader strategy; repo map. |
 | [wasm-number-types.md](wasm-number-types.md) | SCOPE 2026-10-09 (owner: `Math` cannot follow the wasm types): Track M, every `Math` member exact against Deno (measured, appendix table: 39 functions + 8 constants; 23 identical, 14 wrong = sw57–sw61, ld27–ld29, 2 unsupported); Track T, the wasm types as a TypeScript library with exact bodies. Owner 2026-10-09: a COMPLETE library, namespaces `f64` `f32` `i32` `i64` (+ `u32` / `u64`), function lists per type, work order L1–L4, decisions T1–T6 (T1: module `wasMath`; T6: traps are throws). L1, L2, L3 DONE 2026-10-09 (L3 under the owner's "CR, in both": wasMath's Math-style members run the mathlib in Deno too; 199 / 199 exact from compiled programs); L4 DONE 2026-10-13 (the operator bugs; u64 printed unsigned). Re-measure with `scripts/math/`. |
-| [deno-exit-plan.md](deno-exit-plan.md) | SCOPE 2026-10-13, nothing started: leaving Deno for Bun + Node (owner, 2026-10-12), JSR stays. Re-measured facts (shipped `Deno.*` in 4 files; wasic's output identical on Deno / Bun / Node 22–26, 410 / 410; the TypeScript reference on Bun 447 / 453, Node 432), the five roles Deno plays, owner decisions M1–M7 (decided 2026-10-13: M1 Bun + Deno + Node LTS + web, M3 keep Deno/Node console layout, M4 Math comparisons move to wasMath, M5 JSR's install instructions, M6 browser-loadable exports, M7 keep the Windows console fix, M2 Bun is the TypeScript reference; all settled; run-time `.wasm` loading goes through universal-wasm-loader), phases P0–P8. Source: binaryang's `cmem/jsr-deno-exit-guide.md`. |
+| [deno-exit-plan.md](deno-exit-plan.md) | **P5 (scripts) DONE 2026-10-21, ahead of P0–P4 (owner): 14 scripts and 5 tasks run with `bun` on `node:` builtins, each A/B'd identical with its Deno run; 2 stay Deno (check_try_table_oz: the import map; check_inspect_array_ref: `Deno.inspect` is its oracle).** SCOPE 2026-10-13: leaving Deno for Bun + Node (owner, 2026-10-12), JSR stays. Re-measured facts (shipped `Deno.*` in 4 files; wasic's output identical on Deno / Bun / Node 22–26, 410 / 410; the TypeScript reference on Bun 447 / 453, Node 432), the five roles Deno plays, owner decisions M1–M7 (decided 2026-10-13: M1 Bun + Deno + Node LTS + web, M3 keep Deno/Node console layout, M4 Math comparisons move to wasMath, M5 JSR's install instructions, M6 browser-loadable exports, M7 keep the Windows console fix, M2 Bun is the TypeScript reference; all settled; run-time `.wasm` loading goes through universal-wasm-loader), phases P0–P8. Source: binaryang's `cmem/jsr-deno-exit-guide.md`. |
 | [wasm-math-plan.md](wasm-math-plan.md) | The declared-type rule for `/` (owner ruling 2026-09-30) and the `Math` work: Phase 1 (exact `sign` / `round` / `hypot`, Math results at the declared type) DONE 2026-10-06; Phase 2 RESOLVED 2026-10-09 by the owner: a plain `/` between integers is a compile error naming wasMath's `i32.div` / `f64.div` (sw36, sw37 closed); D1–D6 all settled and built (D3, D6 on 2026-10-13; design-decisions.md). |
 | [wasic-modularization-plan.md](wasic-modularization-plan.md) | Plan of record for splitting `src/wasic.ts` (letter H12): the layers, the seam rules and gate, the phases. |
 | [component-model-discussion.md](component-model-discussion.md) | OPEN design discussion, not implemented: a polyglot component model. |
