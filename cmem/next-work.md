@@ -36,8 +36,12 @@ the workspace pulls it on its sweep.
 > same day: (1) the `try_table` `-Oz` skip was found ALREADY removed (2026-08-27, binaryang
 > 1.5.2); `check_try_table_oz` (42 / 42 on 1.13.0) now reads as the regression guard it is;
 > (2) `src/wasm/caps_bytes.ts`'s six embedded capability libraries re-embedded from fresh `modc`
-> builds (6–17 % smaller each, WIT unchanged); (3) the workspace items above.
-> Then the fix order resumes: sw122, the 22 loud compiler rows, the 9 tool rows.
+> builds (6–17 % smaller each, WIT unchanged); (3) the workspace items above; (4) **sw122 FIXED**
+> (parseFloat / Number / parseInt correctly rounded, `$__dec_to_f64`; 4,078 values identical to
+> Deno; dynrt re-embedded, it parses literals with parseFloat; `53_NumberParseRounding`).
+> **Next:** the 22 loud compiler rows (all refusals: ld38, ld41–ld43, ld45, ld66–ld74, ld76–ld80,
+> ld91–ld93), then the 9 tool rows, then items 3–5. Silent open: sw119 (owner-ruled, a branch),
+> sw123 (nullable gaps, item 5).
 
 > **2026-10-20, the loud rows, group 1 DONE: every round-2 row that built an INVALID module or
 > trapped** (ld48–ld50, ld52–ld57, ld59–ld61, ld63, ld64, ld75; ld46, ld62 found already passing;
