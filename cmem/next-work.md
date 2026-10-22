@@ -54,9 +54,9 @@ the workspace pulls it on its sweep.
 > ld100 (features / gaps, each refused with a message), then the 9 tool rows. Tool group 1
 > (ld89 `dync`, ld90 CLI flags) DONE; group 2 (ld84 bundler exports, ld85 same-basename imports,
 > ld87 `mod` i64) DONE; group 3 (ld81 wasmbundle memory, ld82 bindgen camelCase, ld83 deno
-> binding) DONE: **all loud tool rows closed**. Open: loud 5 compiler (ld45, ld94–ld96, ld100,
-> features each refused with a message), silent 2 (sw119 owner decision, sw123). Next per the
-> earlier plan: items 3–5 (binaryang 1.10.0 items, H10, nullable gaps incl. sw123).
+> binding) DONE: **all loud tool rows closed**. Owner 2026-10-22: "fix the compiler issues first":
+> sw123 DONE (null vs undefined, `24_NullVersusUndefined`); next ld94 (`string[][]`), ld95, ld96,
+> ld100, ld45; sw119 waits for the owner. Then items 3–5.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule
