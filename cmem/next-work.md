@@ -31,11 +31,12 @@ the workspace pulls it on its sweep.
 ## Open now
 
 > **2026-10-22, the loud refusals in progress, branch `fix/loud-refusals`, one commit per group:**
-> group 1 (expressions: ld38 `toFixed`, ld43, ld66–ld70) DONE, gate green, `4m_ExpressionGaps`.
-> Next: group 2 (statements: ld71 `++` / `--` as a value, ld72 compound assignment on elements,
-> ld73 one-line `do`, ld78 default from an earlier parameter and two `for` declarations), then
-> strings (ld76, ld77, ld80), module globals (ld41, ld42), callbacks / loops (ld78's HOF forms,
-> ld91–ld93), classes (ld74, ld79), struct-array printing (ld45). Open: loud 15 compiler + 9 tool.
+> group 1 (expressions: ld38 `toFixed`, ld43, ld66–ld70) DONE, gate green, `4m_ExpressionGaps`;
+> group 2 (statements: ld71 `++` / `--` as a value, ld72 compound assignment on elements, ld73
+> one-line `do`, ld78's default-from-an-earlier-parameter and two `for` declarations) DONE,
+> `5f_IncrementsAndCompoundForms`, `5f_CompoundIndexSideEffectRefused`. Next: strings (ld76,
+> ld77, ld80), module globals (ld41, ld42), callbacks / loops (ld78's HOF forms, ld91–ld93),
+> classes (ld74, ld79), struct-array printing (ld45). Open: loud 12 compiler + 9 tool.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule

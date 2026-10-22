@@ -135,6 +135,7 @@ import {
   type WmHelper,
   WM_WAT,
 } from "./wasmath_lower.ts";
+import { bindDefaultParam } from "./default_params.ts";
 import {
   arrInspectKind,
   type ClosureVarLookup,
@@ -8684,6 +8685,68 @@ class WasicTranspiler {
 
   /** Returns true if expr is a string literal, a known string variable, a template literal,
    *  a string method call on a string variable, or a call to a string-returning function. */
+  /** A `for` header's init split into one declaration per declarator: `let i: i32 = 0, j: i32 = 10`
+   *  → [`let i: i32 = 0`, `let j: i32 = 10`] (ld78, 2026-10-22: the second declarator was read as
+   *  part of the first one's value). Anything else is returned as it is. */
+  private splitForInit(initPart: string): string[] {
+    const m = initPart.trim().replace(/;$/, "").match(/^(let|const|var)\s+([\s\S]+)$/);
+    if (!m) return [initPart];
+    const decls = this.splitArgs(m[2]!).map((d) => d.trim()).filter(Boolean);
+    return decls.length <= 1 ? [initPart] : decls.map((d) => `${m[1]} ${d}`);
+  }
+
+  /** The WAT for omitted argument `i` of `fn`: its default, earlier parameters bound to the
+   *  call's arguments (bindDefaultParam; ld78, 2026-10-22). A side-effecting argument the default
+   *  would repeat is refused. */
+  private emitDefaultArg(fn: FuncDef, args: string[], i: number, locals: Map<string, WatType>): string {
+    const bound = bindDefaultParam(fn.params, args, i);
+    if (bound.unsafe) {
+      this.diagnostics.push(
+        `'${fn.name}(…)': the default of an omitted parameter reads an argument with a side effect ` +
+          `('${bound.unsafe.slice(0, 40)}'), which it would evaluate twice; pass the parameter.`,
+      );
+    }
+    return this.emitExpr(bound.expr, locals, fn.params[i]!.type);
+  }
+
+  /** A `for` header's init, one statement per declarator (ld78). */
+  private emitForInit(initPart: string, locals: Map<string, WatType>, funcResult: WatType | null): string {
+    return this.splitForInit(initPart)
+      .map((d) => this.emitStatement(d.replace(/;$/, "") + ";", locals, funcResult))
+      .filter((w) => w.trim())
+      .join("\n      ");
+  }
+
+  /** Every declarator of a `for (let …; …; …)` header line: name, written type, initialiser (ld78). */
+  private forHeaderDecls(line: string): Array<{ name: string; type: string; init: string }> {
+    const hm = line.match(/^(?:\w+\s*:\s*)?for\s*\(\s*((?:let|const|var)\s+[^;]+);/);
+    if (!hm) return [];
+    const out: Array<{ name: string; type: string; init: string }> = [];
+    for (const d of this.splitForInit(hm[1]!)) {
+      const dm = d.match(/^(?:let|const|var)\s+(\w+)\s*(?::\s*(\w+))?\s*=\s*([\s\S]+)$/);
+      if (dm) out.push({ name: dm[1]!, type: dm[2] ?? "", init: dm[3]!.trim() });
+    }
+    return out;
+  }
+
+  /** `++x` / `x--` … on a number local or module global (not boxed, not nullable), else null (ld71). */
+  private incDecParts(
+    expr: string,
+    locals: Map<string, WatType>,
+  ): { name: string; op: "++" | "--"; pre: boolean; t: "i32" | "i64" | "f32" | "f64"; isLocal: boolean } | null {
+    const e = expr.trim();
+    const preM = e.match(/^(\+\+|--)\s*([A-Za-z_$][\w$]*)$/);
+    const postM = preM ? null : e.match(/^([A-Za-z_$][\w$]*)\s*(\+\+|--)$/);
+    if (!preM && !postM) return null;
+    const name = preM ? preM[2]! : postM![1]!;
+    const op = (preM ? preM[1] : postM![2]) as "++" | "--";
+    const isLocal = locals.has(name);
+    const t = isLocal ? locals.get(name) : this.moduleGlobals.get(name)?.type;
+    if (t !== "i32" && t !== "i64" && t !== "f32" && t !== "f64") return null;
+    if (this.currentBoxShadow.has(name) || this.nullableVarInnerType.has(name)) return null;
+    return { name, op, pre: !!preM, t, isLocal };
+  }
+
   /** `x.toFixed(d)` of a NUMBER (not a string, not a class value with its own `toFixed`): the
    *  receiver and the digits expression, else null (ld38, 2026-10-22). */
   private toFixedParts(expr: string, locals: Map<string, WatType>): { recv: string; digits: string } | null {
@@ -8859,6 +8922,10 @@ class WasicTranspiler {
   private inferExprType(expr: string, locals: Map<string, WatType>): WatType {
     const e = expr.trim();
     if (/^__strnull\(\w+\)$/.test(e)) return "bool"; // ld64's internal null test
+    { // `++x` / `x--`: the variable's own type (ld71)
+      const inc = this.incDecParts(e, locals);
+      if (inc) return inc.t;
+    }
     // A top-level COMPARISON is a boolean, whatever it starts with: `ps[0].x > 1` was typed by its
     // leading array element (i32), so `ps[1].ok || ps[0].x > 1` printed `1` (sw102, 2026-10-19).
     // Not `&&` / `||` (their result is an operand) and not across a `?` (ternary, `??`).
@@ -9896,6 +9963,20 @@ ${prefixed}
     {
       const boxRef = expr.match(/^__boxref\((\w+)\)$/);
       if (boxRef) return `(local.get $${this.boxSlot(boxRef[1])})`;
+    }
+    // `++x` / `--x` / `x++` / `x--` as a VALUE (ld71, 2026-10-22: refused): a number local or module
+    // global. Prefix gives the new value (local.tee); postfix leaves the old one on the stack while
+    // the new one is stored. A boxed capture or a nullable variable keeps the refusal.
+    {
+      const inc = this.incDecParts(expr, locals);
+      if (inc) {
+        const { name, op, pre, t, isLocal } = inc;
+        const get = isLocal ? `(local.get $${name})` : `(global.get $${name})`;
+        const nv = `(${t}.${op === "++" ? "add" : "sub"} ${get} (${t}.const 1))`;
+        const set = isLocal ? `(local.set $${name} ${nv})` : `(global.set $${name} ${nv})`;
+        if (pre) return isLocal ? `(local.tee $${name} ${nv})` : `(block (result ${t}) ${set} ${get})`;
+        return `(block (result ${t}) ${get} ${set})`;
+      }
     }
     // ld64: nullPrintRewrite's test of a nullable string local, `null` = the 0 pointer
     {
@@ -11789,9 +11870,9 @@ ${prefixed}
       if (fn && lastParam?.isRest) {
         // Pass all normal args (none expected in pure spread call) then the array ptr
         const normalCount = fn.params.length - 1;
-        const normalEmitted = fn.params.slice(0, normalCount).map((p: FuncParam) =>
+        const normalEmitted = fn.params.slice(0, normalCount).map((p: FuncParam, pi: number) =>
           p.defaultValue !== undefined
-            ? this.emitExpr(p.defaultValue, locals, p.type)
+            ? this.emitDefaultArg(fn, [], pi, locals)
             : `(i32.const 0)`
         );
         const arrGet4 = this.moduleGlobals.has(arrName)
@@ -11989,7 +12070,7 @@ ${prefixed}
       for (let i = args.length; i < baseParamCount; i++) {
         const param = fn.params[i];
         if (param.defaultValue !== undefined) {
-          emittedArgsList.push(this.emitExpr(param.defaultValue, locals, param.type));
+          emittedArgsList.push(this.emitDefaultArg(fn, args, i, locals)); // ld78
         }
       }
       // Append closure-captured variable values as hidden extra args
@@ -13214,6 +13295,8 @@ ${prefixed}
         // A sign inside a number literal's exponent (`1e-7`, `2.5E+3`) is not an operator: `1e-7 * 1.5`
         // split at it into `1e` and `7 * 1.5` (ld66, 2026-10-22)
         if ((op === "-" || op === "+") && isLiteralExponentSign(expr, i)) continue;
+        // ...nor is either character of `++` / `--` (`m-- > 0`, `x++ + 1`; ld71, 2026-10-22)
+        if ((op === "-" || op === "+") && (expr[i + 1] === op || before === op)) continue;
         // Guard: treat '-' as unary (not binary) when preceded by an operator or open paren/bracket.
         // This prevents `x * -1` from being parsed as `(x *) - (1)`.
         if (op === "-") {
@@ -14849,6 +14932,36 @@ ${prefixed}
         );
       }
     }
+    // The same for an ELEMENT or an element's field: `arr[i] += 10`, `arr[0]++`, `ps[1].x += 5`
+    // were "Unsupported statement" (ld72, 2026-10-22; the README claimed them). The target is
+    // written out twice, so an index with a side effect (a call, `++` / `--`, an assignment) is
+    // refused rather than evaluated twice.
+    {
+      const LV = String.raw`\w+(?:\[[^\[\]]+\])+(?:\.\w+)*`;
+      const body = line.replace(/;\s*$/, "").trim();
+      const post = body.match(new RegExp(`^(${LV})\\s*(\\+\\+|--)$`));
+      const pre = body.match(new RegExp(`^(\\+\\+|--)\\s*(${LV})$`));
+      const comp = body.match(new RegExp(`^(${LV})\\s*(\\*\\*|>>>|<<|>>|[+\\-*/%&|^])=(?!=)\\s*([\\s\\S]+)$`));
+      const target = post?.[1] ?? pre?.[2] ?? comp?.[1];
+      if (target) {
+        const idx = [...target.matchAll(/\[([^\[\]]+)\]/g)].map((m) => m[1]!);
+        if (idx.some((x) => /\w\s*\(|\+\+|--|[^=!<>]=(?!=)/.test(x))) {
+          this.diagnostics.push(
+            `'${body.slice(0, 60)}': a compound assignment to an element whose index has a side effect is ` +
+              `not supported (the index would be evaluated twice); compute the index first.`,
+          );
+          return "";
+        }
+        // the right side in parentheses only when it has an operator of its own (string
+        // concatenation does not take a parenthesised literal: `ss[1] += "!"`)
+        const r = comp ? comp[3]!.trim() : "";
+        const rWrapped = comp && (this.hasTopLevelBinaryOp(r) || this.splitTernaryTop(r)) ? `(${r})` : r;
+        const rhs = post ? `${target} ${post[2] === "++" ? "+" : "-"} 1`
+          : pre ? `${target} ${pre[1] === "++" ? "+" : "-"} 1`
+          : `${target} ${comp![2]} ${rWrapped}`;
+        return this.emitStatement(`${target} = ${rhs};`, locals, funcResult);
+      }
+    }
 
     const structWriteMatch = line.match(/^(\w+)\.(\w+)\s*=\s*(.+?);?$/);
     if (structWriteMatch) {
@@ -15344,9 +15457,19 @@ ${prefixed}
             : `(i32.const ${arrInfo.ptr})`;
           const elemAddrWat =
             `(i32.add (i32.add ${baseWat} (i32.const 8)) (i32.shl ${idxWat} (i32.const 3)))`;
-          const ptrLen = this.emitStringPtrLen(arrWriteMatch[3].trim(), locals);
+          // Two plain words store directly. Anything else goes through the $__str_op pair, as a string
+          // field store does: a concatenation or a template was refused, and a call returning both
+          // words was split as text (`ss[1] = ss[1] + "!"`, `ss[i] += "!"`; found with ld72, 2026-10-22)
+          const rhsS = arrWriteMatch[3].trim();
+          const ptrLen = this.quietEmit(() => this.emitStringPtrLen(rhsS, locals));
           const [ptrWat, lenWat] = splitTwoWatExprs(ptrLen);
-          return `(i32.store ${elemAddrWat} ${ptrWat})\n      (i32.store offset=4 ${elemAddrWat} ${lenWat})`;
+          if (
+            (ptrLen !== "(i32.const 0) (i32.const 0)" || rhsS === '""' || rhsS === "''") && lenWat &&
+            splitTwoWatExprs(lenWat)[1] === ""
+          ) {
+            return `(i32.store ${elemAddrWat} ${ptrWat})\n      (i32.store offset=4 ${elemAddrWat} ${lenWat})`;
+          }
+          return this.emitStringFieldStore(elemAddrWat, 0, rhsS, locals);
         }
         const storeOp = memStoreOp(arrInfo.elemType);
         const shift = (arrInfo.elemType === "f64" || arrInfo.elemType === "i64") ? 3 : 2;
@@ -17059,7 +17182,7 @@ ${prefixed}
         for (let i = args.length; i < baseParamCount; i++) {
           const param = fn.params[i];
           if (param.defaultValue !== undefined) {
-            emittedArgsList.push(this.emitExpr(param.defaultValue, locals, param.type));
+            emittedArgsList.push(this.emitDefaultArg(fn, args, i, locals)); // ld78
           }
         }
         // Append closure-captured variable values as hidden extra args
@@ -17100,6 +17223,11 @@ ${prefixed}
   /** Emits a WAT statement for a for-loop update expression (i++, i--, i += n, etc.). */
   private emitUpdate(upd: string, locals: Map<string, WatType>): string {
     upd = upd.trim().replace(/;$/, "");
+    // a comma list, `i++, j--` (ld78, 2026-10-22: refused), left to right
+    {
+      const parts = this.splitArgs(upd).map((p) => p.trim()).filter(Boolean);
+      if (parts.length > 1) return parts.map((p) => this.emitUpdate(p, locals)).join("\n    ");
+    }
     // i++ / i--
     if (/^(\w+)\+\+$/.test(upd)) {
       return this.emitStatement(`${upd.slice(0, -2)} += 1;`, locals, null);
@@ -17627,9 +17755,7 @@ ${prefixed}
           const brk2 = `$break_${lbl2}`;
           const loop2 = `$loop_${lbl2}`;
           const cont2 = `$cont_${lbl2}`;
-          const initWat2 = initP
-            ? this.emitStatement(initP.replace(/;$/, "") + ";", locals, funcResult)
-            : "";
+          const initWat2 = initP ? this.emitForInit(initP, locals, funcResult) : "";
           const condExpr2 = condP ? this.emitExpr(condP, locals, "i32") : "(i32.const 1)";
           const updWat2 = updP ? this.emitUpdate(updP, locals) : "";
           this.controlStack.push({ breakLabel: brk2, continueLabel: cont2 });
@@ -17685,9 +17811,7 @@ ${prefixed}
             const loop = `$loop_${lbl}`;
             const cont = `$cont_${lbl}`;
 
-            const initWat = initPart
-              ? this.emitStatement(initPart.replace(/;$/, "") + ";", locals, funcResult)
-              : "";
+            const initWat = initPart ? this.emitForInit(initPart, locals, funcResult) : "";
             const condExpr = condPart ? this.emitExpr(condPart, locals, "i32") : "(i32.const 1)";
             const updWat = updPart ? this.emitUpdate(updPart, locals) : "";
 
@@ -17733,10 +17857,8 @@ ${prefixed}
         const loop = `$loop_${lbl}`;
         const cont = `$cont_${lbl}`; // continue target: exits cont-block → falls to update then br loop
 
-        // Emit init (may declare a variable via let/const)
-        const initWat = initPart
-          ? this.emitStatement(initPart.replace(/;$/, "") + ";", locals, funcResult)
-          : "";
+        // Emit init (may declare variables via let/const)
+        const initWat = initPart ? this.emitForInit(initPart, locals, funcResult) : "";
         const condExpr = condPart ? this.emitExpr(condPart, locals, "i32") : "(i32.const 1)";
         const updWat = updPart ? this.emitUpdate(updPart, locals) : "";
 
@@ -17758,21 +17880,35 @@ ${prefixed}
         continue;
       }
 
-      // do { ... } while (cond);
+      // do { ... } while (cond);   — and all on one line, `do { k += 3; } while (k < 10);` (ld73,
+      // 2026-10-22: "Unsupported statement")
       const doMatch = line.match(/^do\s*\{?$/);
-      if (doMatch) {
-        const [doBody, consumed, termLine] = this.extractBlock(lines, i + 1);
-        i += consumed + 1;
-        // Extract condition from terminator line "} while (cond);" or from next line "while (cond);"
+      const doOneLine = doMatch
+        ? null
+        : (line.match(/^do\s*\{([\s\S]*)\}\s*while\s*\(([\s\S]+)\)\s*;?$/) ??
+          // brace-less: `do k++; while (k < 13);`
+          line.match(/^do\s+(?![{\s])([^;{}]+;)\s*while\s*\(([\s\S]+)\)\s*;?$/));
+      if (doMatch || (doOneLine && parenDepthNeverNegative(doOneLine[2]!))) {
+        let doBody: string[];
         let condPart = "0";
-        const termWhile = termLine.match(/^}\s*while\s*\((.+)\)\s*;?$/);
-        if (termWhile) {
-          condPart = termWhile[1].trim();
-        } else if (i < lines.length) {
-          const nextWhile = lines[i].match(/^while\s*\((.+)\)\s*;?$/);
-          if (nextWhile) {
-            condPart = nextWhile[1].trim();
-            i++;
+        if (doOneLine) {
+          doBody = doOneLine[1]!.trim() ? WasicTranspiler.splitStmts(doOneLine[1]!.trim()) : [];
+          condPart = doOneLine[2]!.trim();
+          i++;
+        } else {
+          const [body, consumed, termLine] = this.extractBlock(lines, i + 1);
+          doBody = body;
+          i += consumed + 1;
+          // Extract condition from terminator line "} while (cond);" or from next line "while (cond);"
+          const termWhile = termLine.match(/^}\s*while\s*\((.+)\)\s*;?$/);
+          if (termWhile) {
+            condPart = termWhile[1].trim();
+          } else if (i < lines.length) {
+            const nextWhile = lines[i].match(/^while\s*\((.+)\)\s*;?$/);
+            if (nextWhile) {
+              condPart = nextWhile[1].trim();
+              i++;
+            }
           }
         }
 
@@ -22434,18 +22570,14 @@ ${sum}
           }
         }
       }
-      // for-loop init variable: for (let i = 0; ...)
-      const forM = line.match(
-        /^(?:\w+\s*:\s*)?for\s*\(\s*(?:let|const|var)\s+(\w+)\s*(?::\s*(\w+))?\s*=\s*(.+?)\s*;/,
-      );
-      if (forM && !locals.has(forM[1])) {
-        const typeStr2 = forM[2] ?? "";
-        const initExpr2 = forM[3].trim();
-        const t2 = typeStr2
-          ? mapType(typeStr2)
-          : inferInitType(initExpr2, locals, this.enumValues, this.functions);
-        declaredLocals.push([forM[1], t2]);
-        locals.set(forM[1], t2);
+      // for-loop init variable(s): for (let i = 0, j = 10; ...)
+      for (const fd of this.forHeaderDecls(line)) {
+        if (locals.has(fd.name)) continue;
+        const t2 = fd.type
+          ? mapType(fd.type)
+          : inferInitType(fd.init, locals, this.enumValues, this.functions);
+        declaredLocals.push([fd.name, t2]);
+        locals.set(fd.name, t2);
       }
       // Phase 26: for...of item variable: for (const item of arrName) { ... }
       const forOfPre = line.match(/^for\s*\(\s*(?:const|let)\s+(\w+)\s+of\s+(\w+)\s*\)/);
@@ -23556,6 +23688,12 @@ ${sum}
     body: string[],
     locals: Map<string, WatType>,
   ): void {
+    // several declarators (`let i = 0, j = 10`): each is a counter of its own (ld78)
+    const decls = this.splitForInit(initPart);
+    if (decls.length > 1) {
+      for (const d of decls) this.checkForCounter(d, updPart, body, locals);
+      return;
+    }
     const dm = initPart.match(/^(?:let|const|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(.+?);?$/);
     if (!dm) return; // typed counter, or an init that declares nothing
     const name = dm[1];
@@ -23577,7 +23715,8 @@ ${sum}
       if (a[1] === "/" || a[1] === "**") refuse(`'${name} ${a[1]}= …' can produce a fraction`);
       else if (!isInt(a[2])) refuse(`it is assigned '${a[2].slice(0, 40)}'`);
     };
-    if (updPart) checkAssign(updPart);
+    // each update of a comma list on its own (`i += 2, j--`, ld78)
+    if (updPart) for (const u of this.splitArgs(updPart)) checkAssign(u.trim());
     // Assignments to the counter in the body. `maskCode` preserves offsets, so each masked
     // statement's span is the same span in the raw line.
     const assigns = new RegExp(`(?:^|[^\\w$.])${name}\\s*(\\*\\*|[-+*/%])?=(?!=)`);
@@ -24378,18 +24517,13 @@ ${sum}
             startLocals.set(m[1], t);
           }
         }
-        // for-loop init variable: for (let i = 0; ...)
-        const forM = line.match(
-          /^(?:\w+\s*:\s*)?for\s*\(\s*(?:let|const|var)\s+(\w+)\s*(?::\s*(\w+))?\s*=\s*(.+?)\s*;/,
-        );
-        if (forM) {
-          const typeStr2 = forM[2] ?? "";
-          const initExpr2 = forM[3].trim();
-          const t2 = typeStr2
-            ? mapType(typeStr2)
-            : inferInitType(initExpr2, startLocals, this.enumValues, this.functions);
-          startDeclaredLocals.push([forM[1], t2]);
-          startLocals.set(forM[1], t2);
+        // for-loop init variable(s): for (let i = 0, j = 10; ...)
+        for (const fd of this.forHeaderDecls(line)) {
+          const t2 = fd.type
+            ? mapType(fd.type)
+            : inferInitType(fd.init, startLocals, this.enumValues, this.functions);
+          startDeclaredLocals.push([fd.name, t2]);
+          startLocals.set(fd.name, t2);
         }
         // Phase 26: for...of item variable — mirrors emitFunction pre-scan
         const forOfPre2 = line.match(/^for\s*\(\s*(?:const|let)\s+(\w+)\s+of\s+(\w+)\s*\)/);
