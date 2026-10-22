@@ -8,8 +8,9 @@
  * result ≥ 2⁶³ is included since L4 (2026-10-13), which prints it unsigned. Every `Math`-style member is included:
  * since L3 (2026-10-09) they run the same correctly rounded math library in Deno as in wasm.
  *
- * Usage: deno run -A scripts/math/gen_wasmath_corpus.ts
+ * Usage: bun scripts/math/gen_wasmath_corpus.ts
  */
+import { writeFile } from "node:fs/promises";
 import * as WM from "../../src/wasmath.ts";
 import { WM_F32_TS, WM_F64_MATH, WM_WAT } from "../../src/wasmath_lower.ts";
 
@@ -83,5 +84,5 @@ for (const ns of ["i32", "u32", "i64", "u64", "f32", "f64"]) {
   if (!sections[ns]) continue;
   lines.push(`// ── ${ns} ──`, ...sections[ns], "");
 }
-await Deno.writeTextFile(OUT, lines.join("\n"));
+await writeFile(OUT, lines.join("\n"));
 console.log(`wrote ${OUT}: ${Object.values(sections).flat().length} functions`);

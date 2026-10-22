@@ -31,6 +31,8 @@
  * **A result from `wasmtk-upstream` is never evidence for a decision.** It tells you where to look.
  * The gate of record runs `wasmtk`, built from the pin in `deno.json`.
  */
+import { spawnSync } from "node:child_process";
+import { stat, writeFile } from "node:fs/promises";
 import denoJson from "../deno.json" with { type: "json" };
 
 const ROOT = new URL("../", import.meta.url);
@@ -44,20 +46,20 @@ const LOCAL: Record<string, string> = {
 
 // Fail loudly rather than silently generating a config that resolves to the published package.
 try {
-  await Deno.stat(new URL("deno.json", CHECKOUT));
+  await stat(new URL("deno.json", CHECKOUT));
 } catch {
   console.error("❌ upstream/binaryang is not checked out. Clone it first:");
   console.error("   git clone https://github.com/jrmarcum/binaryang.git upstream/binaryang");
-  Deno.exit(1);
+  process.exit(1);
 }
 
 for (const [spec, path] of Object.entries(LOCAL)) {
   try {
-    await Deno.stat(new URL(path.replace("./", ""), ROOT));
+    await stat(new URL(path.replace("./", ""), ROOT));
   } catch {
     console.error(`❌ entrypoint for "${spec}" not found at ${path}`);
     console.error("   The upstream layout moved — update LOCAL in scripts/upstream-link.ts.");
-    Deno.exit(1);
+    process.exit(1);
   }
 }
 
@@ -67,7 +69,7 @@ const swapped: string[] = [];
 for (const [spec, path] of Object.entries(LOCAL)) {
   if (!(spec in imports)) {
     console.error(`❌ "${spec}" is not in deno.json imports — did an alias get renamed?`);
-    Deno.exit(1);
+    process.exit(1);
   }
   swapped.push(`${spec}: ${imports[spec]} → ${path}`);
   imports[spec] = path;
@@ -78,16 +80,13 @@ delete cfg.publish;
 delete cfg.tasks;
 
 const out = new URL("deno.upstream.json", ROOT);
-await Deno.writeTextFile(out, JSON.stringify(cfg, null, 2) + "\n");
+await writeFile(out, JSON.stringify(cfg, null, 2) + "\n");
 
 console.log("✅ wrote deno.upstream.json (gitignored, exploration only)");
 for (const s of swapped) console.log(`   ${s}`);
-const head = new TextDecoder().decode(
-  (await new Deno.Command("git", {
-    args: ["-C", "upstream/binaryang", "rev-parse", "--short", "HEAD"],
-    stdout: "piped",
-  }).output()).stdout,
-).trim();
+const head = (spawnSync("git", ["-C", "upstream/binaryang", "rev-parse", "--short", "HEAD"], {
+  encoding: "utf8",
+}).stdout ?? "").trim();
 console.log(`   checkout at ${head || "unknown"}`);
 console.log("");
 console.log("   Use:  deno run -A --config deno.upstream.json <script>");

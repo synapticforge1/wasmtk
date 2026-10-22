@@ -29,6 +29,15 @@
 
 // deno-lint-ignore-file no-explicit-any
 
+// Runs on Bun (`bun scripts/api-surface.ts`). It still spawns `deno` twice: `deno doc --json` is the
+// surface JSR sees, and main.ts's `--help` runs the CLI, which is a Deno program until the
+// Deno-exit plan's P2 (cmem/deno-exit-plan.md).
+import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 export type Kind = "patch" | "minor" | "major";
 export const KIND_RANK: Record<Kind, number> = { patch: 0, minor: 1, major: 2 };
 
@@ -97,19 +106,19 @@ function membersOf(kind: string, def: any): Record<string, string> {
 }
 
 /** Run `deno doc --json` on one file in `cwd` and return its exported symbols. */
+// deno-lint-ignore require-await
 async function symbolsOf(cwd: string, file: string): Promise<Record<string, SurfaceSymbol>> {
-  const o = await new Deno.Command(Deno.execPath(), {
-    args: ["doc", "--json", file],
+  const o = spawnSync("deno", ["doc", "--json", file], {
     cwd,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  if (o.code !== 0) {
+    encoding: "utf8",
+    maxBuffer: 1 << 30,
+  });
+  if (o.status !== 0) {
     throw new Error(
-      `deno doc --json ${file} failed: ${new TextDecoder().decode(o.stderr).slice(0, 300)}`,
+      `deno doc --json ${file} failed: ${(o.stderr ?? String(o.error)).slice(0, 300)}`,
     );
   }
-  const doc = JSON.parse(new TextDecoder().decode(o.stdout));
+  const doc = JSON.parse(o.stdout);
   if (doc.version !== 2) {
     throw new Error(`deno doc JSON version ${doc.version}; this tool reads version 2`);
   }
@@ -146,7 +155,7 @@ async function symbolsOf(cwd: string, file: string): Promise<Record<string, Surf
 async function cliSurface(
   dir: string,
 ): Promise<{ symbols: Record<string, SurfaceSymbol>; notes: string[] }> {
-  const src = (await Deno.readTextFile(`${dir}/main.ts`)).replace(/\r\n/g, "\n");
+  const src = (await readFile(`${dir}/main.ts`, "utf8")).replace(/\r\n/g, "\n");
   const notes: string[] = [];
   const symbols: Record<string, SurfaceSymbol> = {};
 
@@ -160,13 +169,8 @@ async function cliSurface(
   if (caseAt.length === 0) throw new Error("main.ts: no dispatcher `case` labels found");
 
   // Usage shapes: `wasmtk <name> …   description` lines of `--help`, run in `dir`.
-  const h = await new Deno.Command(Deno.execPath(), {
-    args: ["run", "-A", "main.ts", "--help"],
-    cwd: dir,
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  const help = new TextDecoder().decode(h.stdout).replace(/\r\n/g, "\n");
+  const h = spawnSync("deno", ["run", "-A", "main.ts", "--help"], { cwd: dir, encoding: "utf8" });
+  const help = (h.stdout ?? "").replace(/\r\n/g, "\n");
   const usage = new Map<string, string[]>();
   for (const l of help.split("\n")) {
     const m = l.match(/^\s*wasmtk ([a-z0-9-]+)(.*)$/);
@@ -220,11 +224,11 @@ async function cliSurface(
   const exits: Record<string, string> = {};
   const files = [
     "main.ts",
-    ...[...Deno.readDirSync(`${dir}/src`)]
-      .filter((e) => e.isFile && e.name.endsWith(".ts")).map((e) => `src/${e.name}`).sort(),
+    ...readdirSync(`${dir}/src`, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".ts")).map((e) => `src/${e.name}`).sort(),
   ];
   for (const f of files) {
-    for (const l of (await Deno.readTextFile(`${dir}/${f}`)).split("\n")) {
+    for (const l of (await readFile(`${dir}/${f}`, "utf8")).split("\n")) {
       if (/^\s*(\/\/|\*|\/\*)/.test(l)) continue;
       for (const m of l.matchAll(/\b(?:Deno|rt)\.exit\(([^)]*)\)/g)) {
         const arg = m[1]!.trim();
@@ -242,7 +246,7 @@ export const surfaceNotes: string[] = [];
 
 /** Generate the surface of the tree at `dir` from ITS deno.json `exports` map, plus its CLI. */
 export async function generateSurface(dir: string): Promise<Surface> {
-  const cfg = JSON.parse(await Deno.readTextFile(`${dir}/deno.json`));
+  const cfg = JSON.parse(await readFile(`${dir}/deno.json`, "utf8"));
   const exp: Record<string, string> = typeof cfg.exports === "string"
     ? { ".": cfg.exports }
     : cfg.exports ?? {};
@@ -309,13 +313,13 @@ export const REVIEW_FILE = "api-surface.review.json";
 /** The committed reviews, or none. */
 export async function loadReviews(root: string): Promise<Review[]> {
   try {
-    const r = JSON.parse(await Deno.readTextFile(`${root}/${REVIEW_FILE}`)).reviews ?? [];
+    const r = JSON.parse(await readFile(`${root}/${REVIEW_FILE}`, "utf8")).reviews ?? [];
     for (const x of r) {
       if (!(x.kind in KIND_RANK)) throw new Error(`${REVIEW_FILE}: bad kind "${x.kind}"`);
     }
     return r;
   } catch (e) {
-    if (e instanceof Deno.errors.NotFound) return [];
+    if ((e as { code?: string }).code === "ENOENT") return [];
     throw e;
   }
 }
@@ -407,13 +411,13 @@ export async function diffSurfaces(
   return { kind, reasons, warnings };
 }
 
+// deno-lint-ignore require-await
 async function git(
   args: string[],
-  cwd = Deno.cwd(),
+  cwd = process.cwd(),
 ): Promise<{ code: number; out: string; err: string }> {
-  const o = await new Deno.Command("git", { args, cwd, stdout: "piped", stderr: "piped" }).output();
-  const d = new TextDecoder();
-  return { code: o.code, out: d.decode(o.stdout).trim(), err: d.decode(o.stderr).trim() };
+  const o = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 1 << 30 });
+  return { code: o.status ?? 1, out: (o.stdout ?? "").trim(), err: (o.stderr ?? "").trim() };
 }
 
 /**
@@ -431,7 +435,7 @@ export async function surfaceAtLastTag(): Promise<
   if (shown.code === 0) {
     return { tag, surface: JSON.parse(shown.out), source: "its committed api-surface.json" };
   }
-  const dir = await Deno.makeTempDir({ prefix: "wasmtk_surface_" });
+  const dir = await mkdtemp(join(tmpdir(), "wasmtk_surface_"));
   const add = await git(["worktree", "add", "--detach", dir, tag]);
   if (add.code !== 0) throw new Error(`git worktree add ${tag} failed: ${add.err}`);
   try {
@@ -454,12 +458,13 @@ export function printFloor(f: Floor, since: string): void {
 }
 
 if (import.meta.main) {
-  const root = Deno.cwd();
+  const root = process.cwd();
   const file = `${root}/api-surface.json`;
-  const mode = Deno.args[0] ?? "--record";
+  const argv = process.argv.slice(2);
+  const mode = argv[0] ?? "--record";
   const current = await generateSurface(root);
   if (mode === "--record") {
-    await Deno.writeTextFile(file, serialize(current));
+    await writeFile(file, serialize(current));
     const n = Object.values(current.entrypoints).reduce((a, e) => a + Object.keys(e).length, 0);
     console.log(
       `✅ api-surface.json: ${Object.keys(current.entrypoints).length} entrypoints, ${n} symbols`,
@@ -471,10 +476,10 @@ if (import.meta.main) {
   } else if (mode === "--check") {
     let committed = "";
     try {
-      committed = await Deno.readTextFile(file);
+      committed = await readFile(file, "utf8");
     } catch {
       console.error("❌ api-surface.json is missing: run `deno task api-surface` and commit it.");
-      Deno.exit(1);
+      process.exit(1);
     }
     if (committed.replace(/\r\n/g, "\n") !== serialize(current)) {
       const f = await diffSurfaces(JSON.parse(committed), current);
@@ -483,7 +488,7 @@ if (import.meta.main) {
       console.error(
         "   Re-baseline in its own commit (`deno task api-surface`), stating the reason.",
       );
-      Deno.exit(1);
+      process.exit(1);
     }
     console.log("✅ api-surface.json matches the working tree");
   } else if (mode === "--floor") {
@@ -492,14 +497,14 @@ if (import.meta.main) {
   } else if (mode === "--review") {
     // --review <entrypoint> <symbol> <member> <kind> <reason…>: record a person's judgment of ONE
     // changed member since the last release tag. The hashes are computed here, never typed.
-    const [ep, symbol, member, k, ...why] = Deno.args.slice(1);
+    const [ep, symbol, member, k, ...why] = argv.slice(1);
     const reason = why.join(" ").trim();
     if (!ep || !symbol || !member || !k || !(k in KIND_RANK) || !reason) {
       console.error(
         "❌ usage: deno task api-surface --review <entrypoint> <symbol> <member> <patch|minor|major> <reason>\n" +
           '   e.g. --review ./wast runWast "(whole)" minor "options type became a named superset"',
       );
-      Deno.exit(1);
+      process.exit(1);
     }
     const { tag, surface } = await surfaceAtLastTag();
     const was = surface.entrypoints[ep]?.[symbol]?.members[member];
@@ -509,7 +514,7 @@ if (import.meta.main) {
         `❌ ${ep} ${symbol} ${member} is not a CHANGED member since ${tag} (a review applies only to ` +
           `a change; it cannot excuse a removal or an addition).`,
       );
-      Deno.exit(1);
+      process.exit(1);
     }
     const reviews = (await loadReviews(root)).filter((r) =>
       !(r.entrypoint === ep && r.symbol === symbol && r.member === member)
@@ -529,13 +534,13 @@ if (import.meta.main) {
         `${b.entrypoint} ${b.symbol} ${b.member}`,
       )
     );
-    await Deno.writeTextFile(`${root}/${REVIEW_FILE}`, JSON.stringify({ reviews }, null, 2) + "\n");
+    await writeFile(`${root}/${REVIEW_FILE}`, JSON.stringify({ reviews }, null, 2) + "\n");
     console.log(`✅ ${REVIEW_FILE}: ${ep} ${symbol} ${member} reviewed as ${k} (since ${tag})`);
     console.log("   Commit it with its reason, like a re-baseline (Rule 5).");
   } else {
     console.error(
       `❌ api-surface: unknown mode ${mode} — use --record | --check | --floor | --review`,
     );
-    Deno.exit(1);
+    process.exit(1);
   }
 }

@@ -19,27 +19,42 @@
  * must be read and classified (regression / intended surface change / improvement) before a bump.
  *
  * Usage (from the repo root; ~25–30 min):
- *   deno run -A scripts/check_prev_tests.ts [report.md] [--only a_tests.ts,b_tests.ts]
+ *   bun scripts/check_prev_tests.ts [report.md] [--only a_tests.ts,b_tests.ts]
  * A red suite's report row carries its failure lines (✗, OFF BASELINE, error, FAIL …), not only
  * its summary, because a red row has to be classified from them.
+ *
+ * Runs on Bun; the suites themselves (and `deno task install`) still run on `deno` until the
+ * Deno-exit plan's P6 moves the harnesses (cmem/deno-exit-plan.md).
  */
-const repo = Deno.cwd();
-const dec = new TextDecoder();
-const run = async (cmd: string, args: string[], cwd: string) => {
-  const o = await new Deno.Command(cmd, { args, cwd, stdout: "piped", stderr: "piped" }).output();
-  return { code: o.code, out: dec.decode(o.stdout) + dec.decode(o.stderr) };
-};
+import { spawn } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const repo = process.cwd();
+// Asynchronous: a suite runs for minutes and prints megabytes.
+const run = (cmd: string, args: string[], cwd: string) =>
+  new Promise<{ code: number; out: string }>((resolve) => {
+    const p = spawn(cmd, args, { cwd });
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.stderr.on("data", (d) => (out += d));
+    p.on("error", (e) => resolve({ code: 1, out: out + String(e) }));
+    p.on("close", (code) => resolve({ code: code ?? 1, out }));
+  });
 const git = (args: string[], cwd = repo) => run("git", args, cwd);
 
 const tag = (await git(["describe", "--tags", "--abbrev=0", "--match", "v*"])).out.trim();
 const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"])).out.trim();
 const head = (await git(["rev-parse", "--short", "HEAD"])).out.trim();
-const onlyAt = Deno.args.indexOf("--only");
-const only = onlyAt >= 0 ? new Set((Deno.args[onlyAt + 1] ?? "").split(",").filter(Boolean)) : null;
-const positional = Deno.args.filter((a, i) => a !== "--only" && i !== onlyAt + 1);
+const argv = process.argv.slice(2);
+const onlyAt = argv.indexOf("--only");
+const only = onlyAt >= 0 ? new Set((argv[onlyAt + 1] ?? "").split(",").filter(Boolean)) : null;
+const positional = argv.filter((a, i) => a !== "--only" && i !== onlyAt + 1);
 const reportPath = positional[0] ??
-  `${await Deno.makeTempDir({ prefix: "wasmtk_prev_" })}/report.md`;
-const clone = await Deno.makeTempDir({ prefix: "wasmtk_prevtests_" });
+  `${await mkdtemp(join(tmpdir(), "wasmtk_prev_"))}/report.md`;
+const clone = await mkdtemp(join(tmpdir(), "wasmtk_prevtests_"));
 console.log(`previous release ${tag}'s tests against ${branch} @ ${head} (clone: ${clone})`);
 
 // This drive records no file ownership, and D: → C: cannot hard-link (see check_compat_gate.ts).
@@ -61,8 +76,8 @@ for (const step of [["rm", "-r", "-q", "tests"], ["checkout", tag, "--", "tests"
   if (r.code !== 0) throw new Error(`git ${step.join(" ")} failed: ${r.out}`);
 }
 
-const suites = [...Deno.readDirSync(`${clone}/tests`)]
-  .filter((e) => e.isFile && e.name.endsWith("_tests.ts") && e.name !== "golden_wat_tests.ts")
+const suites = readdirSync(`${clone}/tests`, { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith("_tests.ts") && e.name !== "golden_wat_tests.ts")
   .filter((e) => !only || only.has(e.name))
   .map((e) => e.name)
   .sort((a, b) => order(a) - order(b) || a.localeCompare(b));
@@ -79,17 +94,17 @@ function order(n: string): number {
 
 const rows: string[] = [];
 let red = 0;
-const install = await run(Deno.execPath(), ["task", "install"], clone);
+const install = await run("deno", ["task", "install"], clone);
 if (install.code !== 0) throw new Error(`install from the clone failed: ${install.out}`);
 try {
   for (const s of suites) {
-    const src = await Deno.readTextFile(`${clone}/tests/${s}`);
+    const src = await readFile(`${clone}/tests/${s}`, "utf8");
     const perms = ["--allow-read", "--allow-write", "--allow-run", "--allow-env", "--allow-net"];
     const args = src.includes("Deno.test(")
       ? ["test", "--no-check", ...perms, `tests/${s}`]
       : ["run", ...perms, `tests/${s}`, ...(s === "wasi_tests.ts" ? ["tests/wasi/wasm_wasi"] : [])];
     const t0 = Date.now();
-    const r = await run(Deno.execPath(), args, clone);
+    const r = await run("deno", args, clone);
     const plain = r.out.replace(/\x1b\[[0-9;]*m/g, "").trim().split("\n");
     const summary = plain.filter((l) => /pass|fail|skip|clean|baseline|ok \||error/i.test(l))
       .slice(-4);
@@ -107,11 +122,11 @@ try {
     console.log(`${r.code === 0 ? "ok  " : "RED "} ${s} (exit ${r.code})`);
   }
 } finally {
-  const back = await run(Deno.execPath(), ["task", "install"], repo);
+  const back = await run("deno", ["task", "install"], repo);
   console.log(
     back.code === 0 ? "reinstalled wasmtk from the real repo" : `⚠️ reinstall failed: ${back.out}`,
   );
-  await Deno.remove(clone, { recursive: true });
+  await rm(clone, { recursive: true, force: true });
 }
 
 const report = [
@@ -127,5 +142,5 @@ const report = [
   ...rows,
   "",
 ].join("\n");
-await Deno.writeTextFile(reportPath, report);
+await writeFile(reportPath, report);
 console.log(`\n${red} of ${suites.length} suites red. Report: ${reportPath}`);
