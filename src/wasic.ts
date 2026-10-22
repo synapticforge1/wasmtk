@@ -1700,6 +1700,40 @@ function braceDepthOf(s: string): number {
   return d;
 }
 
+/** Net `(` minus `)` in `s`, outside string literals. */
+function parenDepthOf(s: string): number {
+  const mask = buildStringLiteralMask(s);
+  let d = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (mask[i]) continue;
+    if (s[i] === "(") d++;
+    else if (s[i] === ")") d--;
+  }
+  return d;
+}
+
+/** A block-bodied arrow ARGUMENT written over several lines, `xs.forEach((x) => {` … `});`, joined
+ *  into one line so the arrow lifter sees the whole callback; each line was its own statement, and
+ *  `});` was "Unsupported statement" (ld91, 2026-10-22). A body line that does not end a statement
+ *  or a block gets its `;` (the joined body is split by splitStmts, which ignores newlines). */
+function joinMultiLineArrowArgs(lines: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    let depth = parenDepthOf(line);
+    if (depth > 0 && /=>\s*\{\s*$/.test(line)) {
+      while (depth > 0 && i + 1 < lines.length) {
+        const next = lines[++i].trim();
+        const sep = /[{};,]$/.test(line) || /^[)}]/.test(next) ? " " : "; ";
+        line += sep + next;
+        depth += parenDepthOf(next);
+      }
+    }
+    out.push(line);
+  }
+  return out;
+}
+
 /** Given s[openIdx] === "<", returns the index of the matching ">" respecting nested <...>.
  *  Used by Phase 51.4 utility-type expansion (type positions only — no comparison operators). */
 function matchAngleBracket(s: string, openIdx: number): number {
@@ -2726,6 +2760,10 @@ class WasicTranspiler {
       if (fnInit) {
         const tern = fnInit.match(/^.+\?\s*(\w+)\s*:\s*(\w+)$/);
         if (plainFn(fnInit) || (tern && plainFn(tern[1]) && plainFn(tern[2]))) return line;
+        // Only an ARROW initialiser loses the annotation (as in a function body): a function
+        // array's element, `const f: () => i32 = fns[i]`, became an untyped `const f = fns[i]`,
+        // and a call through `f` was "Unknown function 'f'" (ld78, 2026-10-22).
+        if (!/^(?:async\s+)?\(/.test(fnInit)) return line;
       }
       // Strip function-type annotation so substituteOneArrow can find the actual arrow body.
       // "const name: () => T = () => expr" → "const name = () => expr"
@@ -2741,6 +2779,39 @@ class WasicTranspiler {
       }
       return stripped;
     });
+  }
+
+  /** The element type of the array an inline callback is passed to, `recv.method((x) => …)`, read
+   *  from the receiver's DECLARATION (a parameter's `T[]`, or a `const|let|var name: T[]`); a chain
+   *  of array methods has its base's type, as inferChainElemType says. undefined when unknown or
+   *  i32 (the lifter's default). An untyped callback parameter was i32 whatever the array was, so an
+   *  f64[] callback trapped with "function signature mismatch" (ld97, found with ld78, 2026-10-22). */
+  private callbackReceiverElemType(recv: string, enclosingFn?: FuncDef): WatType | undefined {
+    let r = recv.trim();
+    // strip trailing `.method(…)` calls down to the base name
+    while (r.endsWith(")")) {
+      let d = 0;
+      let k = r.length - 1;
+      for (; k >= 0; k--) {
+        if (r[k] === ")") d++;
+        else if (r[k] === "(" && --d === 0) break;
+      }
+      const head = r.slice(0, k).match(/^([\s\S]*)\.(\w+)$/);
+      if (!head || !/^(?:filter|map|slice|sort|reverse|concat|fill)$/.test(head[2])) return undefined;
+      r = head[1].trim();
+    }
+    if (!/^\w+$/.test(r)) return undefined;
+    const fromParam = enclosingFn?.params.find((p) => p.name === r)?.arrayElemType;
+    const declared = new Set<string>();
+    if (fromParam) declared.add(fromParam);
+    else {
+      for (const m of this.src.matchAll(new RegExp(`\\b(?:const|let|var)\\s+${r}\\s*:\\s*(\\w+)\\[\\]\\s*=`, "g"))) {
+        declared.add(m[1] === "number" ? "f64" : mapType(m[1]) as string);
+      }
+    }
+    if (declared.size !== 1) return undefined; // unknown, or two declarations that disagree
+    const t = [...declared][0] as WatType;
+    return t === "f64" || t === "f32" || t === "i64" ? t : undefined;
   }
 
   private substituteOneArrow(
@@ -2850,6 +2921,8 @@ class WasicTranspiler {
     let calleeName = "";
     let argIdx = 0;
     const preceding = line[beforeParens];
+    // the receiver's element type for an array method's callback, `recv.filter((x) => …)` (ld97)
+    let recvElem: WatType | undefined;
 
     if (preceding === "(") {
       // First arg: find function name before `(`
@@ -2857,6 +2930,24 @@ class WasicTranspiler {
       while (nameEnd > 0 && /\w/.test(line[nameEnd - 1])) nameEnd--;
       calleeName = line.slice(nameEnd, beforeParens);
       argIdx = 0;
+      if (
+        line[nameEnd - 1] === "." &&
+        /^(?:forEach|map|filter|find|findIndex|reduce|every|some|flatMap)$/.test(calleeName)
+      ) {
+        // the receiver: back over names, dots and balanced brackets
+        let s = nameEnd - 1;
+        let d = 0;
+        while (s > 0) {
+          const ch = line[s - 1];
+          if (ch === ")" || ch === "]") d++;
+          else if (ch === "(" || ch === "[") {
+            if (d === 0) break;
+            d--;
+          } else if (d === 0 && !/[\w.]/.test(ch)) break;
+          s--;
+        }
+        recvElem = this.callbackReceiverElemType(line.slice(s, nameEnd - 1), enclosingFn);
+      }
     } else if (preceding !== "=") {
       // After a comma: find enclosing `(` and count commas
       depth = 1;
@@ -2888,9 +2979,14 @@ class WasicTranspiler {
       innerRaw.split(",").map((p) => p.trim()).filter(Boolean).forEach((pp, pi) => {
         const ci = pp.indexOf(":");
         const pname = ci !== -1 ? pp.slice(0, ci).trim().replace(/\?$/, "") : pp.trim();
+        // an array method's callback: the element (reduce: the accumulator and the element),
+        // then the index (ld97)
+        const recvType = recvElem && (pi === 0 || (pi === 1 && calleeName === "reduce"))
+          ? recvElem
+          : undefined;
         const ptype: WatType = ci !== -1
           ? mapType(pp.slice(ci + 1).trim()) as WatType
-          : (paramInfo?.params[pi] ?? "i32" as WatType);
+          : (paramInfo?.params[pi] ?? recvType ?? "i32" as WatType);
         paramList.push({ name: pname, type: ptype });
       });
     }
@@ -2962,7 +3058,13 @@ class WasicTranspiler {
       // Infer result type from body expression only when we have no callee type info.
       // If paramInfo is defined but its result is null (void callee), don't override with inferInitType
       // because null from JavaScript's ?? coalescing is indistinguishable from "no info" otherwise.
-      if (anonResult === null && paramInfo === undefined) {
+      // An annotated `: void` is no result to infer: `(x: i32): void => console.log(x)` was given
+      // one and emitted `return console.log(x)`, "Unsupported expression" (ld92, 2026-10-22).
+      // A console call is void too, annotated or not (`(x) => console.log(x)`).
+      if (
+        anonResult === null && paramInfo === undefined && retAnnotation !== "void" &&
+        !/^console\.\w+\s*\(/.test(bodyRaw)
+      ) {
         anonResult = inferInitType(bodyRaw, inferLocals, this.enumValues, this.functions);
       }
       bodyLines = anonResult !== null ? [`return ${bodyRaw};`] : [`${bodyRaw};`];
@@ -3602,6 +3704,7 @@ class WasicTranspiler {
       if (rawLines.length === 1) {
         rawLines = WasicTranspiler.splitStmts(rawLines[0]);
       }
+      rawLines = joinMultiLineArrowArgs(rawLines); // `xs.forEach((x) => {` … `});` (ld91)
       // Join multi-line `return { ... }` object literals into one line so substituteOneArrow
       // and emitStatement can process them as a unit.
       const bodyLines: string[] = [];
@@ -7225,10 +7328,27 @@ class WasicTranspiler {
     return { receiver, method, args };
   }
 
+  /** A plain numeric `T[]` parameter: a runtime pointer to the usual header, registered NOT dynamic
+   *  so a push cannot move it under the caller. Non-growing methods read it as a dynamic array. */
+  private isNumericArrayParam(
+    ai: {
+      elemType: WatType;
+      ptr: number;
+      dynamic?: boolean;
+      is2D?: boolean;
+      isStringArr?: boolean;
+      structTypeName?: string;
+      isFuncPtrArr?: unknown;
+    } | undefined,
+  ): boolean {
+    return !!ai && ai.ptr === -1 && !ai.dynamic && !ai.is2D && !ai.isStringArr && !ai.structTypeName &&
+      !ai.isFuncPtrArr && ["i32", "i64", "f32", "f64"].includes(ai.elemType as string);
+  }
+
   /** Phase 49: Infer the element type of a (possibly chained) array expression. */
   private inferChainElemType(expr: string, locals: Map<string, string>): string | null {
     const ai = this.arrayVars.get(expr);
-    if (ai?.dynamic) return ai.elemType as string;
+    if (ai?.dynamic || this.isNumericArrayParam(ai)) return ai!.elemType as string;
     const parsed = this.splitLastMethodCall(expr);
     if (!parsed) return null;
     const baseType = this.inferChainElemType(parsed.receiver, locals);
@@ -8949,6 +9069,22 @@ class WasicTranspiler {
   private cbHelperKey(method: string, elemType: WatType, fnName: string, result: WatType | null): string {
     const fn = this.functions.find((f) => f.name === fnName);
     const n = fn ? fn.params.length - (fn.closureCaptures?.length ?? 0) : 1;
+    // No helper passes a (ptr, len) element: a `string[]` callback was an invalid call_indirect
+    // (found with ld92, 2026-10-22). Refused; `for (const s of names)` works.
+    if (elemType === "string" || fn?.params[0]?.type === "string") {
+      this.diagnostics.push(
+        `'${method}' callback '${fnName}': a callback over a string[] is not supported; use for…of`,
+      );
+    }
+    // A capturing callback is a closure-factory CALL; the helpers call a bare table index, so its
+    // text went into the table as a name, an invalid module (found with ld91, 2026-10-22).
+    const cap = fnName.match(/^\w+__factory\s*\(([^)]*)\)/);
+    if (cap) {
+      this.diagnostics.push(
+        `'${method}' callback: an arrow that captures a local ('${cap[1].trim()}') is not supported ` +
+          `here; use a for loop, or a module-level variable`,
+      );
+    }
     if (n >= 3) {
       this.diagnostics.push(
         `'${method}' callback '${fnName}': a third parameter (the array itself) is not supported.`,
@@ -10057,6 +10193,12 @@ ${prefixed}
     const [, op, resultAnn, name] = m;
     const num = (t: string | null | undefined) =>
       t === "bool" ? "i32" : t && ["i32", "i64", "f32", "f64"].includes(t) ? t : undefined;
+    // a call through a table: its type's name ends `_r_<result>` (getOrCreateFuncType). An f64
+    // `g(2.5, 4)` through a function variable went to the i32 printer: an invalid module (ld98,
+    // found with ld78, 2026-10-22).
+    if (op === "call_indirect") {
+      return num(wat.trimStart().match(/^\(call_indirect\s+\(type\s+\$ftype_[\w]*?_?r_(\w+)\)/)?.[1]);
+    }
     const typed = op.match(/^(i32|i64|f32|f64)\.(\w+)/);
     // A comparison yields i32 (`f32.lt`); the WHOLE name, so `f32.neg` / `f64.nearest` stay float.
     if (typed) return /^(eqz?|ne|lt|gt|le|ge)(_[su])?$/.test(typed[2]) ? "i32" : typed[1];
@@ -11127,7 +11269,10 @@ ${prefixed}
         | "concat";
       const argsStr = dynArrMethod[3].trim();
       const arrInfo = this.arrayVars.get(arrName);
-      if (arrInfo?.dynamic) {
+      // A numeric array PARAMETER (ptr -1, not dynamic: a push would move it under the caller) has
+      // the same [length, capacity] header, and none of these methods grows it: `v.reduce(…)` on a
+      // `v: f64[]` was refused (ld99, found with ld78, 2026-10-22).
+      if (arrInfo && (arrInfo.dynamic || this.isNumericArrayParam(arrInfo))) {
         const elemType = arrInfo.elemType as WatType;
         // string arrays search by TEXT (sw107)
         if ((method === "indexOf" || method === "includes") && (arrInfo.isStringArr || elemType === "string")) {
@@ -11319,6 +11464,31 @@ ${prefixed}
           "flat": true,
           "flatMap": true,
         };
+        // Any other array method on a chained receiver (`….map(g).reduce(h, 0)`, `….find(p)`,
+        // `….every(p)`): the receiver is evaluated ONCE into $__chain_arr, registered as a dynamic
+        // array of the chain's element type, and the method goes through the one-array path
+        // above. It was refused (ld78, 2026-10-22). One temp serves every level: an inner level's
+        // reads all happen before the outer level sets it.
+        if (
+          !CHAIN_METHODS[chainParsed.method] &&
+          /^(?:indexOf|lastIndexOf|includes|find|reduce|every|some|findIndex|at)$/.test(chainParsed.method)
+        ) {
+          const elemType = this.inferChainElemType(chainParsed.receiver, locals) as WatType | null;
+          if (elemType && elemType !== "string") {
+            const innerWat = this.emitExpr(chainParsed.receiver, locals, "i32");
+            const saved = this.arrayVars.get("__chain_arr");
+            this.arrayVars.set("__chain_arr", { elemType, ptr: -1, length: 0, dynamic: true });
+            const outer = this.emitExpr(`__chain_arr.${chainParsed.method}(${chainParsed.args})`, locals, defaultType);
+            if (saved) this.arrayVars.set("__chain_arr", saved);
+            else this.arrayVars.delete("__chain_arr");
+            // the element for reduce / find / at (the helpers' calls carry no type watResultType
+            // reads); an index or a truth value otherwise
+            const rt = /^(?:reduce|find|at)$/.test(chainParsed.method)
+              ? (this.watResultType(outer, locals) ?? watBaseType(elemType))
+              : "i32";
+            return `(block (result ${rt}) (local.set $__chain_arr ${innerWat}) ${outer})`;
+          }
+        }
         if (CHAIN_METHODS[chainParsed.method]) {
           const elemType = this.inferChainElemType(chainParsed.receiver, locals);
           if (elemType) {
@@ -14315,6 +14485,11 @@ ${prefixed}
         if (fnTern && isFnName(fnTern[1]) && isFnName(fnTern[2])) {
           return `(local.set $${funcTypeDecl[1]} ${this.emitExpr(fullInitExpr, locals, "i32")})`;
         }
+        // An element of a function array, `ops[i]`: its slot holds the table index (ld78)
+        const fnElemM = fullInitExpr.match(/^(\w+)\s*\[[\s\S]+\]$/);
+        if (fnElemM && this.arrayVars.get(fnElemM[1])?.isFuncPtrArr !== undefined) {
+          return `(local.set $${funcTypeDecl[1]} ${this.emitExpr(fullInitExpr, locals, "i32")})`;
+        }
         // Any other initialiser was DROPPED: the local stayed 0, and a call through it reached
         // table slot 0, whatever function that was (sw72, 2026-10-15).
         this.diagnostics.push(
@@ -15442,11 +15617,13 @@ ${prefixed}
       const method = dynArrCallbackStmt[2] as string;
       const argsStr = dynArrCallbackStmt[3].trim();
       const arrInfo = this.arrayVars.get(arrName);
-      if (arrInfo?.dynamic) {
+      // a numeric array parameter as well (none of these grows it; ld99, 2026-10-22)
+      if (arrInfo && (arrInfo.dynamic || this.isNumericArrayParam(arrInfo))) {
         const elemType = arrInfo.elemType as WatType;
         const args = this.splitArgs(argsStr);
         const fnName = args[0]?.trim() ?? "";
         const fnIdx = this.getFuncTableIdx(fnName);
+        const arrWat = this.arrGetWat(arrName); // the global, for a module array in a function
         // Normalize method name to lowercase for key/helper name consistency
         const methodLc = method.toLowerCase() as string;
         // every callback but reduce's may take the index as a second parameter (ld75); this
@@ -15462,18 +15639,18 @@ ${prefixed}
         if (methodLc !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key); // sw89: reduce1_T
         if (methodLc === "find") this.needsNullableResultFlag = true; // sw90
         if (methodLc === "foreach") {
-          return `(call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx}))`;
+          return `(call $__dynarr_${key} ${arrWat} (i32.const ${fnIdx}))`;
         }
         if (methodLc === "reduce") {
           this.getOrCreateFuncType([elemType, elemType], elemType);
           if (!args[1]?.trim()) { // sw89: element 0 starts the accumulator
             this.dynArrHelpers.add(`reduce1_${elemType}`);
-            return `(drop (call $__dynarr_reduce1_${elemType} (local.get $${arrName}) (i32.const ${fnIdx})))`;
+            return `(drop (call $__dynarr_reduce1_${elemType} ${arrWat} (i32.const ${fnIdx})))`;
           }
           const initWat = this.emitExpr(args[1].trim(), locals, elemType);
-          return `(drop (call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx}) ${initWat}))`;
+          return `(drop (call $__dynarr_${key} ${arrWat} (i32.const ${fnIdx}) ${initWat}))`;
         }
-        return `(drop (call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx})))`;
+        return `(drop (call $__dynarr_${key} ${arrWat} (i32.const ${fnIdx})))`;
       }
     }
 
@@ -16404,6 +16581,12 @@ ${prefixed}
           this.diagnostics.length = mark;
           return undefined;
         }
+        // A call through a function variable is typed by its table type, which inferExprType does not
+        // know: an f64 `g(2.5, 4)` went to the i32 printer (ld98, found with ld78, 2026-10-22).
+        if (wat.trimStart().startsWith("(call_indirect")) {
+          const have = this.watResultType(wat, l);
+          if (have === "f64" || have === "i64") return { wat, type: have };
+        }
         return { wat, type: bt };
       });
       setStringExprResolver((tok, locs) => {
@@ -16894,6 +17077,12 @@ ${prefixed}
         ) {
           this.diagnostics.length = mark;
           return undefined;
+        }
+        // A call through a function variable is typed by its table type, which inferExprType does not
+        // know: an f64 `g(2.5, 4)` went to the i32 printer (ld98, found with ld78, 2026-10-22).
+        if (wat.trimStart().startsWith("(call_indirect")) {
+          const have = this.watResultType(wat, l);
+          if (have === "f64" || have === "i64") return { wat, type: have };
         }
         return { wat, type: bt };
       });
@@ -17815,8 +18004,9 @@ ${prefixed}
           const arrInfo = this.arrayVars.get(arrName);
           const elemType: WatType = arrInfo?.elemType ?? "i32";
 
-          // Phase 27: string[] (from split) — 8-byte elements, emit ptr+len local sets
-          if (arrInfo?.isStringArr) {
+          // Phase 27: string[] (from split) — 8-byte elements, emit ptr+len local sets. A string-array
+          // LITERAL has elemType "string" without isStringArr (ld93, 2026-10-22).
+          if (arrInfo?.isStringArr || arrInfo?.elemType === "string") {
             const lbl2 = this.pendingLabel ?? String(this.loopCounter++);
             this.pendingLabel = null;
             const brk2 = `$break_${lbl2}`;
@@ -22821,7 +23011,7 @@ ${sum}
         const foArrName = forOfPre[2];
         const foArrInfo = this.arrayVars.get(foArrName);
         const foElemType: WatType = foArrInfo?.elemType ?? "i32";
-        if (foArrInfo?.isStringArr) {
+        if (foArrInfo?.isStringArr || foArrInfo?.elemType === "string") { // (ld93, see _start)
           // Phase 27: string[] — loop variable is a string (needs _ptr and _len locals)
           if (!locals.has(foItemName)) {
             declaredLocals.push([`${foItemName}_ptr`, "i32"], [`${foItemName}_len`, "i32"]);
@@ -23123,9 +23313,9 @@ ${sum}
       // ternary's branch $__obj_ret, and a string push in a one-line loop $__str_push_*; the
       // pre-scan knows only `(` / `,` before `[`, a line starting `return [`, and a push that
       // starts its line (ld09, sw30, ld44, 2026-10-15).
-      // (and $__destr_src, a destructured call's result, ld76)
+      // (and $__destr_src, a destructured call's result, ld76; $__chain_arr, a chained receiver, ld78)
       ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len", "__destr_src",
-        "__splice_s", "__splice_rm"].filter((t) =>
+        "__splice_s", "__splice_rm", "__chain_arr"].filter((t) =>
         new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)
       ).map((t) => `    (local $${t} i32)`),
     ].filter((d) => d !== "").join("\n");
@@ -24056,6 +24246,26 @@ ${sum}
     // parseClasses (needs classDefs) and BEFORE parseFunctions/parseTopLevel collect bodies.
     this.expandClassInstanceArrayLiterals();
     this.parseNamedFuncTypeAliases(); // Phase 5g: must precede parseFunctions so parseParams can resolve aliases
+    // A LOCAL declared with a function-type alias, `const f: Op = ops[i]`, is the inline form
+    // `const f: (a: f64, b: f64) => f64 = …` that both pre-scans and the emitter know; only a
+    // parameter resolved the alias, so a call through it was "Unknown function 'f'" (ld78, 2026-10-22).
+    {
+      const aliasText = new Map<string, string>();
+      for (const m of this.src.matchAll(/type\s+(\w+)\s*=\s*(\([^)]*\)\s*=>\s*\w+)/g)) aliasText.set(m[1], m[2]);
+      if (aliasText.size > 0) {
+        // …and an empty array of them, `const fns: Fn[] = []`, is Phase 44's `Array<(…) => T> = []`
+        this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
+          code.replace(
+            /\b(const|let|var)(\s+\w+\s*):\s*(\w+)(?=\s*[=;\n])/g,
+            (whole, kw: string, name: string, t: string) => aliasText.has(t) ? `${kw}${name}: ${aliasText.get(t)}` : whole,
+          ).replace(
+            /\b(const|let|var)(\s+\w+\s*):\s*(\w+)\[\](?=\s*=\s*\[\s*\])/g,
+            (whole, kw: string, name: string, t: string) =>
+              aliasText.has(t) ? `${kw}${name}: Array<${aliasText.get(t)}>` : whole,
+          )
+        );
+      }
+    }
     // Phase 18 fix: replace Array.from({ length: N }, () => []) with __arr_from_2d__(N)
     // Must run BEFORE parseFunctions() so that collected bodyLines don't still contain
     // () => [] — liftInlineArrows() would otherwise lift it into a module-level $__anon_N
@@ -24079,6 +24289,7 @@ ${sum}
     this.detectMutableClosureCaptures();
     this.liftInlineArrows();
     this.parseTopLevel();
+    this.startBodyLines = joinMultiLineArrowArgs(this.startBodyLines); // ld91: before the lifting
     this.liftStartBodyArrows(); // Phase 44: second pass for startBodyLines with synthetic _start context
     this.joinMultilineArrayLiterals();
     // Block scoping (sw104, sw105): a block's `const x` that shadows an enclosing `x` gets its own
@@ -24791,7 +25002,9 @@ ${sum}
           const foArrName2 = forOfPre2[2];
           const foArrInfo2 = this.arrayVars.get(foArrName2);
           const foElemType2: WatType = foArrInfo2?.elemType ?? "i32";
-          if (foArrInfo2?.isStringArr) {
+          // a string-array LITERAL carries elemType "string" without isStringArr: its loop variable
+          // was an i32, so `$s_ptr` was never declared (ld93, 2026-10-22)
+          if (foArrInfo2?.isStringArr || foArrInfo2?.elemType === "string") {
             // Phase 27: string[] — loop variable is a string (needs _ptr and _len locals)
             if (!startLocals.has(foItemName2)) {
               startDeclaredLocals.push([`${foItemName2}_ptr`, "i32"], [
@@ -24990,7 +25203,7 @@ ${sum}
       }
       // an array literal built inline, `f([1, 2])`, a string push in a one-line loop (sw30, ld44;
       // see emitFunction)
-      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__destr_src", "__splice_s", "__splice_rm"]) {
+      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__destr_src", "__splice_s", "__splice_rm", "__chain_arr"]) {
         if (new RegExp(`\\$${t}\\b`).test(bodyWat) && !declMap.has(t)) declMap.set(t, "i32");
       }
       // console.log's argument temporaries (sw68)

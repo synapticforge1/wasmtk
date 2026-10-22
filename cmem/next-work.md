@@ -37,8 +37,10 @@ the workspace pulls it on its sweep.
 > `5f_IncrementsAndCompoundForms`, `5f_CompoundIndexSideEffectRefused`; group 3 (strings, tuples,
 > objects: ld76, ld77, ld80) DONE, `28_StringsTuplesAndObjects`; group 4 (module globals: ld41,
 > ld42) DONE, `63_ModuleGlobals2DAndBoolean`, found ld94 (`string[][]`, refused everywhere).
-> Next: callbacks / loops (ld78's HOF forms, ld91–ld93), classes (ld74, ld79), struct-array
-> printing (ld45), ld94. Open: loud 8 compiler + 9 tool.
+> Group 5 (callbacks / loops: ld78's last forms, ld91–ld93) DONE, `5h_CallbacksChainsAndLoops`;
+> found and fixed ld97–ld99, found ld95 (a literal array of functions) and ld96 (a capturing
+> array-method callback), both open and refused with a message. Next: classes (ld74, ld79),
+> struct-array printing (ld45), then ld94–ld96. Open: loud 6 compiler + 9 tool.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule

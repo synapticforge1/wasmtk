@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 139 | 0 | 27 |
-| LOUD | 8 | 93 | 9 | 10 |
+| LOUD | 6 | 100 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud refusals, group 5 (callbacks and loops) FIXED 2026-10-22:** ld78 (its last two forms), ld91,
+ld92, ld93; found and fixed ld97, ld98, ld99; found ld95, ld96 (open); open loud 6 compiler + 9
+tool; test `5h_CallbacksChainsAndLoops`.
 **Loud refusals, group 4 (module globals) FIXED 2026-10-22:** ld41, ld42; found ld94 (`string[][]`
 refused everywhere, open); open loud 8 compiler + 9 tool; test `63_ModuleGlobals2DAndBoolean`.
 **Loud refusals, group 3 (strings, tuples, objects) FIXED 2026-10-22:** ld76, ld77, ld80; open loud
@@ -402,11 +405,17 @@ expression position (`"abc" > "ab"`: a literal LEFT side compares as a string; n
 ternary: emitStringAssign split at the LAST `?`, now splitTernaryTop; object with a string and a
 function field: the lifting guard refused every arrow after a `:` on a declaration line, now only
 the annotation's own colon, and a declared literal of an interface with function fields builds
-closure factories as a returned one does, dispatched through `interfaceOf`); ld78 ~~a default parameter using an earlier one~~ (FIXED 2026-10-22, `bindDefaultParam`: the
+closure factories as a returned one does, dispatched through `interfaceOf`); ~~ld78~~ FIXED 2026-10-22 ~~a default parameter using an earlier one~~ (FIXED 2026-10-22, `bindDefaultParam`: the
 earlier arguments substituted at the call site, a side-effecting one refused), ~~`for (let i = 0, j =
 10; …)`~~ (FIXED 2026-10-22: `splitForInit` in both pre-scans and all three `for` emitters, a comma
-list of updates in `emitUpdate`, each declarator counter-checked), still OPEN: chained
-`filter().map().reduce()`, a function array called through a local; ld79 `for…of` over class /
+list of updates in `emitUpdate`, each declarator counter-checked), ~~chained
+`filter().map().reduce()`~~ (FIXED 2026-10-22: a non-chain method on a chained receiver evaluates
+it once into `$__chain_arr`, registered as a dynamic array of the chain's type, and goes through
+the one-array path; reduce, find, at, indexOf, lastIndexOf, includes, every, some, findIndex),
+~~a function array called through a local~~ (FIXED 2026-10-22: the top-level arrow pass stripped
+the annotation of `const f: () => i32 = fns[i]`, now only of an arrow initialiser; a
+function-type alias on a local (`const f: Fn`) and an empty alias array (`const fns: Fn[] = []`)
+expand to the inline forms in a pre-pass; a function-array element is a valid initialiser); ld79 `for…of` over class /
 struct arrays (documented limit; virtual dispatch inside it); ~~ld80~~ FIXED 2026-10-22 missing methods: `substring`
 (`$__str_substring`, clamped and swapped), `lastIndexOf` (string `$__str_lastindexof`, array
 `lastindexof_T` with `from`), `splice` as a value (the removed elements via the slice helper from
@@ -414,10 +423,29 @@ the normalised start and clamped count, a side-effecting start / count refused),
 `(e as Error).message` (a cast of a name to a capitalised type before a member access is stripped
 in a pre-pass), ~~`string[].join` into a
 declaration (README says assignable)~~ (done 2026-10-19 with sw76).
-Found 2026-10-20 (all the same on main): ld91 a MULTI-LINE arrow callback at top level,
-`xs.forEach((x) => {` … `});`, is "Unsupported statement: });"; ld92 an expression-bodied arrow
-whose body is `console.log(…)` is "Unsupported expression"; ld93 `for (const s of xs)` over a
-`string[]` at top level leaves `$s_ptr` unresolved (an IR error).
+Found 2026-10-20 (all the same on main): ~~ld91~~ FIXED 2026-10-22 a MULTI-LINE arrow callback at top level,
+`xs.forEach((x) => {` … `});`, is "Unsupported statement: });" (`joinMultiLineArrowArgs` joins a
+block-bodied arrow argument into one line, in function bodies and at top level, adding the `;` a
+body line lacks); ~~ld92~~ FIXED 2026-10-22 an expression-bodied arrow
+whose body is `console.log(…)` is "Unsupported expression" (an annotated `: void`, or a `console.*`
+body, is no result to infer); ~~ld93~~ FIXED 2026-10-22 `for (const s of xs)` over a
+`string[]` at top level leaves `$s_ptr` unresolved (an IR error) (a string-array LITERAL has
+`elemType: "string"` without `isStringArr`; the `for…of` emitter and both pre-scans take either).
+Found and FIXED with ld78, 2026-10-22 (all the same on main): ~~ld97~~ an untyped callback over an
+`f64[]` took i32 parameters, "function signature mismatch" at run time (the lifter reads the
+receiver's declared element type, a chain's from its base); ~~ld98~~ an f64 call through a
+function variable in console.log was typed i32, an invalid module (`watResultType` reads a
+`call_indirect`'s table type, and both console fallback resolvers use it); ~~ld99~~ array methods on
+a numeric array PARAMETER (`v.reduce(…)`, `v.forEach(…)`) were refused (a parameter is not
+dynamic so that a push cannot move it under the caller; the non-growing methods accept it).
+Found 2026-10-22 (all the same on main), OPEN: ld95 a LITERAL array of functions,
+`const ops: Op[] = [add, mul]`, is not a function array (`const f: Op = ops[i]` is "Unsupported
+function-typed initialiser", `console.log(ops[0](1, 2))` a console refusal; `Array<Op> = []` and
+`push` work); ld96 an array-method callback that CAPTURES a local (`v.forEach((x) => { n += x; })`
+in a function, or a top-level `let` the lifter treats as captured) was an invalid module, now
+refused with a message (the helpers call a bare table index; a closure needs its environment).
+A `string[]` callback (`names.forEach((s) => …)`) is refused likewise (no helper passes a
+(ptr, len) element; it was refused before as well).
 
 **Loud, tools** (`round2/tools/`): ld81 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
 to 131072 in a 1-page bundle: out of bounds); ld82 `bindgen` host imports with a camelCase method
