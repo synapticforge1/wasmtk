@@ -25898,8 +25898,9 @@ export async function compileWasiTs(
       console.log(`   Merged: ${wasmImports.map((e) => e.prefix).join(", ")}`);
     }
   } else {
-    console.error(`❌ wasic: ${result.error}`);
-    console.error(`   Inspect generated WAT at: ${watPath}`);
+    // The caller prints the error (once): printed here too, every CLI failure appeared twice, and
+    // `dync` printed it a third way (ld89, 2026-10-22). The WAT's path rides in the message.
+    return { ...result, error: `${result.error}\n   Inspect generated WAT at: ${watPath}` };
   }
   return result;
 }
@@ -26049,8 +26050,8 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
       console.log(`   Merged: ${wasmImports.map((e) => e.prefix).join(", ")}`);
     }
   } else {
-    console.error(`❌ wasic (library): ${result.error}`);
-    console.error(`   Inspect generated WAT at: ${watPath}`);
+    // printed once, by the caller (ld89; see compileWasiTs)
+    return { ...result, error: `${result.error}\n   Inspect generated WAT at: ${watPath}` };
   }
   return result;
 }

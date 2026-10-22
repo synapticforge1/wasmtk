@@ -73,19 +73,23 @@ dynRunB64(__dyn_b64, __dyn_env);
   // irrelevant — write it alongside the output, compile, then remove the scaffold.
   const driverPath = `${srcDir}/${name}.__dync.ts`;
   await rt.writeTextFile(driverPath, driver);
+  let failed = false;
   try {
     // A dync module is a whole-program WASI command with no exports — its WIT would be an empty
     // world, so skip generating it (emitWit: false) to save a step.
     const result = await compileWasiTs(driverPath, wasmOut, { emitWit: false });
     if (!result.success) {
       if (result.error) console.error(`❌ dync: ${result.error}`);
-      rt.exit(1);
-      return;
+      failed = true;
+    } else {
+      console.log(`✅ dync (own dynamic runtime): ${wasmOut}`);
     }
-    console.log(`✅ dync (own dynamic runtime): ${wasmOut}`);
   } finally {
     try {
       await rt.remove(driverPath);
     } catch { /* best-effort scaffold cleanup */ }
   }
+  // Exit AFTER the cleanup: an exit inside the try never reached `finally`, so a failed compile left
+  // `<name>.__dync.ts` beside the source (ld89, 2026-10-22).
+  if (failed) rt.exit(1);
 }
