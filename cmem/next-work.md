@@ -49,9 +49,9 @@ the workspace pulls it on its sweep.
 > now refused, as the array is. ld45 is the object writer (util.inspect's `{ k: v }` and its line
 > breaking), a feature, NOT started. The loud compiler groups are done; left: ld45, ld94–ld96,
 > ld100 (features / gaps, each refused with a message), then the 9 tool rows. Tool group 1
-> (ld89 `dync`, ld90 CLI flags) DONE; next ld87 (`mod` i64), ld85 (same-basename imports), ld84
-> (bundler exports), ld83 (deno binding), ld82 (bindgen camelCase), ld81 (wasmbundle globals).
-> Open: loud 5 compiler + 7 tool.
+> (ld89 `dync`, ld90 CLI flags) DONE; group 2 (ld84 bundler exports, ld85 same-basename imports,
+> ld87 `mod` i64) DONE; next ld83 (deno binding), ld82 (bindgen camelCase), ld81 (wasmbundle
+> globals). Open: loud 5 compiler + 4 tool.
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule

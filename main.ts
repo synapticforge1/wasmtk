@@ -111,6 +111,28 @@ async function main(): Promise<void> {
     ],
   });
 
+  // The positional arguments AS TYPED: parseArgs turns a numeric one into a Number, so
+  // `mod lib.wasm add64 9007199254740993 1` passed 9007199254740992 (ld87, 2026-10-22). A token
+  // starting with `-` that is not a number is a flag; a string flag without `=` takes the next one.
+  {
+    const stringFlags = new Set(["name", "n", "o", "on-conflict", "alias", "any-policy", "runtime", "lang", "go-runtime", "go-target"]);
+    const raw: string[] = [];
+    for (let i = 0; i < Deno.args.length; i++) {
+      const t = Deno.args[i];
+      if (t === "--") {
+        raw.push(...Deno.args.slice(i + 1));
+        break;
+      }
+      if (t.startsWith("-") && isNaN(Number(t))) {
+        const key = t.replace(/^--?/, "");
+        if (!key.includes("=") && stringFlags.has(key)) i++;
+        continue;
+      }
+      raw.push(t);
+    }
+    if (raw.length === args._.length) args._ = raw;
+  }
+
   // A flag with a fixed set of values: anything else was silently its default (`--runtime=nodee`
   // generated a Deno binding; ld90, 2026-10-22). The `--go-*` flags are read case-insensitively.
   const FLAG_CHOICES: Record<string, string[]> = {
