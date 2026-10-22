@@ -33,15 +33,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const repo = process.cwd();
-// Asynchronous: a suite runs for minutes and prints megabytes.
+// Asynchronous: a suite runs for minutes and prints megabytes. stdout THEN stderr, not interleaved:
+// the report row takes the last matching lines, so the order is part of the output.
 const run = (cmd: string, args: string[], cwd: string) =>
   new Promise<{ code: number; out: string }>((resolve) => {
     const p = spawn(cmd, args, { cwd });
-    let out = "";
+    let out = "", err = "";
     p.stdout.on("data", (d) => (out += d));
-    p.stderr.on("data", (d) => (out += d));
-    p.on("error", (e) => resolve({ code: 1, out: out + String(e) }));
-    p.on("close", (code) => resolve({ code: code ?? 1, out }));
+    p.stderr.on("data", (d) => (err += d));
+    p.on("error", (e) => resolve({ code: 1, out: out + err + String(e) }));
+    p.on("close", (code) => resolve({ code: code ?? 1, out: out + err }));
   });
 const git = (args: string[], cwd = repo) => run("git", args, cwd);
 
