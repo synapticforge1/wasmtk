@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 2 | 140 | 0 | 27 |
+| SILENT-WRONG | 2 | 141 | 0 | 27 |
 | LOUD | 5 | 102 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,6 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**sw127 FIXED (refused) 2026-10-22**, found looking at ld45: `console.log(p)` of a whole struct or
+class instance printed its address; refused now, ld45 (the object writer) stays open; test
+`7i_ConsoleWholeStructRefused` (expect-fail).
 **Loud refusals, group 6 (classes) FIXED 2026-10-22:** ld74 (but generic classes, now ld100, open),
 ld79; found and fixed **sw126** (silent: a base method calling an overridden one through `this`,
 or a call on a base-typed parameter, ran the base's version); open loud 5 compiler + 9 tool; test
@@ -265,7 +268,8 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~ld43~~ | ✅ FIXED 2026-10-22: emitExprCore's `.length` of a string-valued receiver unwraps parentheses and builds a concatenation into the `$__str_op` pair (emitStringAssign); it also takes a string FIELD of an element (ld70) and stays out of a sum (`a.length + t.length`) and of a plain element read (`arr[j].length`, its direct load). `isStringExpr` now knows `L + R` with a string on either side (the last additive operator being that `+`, nothing looser at top level): `(s + s).length` was refused. Test `4m_ExpressionGaps`. Was (found with sw26, 2026-10-15): `.length` of a parenthesised string expression in console.log, `("pre" + s).length`, is refused | console_log |
 | ~~sw74~~ | ✅ FIXED 2026-10-15 (found with ld37; the same on main): a whole STRUCT array in console.log printed its element POINTERS, `[ 260, 264 ]` for `[ { x: 1 }, { x: 2 } ]`: the refusal list missed `structTypeName`, and the elements are i32. Refused now (ld45 is the printing) | console_log |
 | ~~ld44~~ | ✅ FIXED 2026-10-15 (found with ld37; the same on main): a string `push` with an expression in a ONE-LINE loop at top level, `for (…) grown.push("w" + i)`, used an undeclared `$__str_push_ptr` (the pre-scan wants the push at the start of its line); declared after emission now, as `$__arr_tmp`. Test `7h_ConsoleWholeArrays` | wasic temps |
-| ld45 | OPEN (2026-10-15): printing a whole struct array, `console.log(ps)` (Deno `[ { x: 1 }, { x: 2 } ]`), is refused; needs an object writer (util.inspect's `{ k: v }`, its own line-breaking) | console array writer |
+| ld45 | OPEN (2026-10-15): printing a whole struct array, `console.log(ps)` (Deno `[ { x: 1 }, { x: 2 } ]`), is refused; needs an object writer (util.inspect's `{ k: v }`, its own line-breaking). 2026-10-22: a single struct or class instance too (it printed its address: sw127, now refused, `refuseWholeObjectArgs`) | console array writer |
+| ~~sw127~~ | ✅ FIXED (refused) 2026-10-22 (found with ld45; the same on main): `console.log(p)` of a whole struct printed its ADDRESS, `260` for `{ x: 1, y: 2.5 }`. wasic's console handlers refuse a bare struct / class instance argument before console_log runs (no new console_log export); printing it is ld45. Test `7i_ConsoleWholeStructRefused` (expect-fail) | wasic console |
 | ld36 | FIXED 2026-10-13 with D3 (a documented gap, dynrt-design.md 3.1, never a row until D3 made it the only way to unbox): a cast operand in a comparison, `(x as f64) === 13`, compared as `i32.eq` over an f64, an invalid module. The binary-op loop now types an operand written `(x as T)` / `x as T` as T. `dynrt_any_bundle` checks 13 such comparisons | wasic binary-op operand typing |
 | ld35 | FIXED 2026-10-13 with D3 (found building it; the same on main): in a `console.log` argument, a call to a user function with an `i32` parameter passed an f64 argument RAW (`console.log(h(f))`), an invalid module ("call[0] expected type i32, found global.get of type f64"); outside the console it was truncated. Both paths now refuse it (D3: a float passed to an integer parameter; console `intArgWat`). typed_decl asserts it | console_log call arguments |
 | ld30 | FIXED 2026-10-13 (wasMath L4: bigint `**` is wasMath's i64 power by squaring, `$__i64_pow`, wrapped to 64 bits like every bigint here; a negative exponent traps where JavaScript throws; inferExprType now types a bigint expression led by a bigint GLOBAL or holding a bigint literal as i64, which the console fallback needed). Was OPEN (bigint probe, 2026-10-09): bigint `**` is unsupported (`cannot emit the expression 'a ** 3n' as i64`). Repro `ld30_bigint_exponent_unsupported.ts` | wasic i64 operators |
