@@ -28,6 +28,7 @@
  * root (deno task does this automatically).
  */
 
+import { readFile, writeFile } from "node:fs/promises";
 import {
   diffSurfaces,
   generateSurface,
@@ -39,12 +40,12 @@ import {
   surfaceAtLastTag,
 } from "./api-surface.ts";
 
-const root = Deno.cwd();
+const root = process.cwd();
 const denoJsonPath = `${root}/deno.json`;
 
 const KINDS = ["patch", "minor", "major"] as const;
 
-const arg = Deno.args[0]?.toLowerCase();
+const arg = process.argv[2]?.toLowerCase();
 if (!arg || !(KINDS as readonly string[]).includes(arg)) {
   console.error(
     `❌ bump: ${arg ? `unknown release kind "${arg}"` : "no release kind given"} — use one of:\n` +
@@ -52,7 +53,7 @@ if (!arg || !(KINDS as readonly string[]).includes(arg)) {
       `   minor   new capability, backward compatible\n` +
       `   major   anything backward-incompatible (and add a README Breaking Changes row)`,
   );
-  Deno.exit(1);
+  process.exit(1);
 }
 const kind = arg as Kind;
 
@@ -60,10 +61,10 @@ const kind = arg as Kind;
 const current = await generateSurface(root);
 let committed = "";
 try {
-  committed = (await Deno.readTextFile(`${root}/api-surface.json`)).replace(/\r\n/g, "\n");
+  committed = (await readFile(`${root}/api-surface.json`, "utf8")).replace(/\r\n/g, "\n");
 } catch {
   console.error("❌ bump: api-surface.json is missing. Run `deno task api-surface` and commit it.");
-  Deno.exit(1);
+  process.exit(1);
 }
 if (committed !== serialize(current)) {
   console.error("❌ bump: api-surface.json does not match the code:");
@@ -71,7 +72,7 @@ if (committed !== serialize(current)) {
   console.error(
     "   Re-baseline in its OWN commit first (`deno task api-surface`), stating the reason (Rule 5).",
   );
-  Deno.exit(1);
+  process.exit(1);
 }
 const { tag, surface: released, source } = await surfaceAtLastTag();
 const floor = await diffSurfaces(released, current, await loadReviews(root));
@@ -83,14 +84,14 @@ if (KIND_RANK[kind] < KIND_RANK[floor.kind]) {
         floor.kind === "major" ? " and add a README Breaking Changes row" : ""
       }.`,
   );
-  Deno.exit(1);
+  process.exit(1);
 }
 
-const text = await Deno.readTextFile(denoJsonPath);
+const text = await readFile(denoJsonPath, "utf8");
 const m = text.match(/("version"\s*:\s*)"(\d+)\.(\d+)\.(\d+)"/);
 if (!m) {
   console.error('❌ bump: could not find a plain "version": "X.Y.Z" field in deno.json');
-  Deno.exit(1);
+  process.exit(1);
 }
 
 let [major, minor, patch] = [Number(m[2]), Number(m[3]), Number(m[4])];
@@ -111,7 +112,7 @@ const to = `${major}.${minor}.${patch}`;
 
 // Targeted replace so the rest of deno.json's formatting is untouched.
 const updated = text.replace(/("version"\s*:\s*)"\d+\.\d+\.\d+"/, `$1"${to}"`);
-await Deno.writeTextFile(denoJsonPath, updated);
+await writeFile(denoJsonPath, updated);
 console.log(`✅ deno.json     → ${to}  (${kind} bump from ${from})`);
 
 // Propagate the freshly-written version to package.json + src/utils.ts.

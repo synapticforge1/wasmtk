@@ -3,26 +3,27 @@
  *   - package.json  (version + name fields)
  *   - src/utils.ts  (VERSION constant)
  *
- * Run via:  deno task update-version
+ * Run via:  deno task update-version   (runs `bun scripts/sync-version.ts`)
  * Must be invoked from the project root (deno task does this automatically).
  */
+import { readFile, writeFile } from "node:fs/promises";
 
-const root = Deno.cwd();
+const root = process.cwd();
 
-const denoJson = JSON.parse(await Deno.readTextFile(`${root}/deno.json`));
+const denoJson = JSON.parse(await readFile(`${root}/deno.json`, "utf8"));
 const { version, name } = denoJson as { version: string; name: string };
 
 // ── package.json ──────────────────────────────────────────────────────────────
 const pkgPath = `${root}/package.json`;
-const pkg = JSON.parse(await Deno.readTextFile(pkgPath));
+const pkg = JSON.parse(await readFile(pkgPath, "utf8"));
 pkg.name = name;
 pkg.version = version;
-await Deno.writeTextFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 console.log(`✅ package.json  → ${version}`);
 
 // ── src/utils.ts ──────────────────────────────────────────────────────────────
 const utilsPath = `${root}/src/utils.ts`;
-const utils = await Deno.readTextFile(utilsPath);
+const utils = await readFile(utilsPath, "utf8");
 const updated = utils.replace(
   /(export const VERSION\s*=\s*)"[^"]*"/,
   `$1"${version}"`,
@@ -35,6 +36,6 @@ if (updated === utils) {
     console.warn("⚠️  src/utils.ts VERSION constant not found — skipped");
   }
 } else {
-  await Deno.writeTextFile(utilsPath, updated);
+  await writeFile(utilsPath, updated);
   console.log(`✅ src/utils.ts  → ${version}`);
 }

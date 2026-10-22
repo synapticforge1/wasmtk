@@ -1,6 +1,11 @@
 // Every JavaScript Math member, compiled by wasic and run, against Deno on a battery of inputs.
-// One program per member, so an unsupported member fails alone. Usage: deno run -A scan.ts <dir>
-const dir = Deno.args[0];
+// One program per member, so an unsupported member fails alone.
+// Usage: bun scripts/math/scan_math.ts <dir>
+// The reference stays `deno run`: a V8 oracle (JavaScriptCore's Math differs; deno-exit-plan M4).
+import { spawnSync } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+
+const dir = process.argv[2]!;
 const VALS = [
   "0", "-0", "0.5", "-0.5", "1", "-1", "1.5", "-1.5", "2", "2.5", "-2.5", "3", "3.7", "-3.7",
   "10", "100", "0.1", "1e-300", "5e-324", "1e300", "1e10", "2147483647", "-2147483648",
@@ -20,9 +25,11 @@ const UNARY = [
 const BINARY = ["atan2", "pow", "imul", "max", "min", "hypot"];
 const CONSTS = ["E", "LN10", "LN2", "LOG10E", "LOG2E", "PI", "SQRT1_2", "SQRT2"];
 
+// deno-lint-ignore require-await
 const run = async (cmd: string, args: string[]) => {
-  const o = await new Deno.Command(cmd, { args, cwd: dir, stdout: "piped", stderr: "piped" }).output();
-  return { code: o.code, out: new TextDecoder().decode(o.stdout), err: new TextDecoder().decode(o.stderr) };
+  // `shell` on Windows: the installed `wasmtk` is a .cmd shim, which only a shell can start.
+  const o = spawnSync(cmd, args, { cwd: dir, encoding: "utf8", shell: process.platform === "win32" });
+  return { code: o.status ?? 1, out: o.stdout ?? "", err: (o.stderr ?? "") + (o.error ? String(o.error) : "") };
 };
 
 const progs: Array<[string, string[]]> = [];
@@ -46,7 +53,7 @@ for (const [name, exprs] of progs) {
     lines.push(`console.log("${i}", ${m[1]}(${args.map((_, k) => `a${i}_${k}`).join(", ")}));`);
   });
   const file = `m_${name}.ts`;
-  await Deno.writeTextFile(`${dir}/${file}`, lines.join("\n") + "\n");
+  await writeFile(`${dir}/${file}`, lines.join("\n") + "\n");
   const nat = await run("deno", ["run", file]);
   const c = await run("wasmtk", ["wasic", file]);
   if (c.code !== 0) {

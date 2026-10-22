@@ -1,5 +1,9 @@
 // The reference against Deno.inspect on many generated arrays (sw67, 2026-10-13: 444 arrays, 0
 // differ). Run: deno run scripts/console/check_inspect_array_ref.ts
+// It stays on DENO (2026-10-21): Deno.inspect IS what it checks against, and there is no portable
+// stand-in. Measured on the same 444 arrays: node:util's inspect has the layout but quotes strings
+// with ' (61 differ), Bun.inspect does not group columns at all (334 of 441 differ). Revisit with
+// the Deno-exit plan's M3 (wasic keeps the Deno / Node layout).
 import { type Elem, formatArray } from "./inspect_array_ref.ts";
 let seed = 42;
 const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;

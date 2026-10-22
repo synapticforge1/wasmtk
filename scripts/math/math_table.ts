@@ -1,7 +1,12 @@
-// Every Math member of the running Deno, on chosen test inputs: Deno's result vs wasic's, one
+// Every Math member of Deno, on chosen test inputs: Deno's result vs wasic's, one
 // program per (member, input) so a crash costs only its own row. Prints a markdown table.
-// Usage: deno run -A scripts/math/math_table.ts <scratch dir>
-const dir = Deno.args[0];
+// Usage: bun scripts/math/math_table.ts <scratch dir>
+// The reference column stays `deno run`: it is a V8 oracle, and JavaScriptCore's Math differs
+// from V8's (cmem/deno-exit-plan.md M4); it moves with the engine oracle (P6).
+import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+
+const dir = process.argv[2]!;
 // member → inputs; each input is a list of argument expressions (f64 values).
 const CASES: Record<string, string[][]> = {
   abs: [["-2.5"], ["-0"], ["NaN"], ["-2147483648"]],
@@ -44,10 +49,17 @@ const CASES: Record<string, string[][]> = {
 };
 const CONSTS = ["E", "LN10", "LN2", "LOG10E", "LOG2E", "PI", "SQRT1_2", "SQRT2"];
 
-const run = async (cmd: string, args: string[]) => {
-  const o = await new Deno.Command(cmd, { args, cwd: dir, stdout: "piped", stderr: "piped" }).output();
-  return { code: o.code, out: new TextDecoder().decode(o.stdout).trim(), err: new TextDecoder().decode(o.stderr) };
-};
+// Asynchronous, so the batches of eight below really run in parallel.
+const run = (cmd: string, args: string[]) =>
+  new Promise<{ code: number; out: string; err: string }>((resolve) => {
+    // `shell` on Windows: the installed `wasmtk` is a .cmd shim, which only a shell can start.
+    const p = spawn(cmd, args, { cwd: dir, shell: process.platform === "win32" });
+    let out = "", err = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.stderr.on("data", (d) => (err += d));
+    p.on("error", (e) => resolve({ code: 1, out: out.trim(), err: err + String(e) }));
+    p.on("close", (code) => resolve({ code: code ?? 1, out: out.trim(), err }));
+  });
 
 type Job = { label: string; file: string; src: string };
 const jobs: Job[] = [];
@@ -76,7 +88,7 @@ jobs.push({
 });
 
 const cell = async (j: Job): Promise<string> => {
-  await Deno.writeTextFile(`${dir}/${j.file}`, j.src);
+  await writeFile(`${dir}/${j.file}`, j.src);
   const nat = await run("deno", ["run", j.file]);
   const c = await run("wasmtk", ["wasic", j.file]);
   let wasm: string;

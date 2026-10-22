@@ -16,26 +16,27 @@
  *   C  against a tag on a KNOWN surface: no change → patch; an export removed → patch refused,
  *      major floor, the symbol named; an export added → minor floor
  *
- * Usage (from the repo root):  deno run -A scripts/check_compat_gate.ts
+ * Usage (from the repo root):  bun scripts/check_compat_gate.ts
  */
-const repo = Deno.cwd();
-const clone = await Deno.makeTempDir({ prefix: "wasmtk_gate_" });
-const branch = new TextDecoder().decode(
-  (await new Deno.Command("git", { args: ["rev-parse", "--abbrev-ref", "HEAD"], stdout: "piped" })
-    .output())
-    .stdout,
-).trim();
-const dec = new TextDecoder();
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const repo = process.cwd();
+const clone = await mkdtemp(join(tmpdir(), "wasmtk_gate_"));
+const branch =
+  (spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).stdout ?? "")
+    .trim();
+// deno-lint-ignore require-await
 const run = async (cmd: string, args: string[], cwd = clone) => {
-  const o = await new Deno.Command(cmd, { args, cwd, stdout: "piped", stderr: "piped" }).output();
-  return { code: o.code, out: dec.decode(o.stdout) + dec.decode(o.stderr) };
+  const o = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 1 << 30 });
+  return { code: o.status ?? 1, out: (o.stdout ?? "") + (o.stderr ?? "") };
 };
-const P = ["--allow-read", "--allow-write", "--allow-run", "--allow-env"];
-const bump = (kind?: string) =>
-  run(Deno.execPath(), ["run", ...P, "scripts/bump.ts", ...(kind ? [kind] : [])]);
-const surface = (...args: string[]) =>
-  run(Deno.execPath(), ["run", ...P, "scripts/api-surface.ts", ...args]);
-const version = async () => JSON.parse(await Deno.readTextFile(`${clone}/deno.json`)).version;
+// The scripts under test run on the same runtime as this one (Bun).
+const bump = (kind?: string) => run(process.execPath, ["scripts/bump.ts", ...(kind ? [kind] : [])]);
+const surface = (...args: string[]) => run(process.execPath, ["scripts/api-surface.ts", ...args]);
+const version = async () => JSON.parse(await readFile(`${clone}/deno.json`, "utf8")).version;
 const reset = async () => void await run("git", ["checkout", "--", "."]);
 
 let bad = 0;
@@ -86,11 +87,11 @@ await reset();
 
 // B. Rule 5: a surface change without its re-baseline commit is refused before any floor.
 const wast = `${clone}/src/wast.ts`;
-const src = await Deno.readTextFile(wast);
+const src = await readFile(wast, "utf8");
 // Un-export `isList`, and FAIL if the edit did nothing (a no-op edit passed two cases before).
 const unexported = src.replace("export const isList =", "const isList =");
 if (unexported === src) throw new Error("test edit did nothing: `export const isList =` not found");
-await Deno.writeTextFile(wast, unexported);
+await writeFile(wast, unexported);
 r = await bump("major");
 check(
   "B1 stale api-surface.json refused (even for major), nothing written",
@@ -118,7 +119,7 @@ check(
 );
 await reset();
 // Remove an export, re-baseline (as Rule 5 demands), then try a patch: refused for the right reason.
-await Deno.writeTextFile(wast, unexported);
+await writeFile(wast, unexported);
 await surface("--record");
 r = await bump("patch");
 check(
@@ -128,7 +129,7 @@ check(
 );
 await reset();
 // Add an export instead: floor MINOR; patch refused, minor allowed.
-await Deno.writeTextFile(
+await writeFile(
   wast,
   src + "\n/** Probe export for the gate test. */\nexport const gateProbe = 1;\n",
 );
@@ -162,7 +163,7 @@ const edited = src2.replace(
   "  path: string,\n  opts: WastOptions = {},\n  extra?: number,\n): Promise<WastResult> {",
 );
 if (edited === src2) throw new Error("test edit did nothing: runWast's signature text not found");
-await Deno.writeTextFile(wast, edited);
+await writeFile(wast, edited);
 await surface("--record");
 r = await surface("--floor");
 check(
@@ -173,7 +174,7 @@ check(
 );
 await reset();
 // A review cannot excuse a REMOVAL: --review on a removed export is refused.
-await Deno.writeTextFile(wast, unexported);
+await writeFile(wast, unexported);
 await surface("--record");
 r = await surface("--review", "./wast", "isList", "(whole)", "minor", "should be refused");
 check(
@@ -186,13 +187,13 @@ await reset();
 // E. The CLI surface (H6.4), against a tag on a known surface again.
 await run("git", ["tag", "v99.0.0"]);
 const mainPath = `${clone}/main.ts`;
-const mainSrc = (await Deno.readTextFile(mainPath)).replace(/\r\n/g, "\n");
+const mainSrc = (await readFile(mainPath, "utf8")).replace(/\r\n/g, "\n");
 // Remove the `--auto` boolean flag from parseArgs: a script passing `--auto` breaks → MAJOR.
 const noAuto = mainSrc.replace(`"dry-run", "auto", "verbose"`, `"dry-run", "verbose"`);
 if (noAuto === mainSrc) {
   throw new Error("test edit did nothing: the parseArgs boolean list not found");
 }
-await Deno.writeTextFile(mainPath, noAuto);
+await writeFile(mainPath, noAuto);
 await surface("--record");
 r = await surface("--floor");
 check(
@@ -207,7 +208,7 @@ const withCmd = mainSrc.replace(
   `    case "gate-probe":\n      break;\n    case "clean":`,
 );
 if (withCmd === mainSrc) throw new Error('test edit did nothing: `case "clean":` not found');
-await Deno.writeTextFile(mainPath, withCmd);
+await writeFile(mainPath, withCmd);
 await surface("--record");
 r = await surface("--floor");
 check(
@@ -223,6 +224,6 @@ function bumpOf(v: string, k: string): string {
   return k === "patch" ? `${a}.${b}.${c + 1}` : k === "minor" ? `${a}.${b + 1}.0` : `${a + 1}.0.0`;
 }
 
-await Deno.remove(clone, { recursive: true });
+await rm(clone, { recursive: true, force: true });
 console.log(bad === 0 ? "\nall gate cases pass" : `\n${bad} gate case(s) FAILED`);
-if (bad) Deno.exit(1);
+if (bad) process.exit(1);
