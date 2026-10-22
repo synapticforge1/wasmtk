@@ -6,6 +6,7 @@
  *   sw116  `mod lib.wasm f abc` turned `abc` into 0 (also the `run` library-call branch).
  *   sw117  Go `modc -o out/x.wasm` (relative) wrote beside the SOURCE, success at the path given.
  *   sw118  witgen listed `fooBar` and `foo_bar` both as `foo-bar`; `package local:2048;` unchecked.
+ *   ld87   `mod` / `run` could not call an i64 function: every argument was a Number.
  *   ld89   a failed `dync` left `<name>.__dync.ts` and printed the error twice (so did `wasic`).
  *   ld90   a bad flag value became its default; `-o` on run / info / mod was ignored; a command
  *          without its target printed help and exited 0. (Loud rows, 2026-10-22.)
@@ -88,6 +89,9 @@ const FILES: Record<string, string> = {
   // sw118: two exports that kebab to one WIT name, in a file whose name is not a WIT identifier
   "2048.wat": `(module (func $a (result i32) i32.const 1) (func $b (result i32) i32.const 2)\n` +
     `  (export "fooBar" (func $a)) (export "foo_bar" (func $b)))\n`,
+  // ld87: an i64 library function
+  "i64.wat": `(module (func $add64 (param $a i64) (param $b i64) (result i64) local.get $a local.get $b i64.add)\n` +
+    `  (export "add64" (func $add64)))\n`,
   // ld89: a dync program (its compile is made to fail by an output path that is a directory)
   "prog.js": `console.log("hello", 1 + 2);\n`,
 };
@@ -98,7 +102,7 @@ const GO_LIB = `package main\n\n//go:wasmexport add\nfunc add(a, b int32) int32 
 const dir = await Deno.makeTempDir({ prefix: "wasmtk_toolrows_" });
 try {
   for (const [f, body] of Object.entries(FILES)) await Deno.writeTextFile(join(dir, f), body);
-  for (const w of ["dual", "argc", "argv1", "inc", "2048"]) await step(["convert", `${w}.wat`], dir);
+  for (const w of ["dual", "argc", "argv1", "inc", "2048", "i64"]) await step(["convert", `${w}.wat`], dir);
 
   console.log("── a function exported under two names keeps both (sw111) ──");
   await step(["wasmbundle", "dual.wasm", "-o", "db.wasm"], dir);
@@ -140,6 +144,11 @@ try {
   await expectExit("run x.wasm -o is refused", ["run", "argc.wasm", "-o", "x.txt"], dir, 1, /writes no file/);
   await expectExit("a command without its target exits 1", ["wasic"], dir, 1, /expected a target/);
   await expectExit("--help exits 0", ["--help"], dir, 0);
+
+  console.log("── an i64 function takes BigInt arguments (ld87) ──");
+  await expectOut("mod: i64 add, beyond 2^53", ["mod", "i64.wasm", "add64", "9007199254740993", "1"], dir, "9007199254740994");
+  await expectOut("run (library call): i64 add", ["run", "i64.wasm", "add64", "2", "3"], dir, "5");
+  await expectExit("mod: a fraction for an i64 is refused", ["mod", "i64.wasm", "add64", "2.5", "1"], dir, 1, /is not an integer/);
 
   console.log("── a failed dync removes its scaffold and reports once (ld89) ──");
   await Deno.mkdir(join(dir, "adir"));

@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 141 | 0 | 27 |
-| LOUD | 5 | 102 | 7 | 12 |
+| LOUD | 5 | 102 | 4 | 15 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud tool rows, group 2 FIXED 2026-10-22:** ld84 (bundler exports), ld85 (one basename twice),
+ld87 (`mod` i64); open loud 5 compiler + 4 tool.
 **Loud tool rows, group 1 FIXED 2026-10-22:** ld89 (`dync` scaffold and doubled errors), ld90 (flag
 values, a stray `-o`, a missing target); open loud 5 compiler + 7 tool; `tests/tool_rows_tests.ts`.
 **sw127 FIXED (refused) 2026-10-22**, found looking at ld45: `console.log(p)` of a whole struct or
@@ -477,11 +479,18 @@ A `string[]` callback (`names.forEach((s) => …)`) is refused likewise (no help
 **Loud, tools** (`round2/tools/`): ld81 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
 to 131072 in a 1-page bundle: out of bounds); ld82 `bindgen` host imports with a camelCase method
 never link (`display_show_value` vs `display_showValue`); ld83 the deno binding cannot load a
-relative path (`fetch(String(source))`), and a typed-array view ignores byteOffset; ld84 the bundler
-handles neither `export class` nor `export { name }`; ld85 two imports with the same basename
-collide (`duplicate func $util_add`); ~~ld86~~ FIXED 2026-10-19 (`extractForms` skips string
+relative path (`fetch(String(source))`), and a typed-array view ignores byteOffset; ~~ld84~~ FIXED 2026-10-22 the bundler
+handles neither `export class` nor `export { name }` (`class` / `abstract class` joined the
+named-export rename, with a CAPITALISED prefix, `Shapes_Box`, since wasic reads `new X` by its
+capital; a local `export { a, b as c };` renames each declaration and maps the exported name);
+~~ld85~~ FIXED 2026-10-22 two imports with the same basename
+collide (`duplicate func $util_add`) (`uniquePrefix`: the second file named `util` gets
+`util_2`); both in `tests/merge_layout_tests.ts`; ~~ld86~~ FIXED 2026-10-19 (`extractForms` skips string
 literals; `tests/merge_layout_tests.ts`) the merge scanners count `(` `)` inside data strings;
-ld87 `mod` cannot call an i64 function; ~~ld88~~ FIXED 2026-10-19 (the owner's rule 3: `src/wast_known_unbuilt.ts` holds each vendored
+~~ld87~~ FIXED 2026-10-22 `mod` cannot call an i64 function (`exportCallArgs` reads the export's
+parameter types: an i64 takes a BigInt, a fraction for one is refused; and main.ts keeps each
+positional argument AS TYPED, since parseArgs made `9007199254740993` a Number, 2^53;
+`tests/tool_rows_tests.ts`); ~~ld88~~ FIXED 2026-10-19 (the owner's rule 3: `src/wast_known_unbuilt.ts` holds each vendored
 corpus file's unbuilt-module CEILING, 21 files / 94 modules, all engine / proposal gaps; a run
 above a ceiling, with an unlisted unbuilt file, or with 0 files exits 1 and the summary says ❌;
 `tests/wast_cli_tests.ts`) `wast` exits 0 with ✅ when modules are not built (or

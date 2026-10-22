@@ -317,14 +317,15 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
         // Reactor libraries need _initialize before any export is called (else they trap).
         const initFn = wasiInstance.exports._initialize;
         if (typeof initFn === "function") (initFn as WasmCallable)();
-        // A non-numeric argument is refused; it became 0 (sw116, 2026-10-19).
-        const bad = params.find((p) => p.trim() === "" || isNaN(Number(p)));
-        if (bad !== undefined) {
-          console.error(`❌ wasmtk run: '${bad}' is not a number (arguments to ${name} are numbers)`);
+        // A non-numeric argument is refused; it became 0 (sw116, 2026-10-19). An i64 parameter
+        // takes a BigInt (ld87).
+        const conv = exportCallArgs(wasmBytes, name, params);
+        if ("error" in conv) {
+          console.error(`❌ wasmtk run: ${conv.error} (arguments to ${name} are numbers)`);
           rt.exit(1);
           return;
         }
-        const parsedArgs = params.map(Number) as (number | bigint)[];
+        const parsedArgs = conv.args;
         const res = (fn as WasmCallable)(...parsedArgs);
         if (res !== undefined) console.log(`${res}`);
         return;
@@ -460,14 +461,14 @@ export async function callExport(path: string, fnName: string, params: string[])
     }
 
     // A non-numeric argument is refused; it became 0, so `mod lib.wasm add abc 5` printed 5
-    // (sw116, 2026-10-19).
-    const bad = params.find((p) => p.trim() === "" || isNaN(Number(p)));
-    if (bad !== undefined) {
-      console.error(`❌ mod: '${bad}' is not a number (the arguments to ${fnName} are numbers)`);
+    // (sw116, 2026-10-19). An i64 parameter takes a BigInt (ld87).
+    const conv = exportCallArgs(wasmBytes, fnName, params);
+    if ("error" in conv) {
+      console.error(`❌ mod: ${conv.error} (the arguments to ${fnName} are numbers)`);
       rt.exit(1);
       return;
     }
-    const parsedArgs = params.map(Number) as (number | bigint)[];
+    const parsedArgs = conv.args;
 
     const res = (fn as WasmCallable)(...parsedArgs);
     if (res !== undefined) console.log(`${res}`);
@@ -482,6 +483,40 @@ export async function callExport(path: string, fnName: string, params: string[])
  * Displays metadata and callable exported functions for a WASM module.
  * @param path - Path to the module.
  */
+/** The command-line arguments of a call to export `name`, by its parameter types: an i64
+ *  parameter takes a BigInt (a Number was "Cannot convert 2 to a BigInt", ld87, 2026-10-22),
+ *  the others a Number. A non-numeric argument (sw116), or a non-integer for an i64, is an error
+ *  message instead. */
+function exportCallArgs(
+  wasmBytes: Uint8Array,
+  name: string,
+  params: string[],
+): { args: (number | bigint)[] } | { error: string } {
+  let types: string[] = [];
+  try {
+    const module = binaryen.readBinary(wasmBytes);
+    for (let i = 0; i < module.getNumExports(); i++) {
+      const exp = binaryen.getExportInfo(module.getExportByIndex(i));
+      if (exp.kind !== 0 || exp.name !== name) continue;
+      const info = binaryen.getFunctionInfo(module.getFunction(exp.value));
+      types = binaryen.expandType(info.params).map(getTypeName);
+    }
+    module.dispose();
+  } catch { /* unreadable here: every argument is a Number, as before */ }
+  const args: (number | bigint)[] = [];
+  for (let i = 0; i < params.length; i++) {
+    const p = params[i].trim();
+    if (p === "" || isNaN(Number(p))) return { error: `'${params[i]}' is not a number` };
+    if (types[i] === "i64") {
+      if (!/^[+-]?\d+$/.test(p)) return { error: `'${params[i]}' is not an integer (parameter ${i + 1} is i64)` };
+      args.push(BigInt(p));
+    } else {
+      args.push(Number(p));
+    }
+  }
+  return { args };
+}
+
 export async function showInfo(path: string): Promise<void> {
   try {
     const bytes = await getWasmBytes(path);

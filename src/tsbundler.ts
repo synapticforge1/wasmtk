@@ -116,6 +116,12 @@ function modulePrefix(filePath: string): string {
   return basename(filePath).replace(/\.[^/.]+$/, "").replace(/\W+/g, "_");
 }
 
+/** The prefix of an exported CLASS: capitalised (`shapes` → `Shapes`, `2d` → `M2d`), since wasic
+ *  reads `new X(…)` and a class type by a leading capital (ld84, 2026-10-22). */
+function classPrefix(prefix: string): string {
+  return /^[a-z]/.test(prefix) ? prefix[0]!.toUpperCase() + prefix.slice(1) : /^[A-Z]/.test(prefix) ? prefix : `M${prefix}`;
+}
+
 /**
  * Blank out comments and string/template literals in one left-to-right pass, so the auto-merge
  * trigger sniff (below) only ever sees real CODE. A regex approach can't do this: stripping comments
@@ -321,6 +327,17 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
   // Which file declares each top-level VALUE name left unprefixed (a file's private names, and the
   // entry's): two files declaring the same one are refused (sw112, below).
   const topLevelOwner = new Map<string, string>();
+  // The prefix each loaded file got. Two files with one basename (`a/util.ts`, `b/util.ts`) both
+  // took `util`, so their `add`s were one `util_add`: refused as a duplicate (ld85, 2026-10-22).
+  // The second gets `util_2`, the third `util_3`.
+  const prefixTaken = new Set<string>();
+  const uniquePrefix = (realPath: string): string => {
+    const base = modulePrefix(realPath);
+    let p = base;
+    for (let n = 2; prefixTaken.has(p); n++) p = `${base}_${n}`;
+    prefixTaken.add(p);
+    return p;
+  };
 
   async function load(filePath: string, isEntry: boolean): Promise<LoadResult> {
     // ── 1. Resolve canonical path ─────────────────────────────────────────
@@ -420,7 +437,7 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
     }
 
     const fileDir = dirname(realPath);
-    const prefix = modulePrefix(realPath);
+    const prefix = uniquePrefix(realPath); // each file once: `visited` returns early above
     const importedChunks: string[] = [];
 
     // Collect all rewrites needed in this file's source after processing imports
@@ -674,19 +691,42 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
         },
       );
 
-      // Named exports: `export [async] function|const|let|var|type|interface|enum Name`
+      // Named exports: `export [async] function|const|let|var|type|interface|enum|class Name`
+      // (`class` and `abstract class` were left out: the importer called `shapes_Box`, which was
+      // never declared; ld84, 2026-10-22)
       src = src.replace(
-        /^export\s+((?:async\s+)?function|const|let|var|type|interface|enum)\s+(\w+)/gm,
-        (_match, keyword, name) => {
-          const prefixed = `${prefix}_${name}`;
+        /^export\s+((?:async\s+)?function|const|let|var|type|interface|enum|(?:abstract\s+)?class)\s+(\w+)/gm,
+        (_match, keyword: string, name) => {
+          // A class keeps a capitalised name (`Shapes_Box`): wasic reads `new X(…)` and a class
+          // type by its leading capital, and `new shapes_Box(4)` was "Unsupported expression".
+          const prefixed = `${/class$/.test(keyword) ? classPrefix(prefix) : prefix}_${name}`;
           exportRenames.set(name, prefixed);
           return `${keyword} ${prefixed}`;
         },
       );
 
+      // An export LIST of this file's own names, `export { triple, LIMIT as MAX };` (no `from`):
+      // the statement goes, each declaration is renamed as an inline export is, and an importer
+      // asks for the exported (aliased) name. It was ignored (ld84).
+      const internalRenames = new Map(exportRenames);
+      src = src.replace(
+        /^export\s*\{([^}]*)\}\s*;?[ \t]*$/gm,
+        (_match, list: string) => {
+          for (const item of list.split(",").map((s) => s.trim()).filter(Boolean)) {
+            const m = item.match(/^(\w+)(?:\s+as\s+(\w+))?$/);
+            if (!m) continue;
+            const isClass = new RegExp(`^(?:abstract\\s+)?class\\s+${m[1]}\\b`, "m").test(src);
+            const prefixed = `${isClass ? classPrefix(prefix) : prefix}_${m[1]}`;
+            internalRenames.set(m[1]!, prefixed);
+            exportRenames.set(m[2] ?? m[1]!, prefixed);
+          }
+          return "";
+        },
+      );
+
       // Apply those same renames to the rest of this file (internal call sites,
       // recursive calls, field accesses on struct types, etc.)
-      src = applyRenames(src, exportRenames);
+      src = applyRenames(src, internalRenames);
     }
 
     // ── 5. Rewrite imported-symbol references in this file ────────────────
