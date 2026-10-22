@@ -6,6 +6,9 @@
  *   sw116  `mod lib.wasm f abc` turned `abc` into 0 (also the `run` library-call branch).
  *   sw117  Go `modc -o out/x.wasm` (relative) wrote beside the SOURCE, success at the path given.
  *   sw118  witgen listed `fooBar` and `foo_bar` both as `foo-bar`; `package local:2048;` unchecked.
+ *   ld89   a failed `dync` left `<name>.__dync.ts` and printed the error twice (so did `wasic`).
+ *   ld90   a bad flag value became its default; `-o` on run / info / mod was ignored; a command
+ *          without its target printed help and exited 0. (Loud rows, 2026-10-22.)
  *
  * Runs the INSTALLED wasmtk in a temp directory. sw117 needs TinyGo and is skipped (and said so)
  * without it. Usage: deno run -A tests/tool_rows_tests.ts
@@ -85,6 +88,8 @@ const FILES: Record<string, string> = {
   // sw118: two exports that kebab to one WIT name, in a file whose name is not a WIT identifier
   "2048.wat": `(module (func $a (result i32) i32.const 1) (func $b (result i32) i32.const 2)\n` +
     `  (export "fooBar" (func $a)) (export "foo_bar" (func $b)))\n`,
+  // ld89: a dync program (its compile is made to fail by an output path that is a directory)
+  "prog.js": `console.log("hello", 1 + 2);\n`,
 };
 
 const GO_LIB = `package main\n\n//go:wasmexport add\nfunc add(a, b int32) int32 {\n\treturn a + b\n}\n\n` +
@@ -117,6 +122,34 @@ try {
   check("the package name is a WIT identifier", /^package local:m2048;$/m.test(wit), wit);
   check("`foo-bar` is exported once", (wit.match(/^ {2}export foo-bar:/gm) ?? []).length === 1, wit);
   check("the colliding export is listed as skipped", /^\/\/ skipped export foo_bar: its WIT name 'foo-bar'/m.test(wit), wit);
+
+  console.log("── a bad flag value, a stray -o, a missing target exit 1 (ld90) ──");
+  for (const [flag, cmd] of [
+    ["--runtime=nodee", "bindgen"],
+    ["--any-policy=loud", "jstyper"],
+    ["--on-conflict=merge", "wasmbundle"],
+    ["--go-runtime=gccgo", "run"],
+    ["--go-target=wasi", "modc"],
+  ]) {
+    await expectExit(`${flag} is refused`, [cmd, "inc.wasm", flag], dir, 1, /is not a value it takes/);
+  }
+  await expectExit("--go-runtime is case-insensitive", ["mod", "inc.wasm", "inc", "1", "--go-runtime=STD"], dir, 0);
+  for (const cmd of ["info", "mod"]) {
+    await expectExit(`${cmd} -o is refused`, [cmd, "inc.wasm", "-o", "x.txt"], dir, 1, /writes no file/);
+  }
+  await expectExit("run x.wasm -o is refused", ["run", "argc.wasm", "-o", "x.txt"], dir, 1, /writes no file/);
+  await expectExit("a command without its target exits 1", ["wasic"], dir, 1, /expected a target/);
+  await expectExit("--help exits 0", ["--help"], dir, 0);
+
+  console.log("── a failed dync removes its scaffold and reports once (ld89) ──");
+  await Deno.mkdir(join(dir, "adir"));
+  {
+    const r = await wasmtk(["dync", "prog.js", "-o", "adir"], dir);
+    check("dync exits 1", r.code === 1, `exit ${r.code}`);
+    check("no prog.__dync.ts is left", !(await exists(join(dir, "prog.__dync.ts"))), "left behind");
+    const errs = r.out.split("\n").filter((l) => l.startsWith("❌"));
+    check("the error is printed once", errs.length === 1, errs.join(" | "));
+  }
 
   console.log("── Go: a relative -o is relative to the working directory (sw117) ──");
   const hasTinyGo = await new Deno.Command("tinygo", { args: ["version"], stdout: "null", stderr: "null" })

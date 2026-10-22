@@ -114,6 +114,11 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, loud tool rows group 1 (ld89 dync, ld90 CLI flags), gate GREEN.** tool_rows **30**
+> (+11, each failing on the old code) · wasi 491/491 · golden-WAT 548, none moved (the WAT is
+> unchanged; only who prints a failure changed) · wast 64,506 / 0 / 16 · cross-check 1152 on
+> baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface unchanged.
+
 > **2026-10-22, sw127 (a whole struct printed its address) refused, gate GREEN.** wasi **491/491**
 > (+`7i_ConsoleWholeStructRefused`, expect-fail) · golden-WAT **548**, no existing entry moved (11
 > recorded failures, the expect-fail tests, was 10) · wast 64,506 / 0 / 16 · cross-check 1152 on

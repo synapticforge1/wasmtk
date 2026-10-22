@@ -111,6 +111,31 @@ async function main(): Promise<void> {
     ],
   });
 
+  // A flag with a fixed set of values: anything else was silently its default (`--runtime=nodee`
+  // generated a Deno binding; ld90, 2026-10-22). The `--go-*` flags are read case-insensitively.
+  const FLAG_CHOICES: Record<string, string[]> = {
+    "runtime": ["deno", "node", "bun"],
+    "any-policy": ["skip", "warn", "default"],
+    "on-conflict": ["prefix", "alias", "exclude"],
+    "go-runtime": ["tinygo", "std"],
+    "go-target": ["wasm-unknown", "leaf", "reactor", "wasm"],
+  };
+  for (const [flag, choices] of Object.entries(FLAG_CHOICES)) {
+    const raw = args[flag] as string | undefined;
+    if (raw === undefined) continue;
+    const v = flag.startsWith("go-") ? raw.toLowerCase() : raw;
+    if (!choices.includes(v)) {
+      console.error(`❌ wasmtk: --${flag}=${raw} is not a value it takes; use one of: ${choices.join(", ")}`);
+      Deno.exit(1);
+    }
+  }
+
+  // `-o` / `--name` on a command that writes nothing (ld90)
+  const refuseOutPath = (cmd: string): never => {
+    console.error(`❌ wasmtk ${cmd}: -o / --name is not an option here; ${cmd} writes no file`);
+    Deno.exit(1);
+  };
+
   if (args.version) {
     console.log(`wasmtk v${VERSION}`);
     return;
@@ -188,6 +213,11 @@ Options:
       --go-target=wasm-unknown (modc)    Build an alloc-free MERGEABLE leaf library (wasmmerge-able into a wasic/bundle build)
                                          (browser/syscall/js output is not produced — use the universal wasm loader)
     `);
+    // A command without its target is a usage error, not a request for help: it exited 0 (ld90).
+    if (!args.help && command) {
+      console.error(`❌ wasmtk ${command}: expected a target file or directory`);
+      Deno.exit(1);
+    }
     return;
   }
 
@@ -387,11 +417,14 @@ Options:
           Deno.exit(1);
         }
       }
+      // -o names a BUILD output; running a module writes none, so it was ignored (ld90)
+      if (outPath !== undefined) refuseOutPath("run");
       // the arguments after the target go to the program (they were dropped: `[]`, sw115)
       await runWasi(target, args._.slice(2).map(String));
       break;
     }
     case "mod": {
+      if (outPath !== undefined) refuseOutPath("mod");
       const fn = args._[2] as string | undefined;
       if (fn) {
         await callExport(target, fn, args._.slice(3).map(String));
@@ -404,6 +437,7 @@ Options:
       break;
     }
     case "info":
+      if (outPath !== undefined) refuseOutPath("info");
       await showInfo(target);
       break;
     case "wasm2js":

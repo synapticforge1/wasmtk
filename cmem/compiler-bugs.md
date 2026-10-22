@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 141 | 0 | 27 |
-| LOUD | 5 | 102 | 9 | 10 |
+| LOUD | 5 | 102 | 7 | 12 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud tool rows, group 1 FIXED 2026-10-22:** ld89 (`dync` scaffold and doubled errors), ld90 (flag
+values, a stray `-o`, a missing target); open loud 5 compiler + 7 tool; `tests/tool_rows_tests.ts`.
 **sw127 FIXED (refused) 2026-10-22**, found looking at ld45: `console.log(p)` of a whole struct or
 class instance printed its address; refused now, ld45 (the object writer) stays open; test
 `7i_ConsoleWholeStructRefused` (expect-fail).
@@ -484,10 +486,16 @@ corpus file's unbuilt-module CEILING, 21 files / 94 modules, all engine / propos
 above a ceiling, with an unlisted unbuilt file, or with 0 files exits 1 and the summary says ❌;
 `tests/wast_cli_tests.ts`) `wast` exits 0 with ✅ when modules are not built (or
 on an empty directory) — **owner 2026-10-19: exit 1 unless the unbuilt module is on a known
-list; 0 files always fails**; ld89 `dync` leaves `<name>.__dync.ts` on
-failure and prints errors twice; ld90 bad flag values silently become defaults (`--runtime`,
+list; 0 files always fails**; ~~ld89~~ FIXED 2026-10-22 `dync` leaves `<name>.__dync.ts` on
+failure and prints errors twice (it exited inside the `try`, before the `finally` removed the
+scaffold; `compileWasiTs` / `compileLibTs` printed the error and so did every caller, `wasic`
+included: they now return it, the WAT's path in the message, and the caller prints it once);
+~~ld90~~ FIXED 2026-10-22 bad flag values silently become defaults (`--runtime`,
 `--any-policy`, `--on-conflict`, `--go-runtime`, `--go-target`), `-o` ignored by `run` / `info` /
-`mod`, a missing target prints help and exits 0.
+`mod`, a missing target prints help and exits 0 (main.ts: `FLAG_CHOICES` checked after parsing,
+exit 1 naming the values; `-o` refused where nothing is written, `run` of a Go / Zig / Rust
+source still builds to it; a command without its target exits 1, `--help` and a bare `wasmtk`
+exit 0). Both in `tests/tool_rows_tests.ts` (30).
 
 **sw119, i32 overflow** (`65536 * 65536` → 0, Deno 4294967296): first "not counted" as the
 declared-type contract; **owner 2026-10-19: the operator gives JavaScript's result, and storing a
