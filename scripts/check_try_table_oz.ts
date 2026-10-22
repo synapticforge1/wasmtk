@@ -1,6 +1,8 @@
 /**
- * check_try_table_oz.ts — decides whether the binaryen `-Oz` skip for `try_table` modules in
- * `src/wasic.ts` may be lifted.
+ * check_try_table_oz.ts — the regression guard for binaryen `-Oz` on `try_table` modules. The skip it
+ * once decided was REMOVED 2026-08-27 (binaryang 1.5.2; history in `src/wasic.ts`
+ * watToOptimisedWasm): every exception module goes through `-Oz` now, so a binaryang bump must keep
+ * this at exit 0, and a 1 means reinstating the skip.
  *
  * Assembles `eh_try_table_live_local_fixture.wat` ONCE, then runs the result both **before** and
  * **after** `-Oz`. One variable, one comparison. The fixture keeps two locals live across a catch
@@ -14,8 +16,8 @@
  * moves to `bun` once binaryang resolves by bare name (cmem/deno-exit-plan.md P2, "dependencies by
  * bare name").
  *
- * Exit 0 = both sides 42, the skip in `src/wasic.ts` may be removed (re-run the full gate after).
- * Exit 1 = post-`-Oz` is wrong, the skip must stay.
+ * Exit 0 = both sides 42: `-Oz` is safe for try_table; the skip stays removed.
+ * Exit 1 = post-`-Oz` is wrong: reinstate the skip (see the history comment in `src/wasic.ts`).
  * Exit 2 = pre-`-Oz` is wrong — the fixture or the assembler broke; this says NOTHING about `-Oz`.
  *
  * ⚠️ Passing here is necessary, not sufficient. The real acceptance gate is `15_Exceptions` +
@@ -82,10 +84,11 @@ m.dispose();
 const ozCode = await runExit(oz, "post-Oz");
 if (ozCode !== WANT) {
   console.error(`\n[1] -Oz MISCOMPILES try_table: exit ${ozCode}, want ${WANT}.`);
-  console.error('    Keep the `watSource.includes("try_table")` skip in src/wasic.ts.');
+  console.error("    Reinstate the try_table -Oz skip in src/wasic.ts (watToOptimisedWasm's history");
+  console.error("    comment) and report it to binaryang, then run the FULL gate.");
   process.exit(1);
 }
 
-console.log(`\n[0] -Oz is safe for try_table (both sides exit ${WANT}).`);
-console.log("    The skip in src/wasic.ts may be removed — then run the FULL gate,");
-console.log("    because 15_Exceptions / 15_LexicalShadowing_Stress are the real acceptance test.");
+console.log(`\n[0] -Oz is safe for try_table (both sides exit ${WANT}); the skip stays removed.`);
+console.log("    Necessary, not sufficient: 15_Exceptions / 15_LexicalShadowing_Stress in the full");
+console.log("    gate are the real acceptance test.");

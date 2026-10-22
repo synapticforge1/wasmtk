@@ -9,11 +9,10 @@
 // the current compiler.
 //
 // Usage: bun scripts/gen_caps_bytes.ts
-// (it then runs `deno fmt` on its output so the long byte-array lines pass `deno fmt --check`;
-//  formatting stays Deno's until dprint replaces it, cmem/deno-exit-plan.md P4. Without `deno`
-//  on PATH the file is still written, just unformatted.)
+// (The output is not formatted: `src/wasm/` is excluded from `deno fmt` in deno.json, so the long
+//  byte-array lines are expected. The `deno fmt` step this ran could only fail with "No target
+//  files found"; removed 2026-10-21.)
 
-import { spawnSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,15 +72,3 @@ ${parts.join("\n")}
 const outPath = join(root, "src", "wasm", "caps_bytes.ts");
 await writeFile(outPath, out);
 console.log(`✅ Wrote ${outPath}`);
-
-// Format in place so the giant `new Uint8Array([...])` lines get wrapped and the file passes
-// `deno fmt --check` (otherwise every regen re-dirties the publish gate). Degrades gracefully when
-// `deno` cannot be run — the file is already written, just unformatted.
-const fmt = spawnSync("deno", ["fmt", outPath], { stdio: "ignore" });
-console.log(
-  fmt.error
-    ? "⚠️  skipped auto-format (deno not found) — run `deno fmt src/wasm/caps_bytes.ts`"
-    : fmt.status === 0
-    ? "✅ Formatted (deno fmt)"
-    : "⚠️  deno fmt returned nonzero — run `deno fmt src/wasm/caps_bytes.ts` manually",
-);

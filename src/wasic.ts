@@ -22389,8 +22389,9 @@ ${sum}
     // Terminal void `block` — a `switch` statement compiles to nested blocks where every case
     // returns/throws and the default ends in `(unreachable)`. The block leaves an empty stack, so a
     // value-returning function needs an explicit `(unreachable)` after it to satisfy V8's strict
-    // fallthru validation. (binaryen -Oz strips a trailing unreachable, so this only matters on the
-    // exception-module path that skips binaryen — see watToOptimisedWasm.)
+    // fallthru validation. (binaryen -Oz strips a trailing unreachable; it mattered on the
+    // exception-module path that skipped binaryen, gone since 2026-08-27 — see watToOptimisedWasm.
+    // Kept: the WAT must validate before -Oz reads it.)
     if (head === "block") {
       const afterLabel = group.replace(/^\(\s*block\s*(?:\$[\w$]+)?/, "");
       if (/^\s*\(result\b/.test(afterLabel)) return body; // value-producing block — leave as-is
