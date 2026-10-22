@@ -4485,13 +4485,17 @@ class WasicTranspiler {
         // Only accept pure constant initialisers valid in WAT global init expressions:
         //   numeric/bigint literals  e.g. 0, 3.14, -5, 42n
         //   known enum member refs   e.g. Color.Red
+        //   boolean literals         true, false (a boolean left in _start was invisible to a
+        //                            function: `if (useTri)` was "Unsupported expression", ld42)
         const isNumericLit = /^-?\d+(\.\d+)?n?$/.test(initExpr);
         const isEnumRef = /^\w+\.\w+$/.test(initExpr) && this.enumValues.has(initExpr);
-        if (!isNumericLit && !isEnumRef) {
+        const isBoolLit = (initExpr === "true" || initExpr === "false") &&
+          (!typeStr || mapType(typeStr) === "bool");
+        if (!isNumericLit && !isEnumRef && !isBoolLit) {
           remaining.push(line); // complex init (function call, etc.) — leave in startBodyLines
           continue;
         }
-        const type = (typeStr
+        const type = (isBoolLit ? "bool" : typeStr
           ? mapType(typeStr)
           : inferInitType(initExpr, new Map(), this.enumValues, this.functions)) as WatType;
         if (!type || type === "string") {
@@ -4608,12 +4612,29 @@ class WasicTranspiler {
         continue;
       }
       const m = line.match(
-        /^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*([\w]+)(\[\])+)?\s*=\s*\[/,
+        /^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*([\w]+)((?:\[\])+))?\s*=\s*\[/,
+      ) ?? line.match(
+        // the pre-pass form of `Array.from({ length: N }, () => [])`: a 2D array of empty rows
+        /^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*:\s*(\w+)(\[\]\[\])\s*=\s*__arr_from_2d__\(/,
       );
       if (!m) continue;
       const varName = m[1];
       if (!usedInFunctions.has(varName)) continue;
       if (this.moduleGlobals.has(varName)) continue; // already registered
+      // A 2D array, T[][]: the outer array holds row pointers, as _start's pre-scan lays it out. It
+      // was registered as a 1D T[], so a function's `grid[r][c]` was refused (ld41, 2026-10-22).
+      if (m[3] === "[][]" && m[2] !== "string" && !this.structDefs.has(m[2]!)) {
+        const rhs2D = line.slice(line.indexOf("=") + 1).trim().replace(/;$/, "");
+        this.moduleGlobals.set(varName, { type: "i32", mutable: true, initExpr: "0" });
+        this.moduleArrayVars.set(varName, {
+          elemType: m[2] === "number" ? "f64" : (mapType(m[2]!) as WatType) ?? "i32",
+          ptr: -2,
+          length: parse2DArrayLiteral(rhs2D)?.length ?? 0,
+          dynamic: true,
+          is2D: true,
+        });
+        continue;
+      }
       // Determine element type
       const typeHint = m[2] ?? "";
       let elemType: WatType = "i32";
@@ -7334,10 +7355,11 @@ class WasicTranspiler {
     const storeOp = memStoreOp(info.elemType);
     const stmts: string[] = [];
 
-    // Allocate outer array
-    stmts.push(`(local.set $${varName} (call $__malloc (i32.const ${outerSize})))`);
-    stmts.push(`(i32.store (local.get $${varName}) (i32.const ${outerLen}))`);
-    stmts.push(`(i32.store offset=4 (local.get $${varName}) (i32.const ${outerCap}))`);
+    // Allocate outer array (into the global for a module 2D array a function reads, ld41)
+    const getWat = this.arrGetWat(varName);
+    stmts.push(this.arrSetWat(varName, `(call $__malloc (i32.const ${outerSize}))`));
+    stmts.push(`(i32.store ${getWat} (i32.const ${outerLen}))`);
+    stmts.push(`(i32.store offset=4 ${getWat} (i32.const ${outerCap}))`);
 
     // For each row: allocate, init, and store its pointer in the outer array
     for (let i = 0; i < info.rows.length; i++) {
@@ -7347,7 +7369,7 @@ class WasicTranspiler {
       const outerSlotOffset = 8 + i * 4;
       // tee $__2d_tmp so we can init the row immediately after storing its ptr
       stmts.push(
-        `(i32.store offset=${outerSlotOffset} (local.get $${varName}) (local.tee $__2d_tmp (call $__malloc (i32.const ${rowSz}))))`,
+        `(i32.store offset=${outerSlotOffset} ${getWat} (local.tee $__2d_tmp (call $__malloc (i32.const ${rowSz}))))`,
       );
       stmts.push(`(i32.store (local.get $__2d_tmp) (i32.const ${row.length}))`);
       stmts.push(`(i32.store offset=4 (local.get $__2d_tmp) (i32.const ${rowCap}))`);
@@ -7373,11 +7395,12 @@ class WasicTranspiler {
     const innerElemSize = (elemType === "f64" || elemType === "i64") ? 8 : 4;
     const innerSize = 8 + DEFAULT_INNER_CAP * innerElemSize;
     const lenWat = this.emitExpr(lenExpr, locals, "i32");
+    const getWat = this.arrGetWat(varName); // the global for a module 2D array (ld41)
     const stmts = [
       `(local.set $__from_n ${lenWat})`,
-      `(local.set $${varName} (call $__malloc (i32.add (i32.const 8) (i32.shl (local.get $__from_n) (i32.const 2)))))`,
-      `(i32.store (local.get $${varName}) (local.get $__from_n))`,
-      `(i32.store offset=4 (local.get $${varName}) (local.get $__from_n))`,
+      this.arrSetWat(varName, `(call $__malloc (i32.add (i32.const 8) (i32.shl (local.get $__from_n) (i32.const 2))))`),
+      `(i32.store ${getWat} (local.get $__from_n))`,
+      `(i32.store offset=4 ${getWat} (local.get $__from_n))`,
       `(local.set $__from_i (i32.const 0))`,
       `(block $__from_blk`,
       `  (loop $__from_lp`,
@@ -7385,7 +7408,7 @@ class WasicTranspiler {
       `    (local.set $__2d_tmp (call $__malloc (i32.const ${innerSize})))`,
       `    (i32.store (local.get $__2d_tmp) (i32.const 0))`,
       `    (i32.store offset=4 (local.get $__2d_tmp) (i32.const ${DEFAULT_INNER_CAP}))`,
-      `    (i32.store (i32.add (i32.add (local.get $${varName}) (i32.const 8)) (i32.shl (local.get $__from_i) (i32.const 2))) (local.get $__2d_tmp))`,
+      `    (i32.store (i32.add (i32.add ${getWat} (i32.const 8)) (i32.shl (local.get $__from_i) (i32.const 2))) (local.get $__2d_tmp))`,
       `    (local.set $__from_i (i32.add (local.get $__from_i) (i32.const 1)))`,
       `    (br $__from_lp)`,
       `  )`,
@@ -10544,7 +10567,7 @@ ${prefixed}
         return `(i32.load offset=4 ${elemAddrWat})`;
       }
       if (arrInfo || locals.get(arrName) === "i32") {
-        const baseWat = `(local.get $${arrName})`;
+        const baseWat = arrInfo ? this.arrGetWat(arrName) : `(local.get $${arrName})`; // global 2D: ld41
         const rowPtrWat =
           `(i32.load (i32.add (i32.add ${baseWat} (i32.const 8)) (i32.shl ${idxWat} (i32.const 2))))`;
         return `(i32.load ${rowPtrWat})`;
@@ -10745,10 +10768,11 @@ ${prefixed}
         const elemType = outerInfo.elemType;
         const loadOp = memLoadOp(elemType);
         const shift = (elemType === "f64" || elemType === "i64") ? 3 : 2;
-        // Outer array: dynamic; row pointer is stored at outer + 8 + rowIdx * 4
-        const rowPtrWat = `(i32.load (i32.add (i32.add (local.get $${
-          bracket2DMatch[1]
-        }) (i32.const 8)) (i32.shl ${rowIdxWat} (i32.const 2))))`;
+        // Outer array: dynamic; row pointer is stored at outer + 8 + rowIdx * 4. A module 2D array
+        // read in a function is the global (it was `local.get` of a name the function lacks, ld41).
+        const rowPtrWat = `(i32.load (i32.add (i32.add ${
+          this.arrGetWat(bracket2DMatch[1])
+        } (i32.const 8)) (i32.shl ${rowIdxWat} (i32.const 2))))`;
         // Element is at rowPtr + 8 + colIdx * elemSize
         const raw2D =
           `(${loadOp} (i32.add (i32.add ${rowPtrWat} (i32.const 8)) (i32.shl ${colIdxWat} (i32.const ${shift}))))`;
@@ -14442,7 +14466,7 @@ ${prefixed}
       // Not a literal: the pointer of the array the right side names or returns (`= m`,
       // `= rows`, `= mk()`). It was laid out as a literal with no rows (ld11, ld12, sw31).
       if (info?.is2D && !info.rows) {
-        return `(local.set $${arr2DLetMatch[1]} ${this.emitExpr(arr2DLetMatch[2]!.trim(), locals, "i32")})`;
+        return this.arrSetWat(arr2DLetMatch[1], this.emitExpr(arr2DLetMatch[2]!.trim(), locals, "i32"));
       }
     }
 
@@ -15202,7 +15226,7 @@ ${prefixed}
         const idxWat = this.emitExpr(subscriptPushStmt[2], locals, "i32");
         const valWat = this.emitExpr(subscriptPushStmt[4], locals, outerInfo.elemType);
         const addrWat =
-          `(i32.add (i32.add (local.get $${outerName}) (i32.const 8)) (i32.shl ${idxWat} (i32.const 2)))`;
+          `(i32.add (i32.add ${this.arrGetWat(outerName)} (i32.const 8)) (i32.shl ${idxWat} (i32.const 2)))`;
         this.dynArrHelpers.add(`push_${outerInfo.elemType}`);
         // Load inner ptr, push (returns possibly-grown ptr), store back — address evaluated twice
         // but it's pure arithmetic so safe.
@@ -15761,7 +15785,7 @@ ${prefixed}
           `    (i32.store (i32.const ${this.iovBase}) (i32.const ${sb}))`,
           `    (i32.store (i32.const ${
             this.iovBase + 4
-          }) (call $__print_2d_i32_arr (local.get $${log2DArg}) (i32.const ${sb})))`,
+          }) (call $__print_2d_i32_arr ${this.arrGetWat(log2DArg)} (i32.const ${sb})))`,
           `    (i32.store8 (i32.add (i32.const ${sb}) (i32.load (i32.const ${
             this.iovBase + 4
           }))) (i32.const 10))`,
@@ -16306,8 +16330,9 @@ ${prefixed}
         const have = this.watResultType(result, locals);
         return { type: have === "f64" || have === "f32" || have === "i64" ? have : "i32", wat: result };
       };
+      // A boolean global stays "bool" so it prints `true` / `false`, as a boolean local does (ld42).
       const globalsMap: Map<string, string> = new Map(
-        [...this.moduleGlobals.entries()].map(([k, v]) => [k, watBaseType(v.type)]),
+        [...this.moduleGlobals.entries()].map(([k, v]) => [k, v.type === "bool" ? "bool" : watBaseType(v.type)]),
       );
       // Add module string consts encoded as "string:offset:len" so parseSingleArg can look them up
       for (const [k, [offset, len]] of this.moduleStringConsts) {
@@ -16800,7 +16825,7 @@ ${prefixed}
         return { type: haveErr === "f64" || haveErr === "f32" || haveErr === "i64" ? haveErr : "i32", wat: result };
       };
       const globalsMapErr: Map<string, string> = new Map(
-        [...this.moduleGlobals.entries()].map(([k, v]) => [k, watBaseType(v.type)]),
+        [...this.moduleGlobals.entries()].map(([k, v]) => [k, v.type === "bool" ? "bool" : watBaseType(v.type)]),
       );
       for (const [k, [offset, len]] of this.moduleStringConsts) {
         globalsMapErr.set(k, `string:${offset}:${len}`);
