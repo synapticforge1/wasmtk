@@ -1531,6 +1531,11 @@ function skipStringLiteral(s: string, i: number): number {
  *  literal (the surrounding quotes included), so depth/operator scanners can skip literal
  *  content. Handles `"`, `'`, `` ` `` and `\` escapes. (A nested `${…}` inside a template is
  *  treated as part of the literal — fine for top-level operator/bracket scanning.) */
+/** Is `s[i]` (a `+` or `-`) the sign of a number literal's exponent, `1e-7` / `2.5E+3`? (ld66) */
+function isLiteralExponentSign(s: string, i: number): boolean {
+  return /(?:^|[^\w.$])(?:\d+\.?\d*|\.\d+)[eE]$/.test(s.slice(0, i)) && /\d/.test(s[i + 1] ?? "");
+}
+
 function buildStringLiteralMask(s: string): boolean[] {
   const mask = new Array<boolean>(s.length).fill(false);
   let q: string | null = null;
@@ -2070,6 +2075,7 @@ class WasicTranspiler {
   private needsMatrix2DPrintHelper = false; // Phase 6d
   private needsNumParsers = false; // Phase 53: $__parse_int / $__parse_float
   private needsStrToNumber = false; // ld60: $__str_to_number (Number(string)); needs the parsers
+  private needsToFixed = false; // ld38: $__f64_to_fixed (and the $__bn_* big-integer helpers)
 
   // String data section: message → [offset, byteLength]
   // Raw (non-string) data segments for arrays etc.
@@ -8678,9 +8684,34 @@ class WasicTranspiler {
 
   /** Returns true if expr is a string literal, a known string variable, a template literal,
    *  a string method call on a string variable, or a call to a string-returning function. */
+  /** `x.toFixed(d)` of a NUMBER (not a string, not a class value with its own `toFixed`): the
+   *  receiver and the digits expression, else null (ld38, 2026-10-22). */
+  private toFixedParts(expr: string, locals: Map<string, WatType>): { recv: string; digits: string } | null {
+    const m = expr.trim().match(/^([\s\S]+)\.toFixed\s*\(([^()]*)\)$/);
+    if (!m || !parenDepthNeverNegative(m[1]!)) return null;
+    const recv = m[1]!.trim();
+    if (/^["'`]/.test(recv) || this.isStringExpr(recv, locals)) return null;
+    const cls = /^\w+$/.test(recv) ? this.classVars.get(recv)?.className : undefined;
+    if (cls && this.classDefs.get(cls)?.methods.some((mm) => mm.name === "toFixed")) return null;
+    if (/^\w+$/.test(recv) && (this.structVars.has(recv) || this.arrayVars.has(recv))) return null;
+    return { recv, digits: m[2]!.trim() };
+  }
+
   private isStringExpr(expr: string, locals: Map<string, WatType>): boolean {
     const e = expr.trim();
     if (/^["']/.test(e)) return true;
+    if (/\.toFixed\s*\([^()]*\)$/.test(e) && this.toFixedParts(e, locals)) return true; // ld38
+    // `L + R` with a string on either side is a string (`(s + s).length` was refused, found with
+    // ld43, 2026-10-22). The last additive operator must be that `+` (`s + 1 - 2` is a number), and
+    // nothing looser at top level (a comparison, `&&` / `||` / `??`, a conditional).
+    {
+      const plus = this.findBinaryOp(e, "+");
+      if (
+        plus > 0 && this.findBinaryOp(e, "-") < plus && !hasTopLevelBoolOp(e) && !this.splitTernaryTop(e) &&
+        this.findBinaryOp(e, "??") === -1 &&
+        (this.isStringExpr(e.slice(0, plus), locals) || this.isStringExpr(e.slice(plus + 1), locals))
+      ) return true;
+    }
     if (e.startsWith("`") && e.endsWith("`")) return true;
     if (/^\w+$/.test(e)) return locals.get(e) === "string" || this.moduleStringConsts.has(e);
     // A string struct FIELD (`p.s`, `ps[i].s`, `a.b.s`): a ternary over two was refused in a
@@ -9166,6 +9197,18 @@ ${prefixed}
 
   private emitStringPtrLen(expr: string, locals: Map<string, WatType>): string {
     expr = expr.trim();
+    // Number.prototype.toFixed(d), exact as JavaScript's ($__f64_to_fixed; ld38, 2026-10-22: it
+    // was refused). The digits default to 0; outside 0..100 it traps (JavaScript: RangeError).
+    {
+      const tf = /\.toFixed\s*\([^()]*\)$/.test(expr) ? this.toFixedParts(expr, locals) : null;
+      if (tf) {
+        this.needsToFixed = true;
+        this.needsNumericHelpers = true; // $__f64_to_str, for NaN, Infinity and |x| >= 1e21
+        return `(call $__f64_to_fixed ${this.emitExpr(tf.recv, locals, "f64")} ${
+          tf.digits ? this.emitExpr(tf.digits, locals, "i32") : "(i32.const 0)"
+        })`;
+      }
+    }
     // A STRING `a ?? b`: b when a is null, else a. It was refused in a declaration and printed a
     // field's pointer in console.log (`q.s ?? "none"` → `268`, sw98, 2026-10-19). The null test is
     // the value's own flag (nullTestWat: a nullable local's `__null`, a field's flag word); a
@@ -9862,16 +9905,37 @@ ${prefixed}
     // `.length` of a string-valued CALL (`s.toUpperCase().length`): the string's len, through the
     // shared $__str_op pair. It was refused here, and in console.log a sum with it printed `2` for
     // `5` (sw100, ld58; 2026-10-19). A plain variable / field / element keeps its own handlers.
+    // ...and of a parenthesised string expression, `("pre" + s).length`: a concatenation is built
+    // into the same pair by emitStringAssign (ld43, 2026-10-22: refused).
+    // ...and of a string FIELD of an element, `users[0].name.length` (ld70: refused). A plain name
+    // keeps its own handlers.
     {
-      const lenM = expr.match(/^([\s\S]+\))\.length$/);
-      if (lenM && parenDepthNeverNegative(lenM[1]!) && this.isStringExpr(lenM[1]!, locals)) {
-        const pl = this.quietEmit(() => this.emitStringPtrLen(lenM[1]!, locals));
+      // ONE operand (`a.length + t.length` is a sum), and not a plain name or a plain element read
+      // (`arr[j].length`), which keep their own direct handlers
+      const lenM0 = expr.match(/^([\s\S]+)\.length$/);
+      const r0 = lenM0?.[1]!.trim() ?? "";
+      const lenM = lenM0 && !/^\w+$/.test(r0) && !/^\w+\[[^\[\]]*\]$/.test(r0) &&
+          !this.hasTopLevelBinaryOp(r0) && !this.splitTernaryTop(r0)
+        ? lenM0
+        : null;
+      let recv = lenM?.[1] ?? "";
+      while (recv.startsWith("(") && recv.endsWith(")") && parenDepthNeverNegative(recv.slice(1, -1))) {
+        recv = recv.slice(1, -1).trim();
+      }
+      if (lenM && parenDepthNeverNegative(lenM[1]!) && this.isStringExpr(recv, locals)) {
+        const asNum = (w: string) => defaultType === "f64" || defaultType === "f32" ? `(f64.convert_i32_s ${w})` : w;
+        const pl = this.quietEmit(() => this.emitStringPtrLen(recv, locals));
+        locals.set("__str_op_ptr", "i32");
+        locals.set("__str_op_len", "i32");
         if (pl !== "(i32.const 0) (i32.const 0)") {
-          locals.set("__str_op_ptr", "i32");
-          locals.set("__str_op_len", "i32");
-          const w = `(block (result i32) ${pl} (local.set $__str_op_len) (drop) (local.get $__str_op_len))`;
-          return defaultType === "f64" || defaultType === "f32" ? `(f64.convert_i32_s ${w})` : w;
+          return asNum(`(block (result i32) ${pl} (local.set $__str_op_len) (drop) (local.get $__str_op_len))`);
         }
+        const mark = this.diagnostics.length;
+        const assign = this.quietEmit(() => this.emitStringAssign("__str_op", recv, locals));
+        if (this.diagnostics.length === mark && assign.trim() && !assign.includes("(;?")) {
+          return asNum(`(block (result i32) ${assign} (local.get $__str_op_len))`);
+        }
+        this.diagnostics.length = mark;
       }
     }
 
@@ -13147,6 +13211,9 @@ ${prefixed}
         if (op === "??" && after === "=") continue; // don't match ??=
         if (op === "||" && after === "=") continue; // don't match ||=
         if (op === "&&" && after === "=") continue; // don't match &&=
+        // A sign inside a number literal's exponent (`1e-7`, `2.5E+3`) is not an operator: `1e-7 * 1.5`
+        // split at it into `1e` and `7 * 1.5` (ld66, 2026-10-22)
+        if ((op === "-" || op === "+") && isLiteralExponentSign(expr, i)) continue;
         // Guard: treat '-' as unary (not binary) when preceded by an operator or open paren/bracket.
         // This prevents `x * -1` from being parsed as `(x *) - (1)`.
         if (op === "-") {
@@ -18253,6 +18320,10 @@ ${prefixed}
     if (this.neededEnumStrHelpers.size > 0) parts.push(this.emitEnumStrHelpers());
     if (this.mathHelpers.size > 0) parts.push(this.emitMathHelpers());
     if (this.needsNumParsers) parts.push(this.emitNumParserHelpers(this.needsStrToNumber));
+    // toFixed; the base big-integer helpers come with the parsers when those are present
+    if (this.needsToFixed) {
+      parts.push((this.needsNumParsers ? "" : this.emitBigNumHelpers() + "\n\n") + this.emitToFixedHelper());
+    }
     if (this.dynArrHelpers.size > 0) parts.push(this.emitDynArrHelpers());
     if (this.typedArrHelpers.size > 0) parts.push(this.emitTypedArrHelpers());
     if (this.needsMatrix2DPrintHelper) parts.push(this.emitMatrix2DPrintHelper());
@@ -19036,9 +19107,12 @@ ${sum}
    * module's bump allocator has no free; the slow path is for long or extreme inputs only).
    */
   private emitDecToF64Helpers(): string {
-    const free = this.mode === "library"
-      ? ""
-      : `\n    (call $__free (local.get $buf) (i32.shl (local.get $cap) (i32.const 3)))`;
+    return this.emitBigNumHelpers() + "\n" + this.emitDecToF64();
+  }
+
+  /** The base big-integer helpers (`$__bn_*`: u32 limbs, least significant first), shared by
+   *  `$__dec_to_f64` (sw122) and `$__f64_to_fixed` (ld38). */
+  private emitBigNumHelpers(): string {
     const ld = (base: string, idx: string) => `(i32.load (i32.add ${base} (i32.shl ${idx} (i32.const 2))))`;
     return `  ;; ── decimal → f64, correctly rounded (sw122). Big integers: u32 limbs at $a, least
   ;; significant first, $len limbs with no zero top limb; each helper returns the new length. ──
@@ -19140,8 +19214,142 @@ ${sum}
     (if (result i32) (i32.eqz (local.get $len))
       (then (i32.const 0))
       (else (i32.sub (i32.shl (local.get $len) (i32.const 5))
-        (i32.clz ${ld("(local.get $a)", "(i32.sub (local.get $len) (i32.const 1))")})))))
-  (func $__dec_to_f64 (param $p i32) (param $n i32) (param $neg i32) (result f64)
+        (i32.clz ${ld("(local.get $a)", "(i32.sub (local.get $len) (i32.const 1))")})))))`;
+  }
+
+  /**
+   * `$__f64_to_fixed(x, f) -> (ptr, len)`: Number.prototype.toFixed, exact as JavaScript's (ld38,
+   * 2026-10-22). NaN is "NaN"; |x| >= 1e21 (±Infinity too) is String(x) through `$__f64_to_str`;
+   * else n = the integer nearest x·10^f (ties to the LARGER n, as the spec says), computed exactly:
+   * x = m·2^e, N = m·10^f, then N·2^e with the round bit, so `(1.005).toFixed(2)` is "1.00" (1.005
+   * is a little below it). f outside 0..100 traps (JavaScript: RangeError). Uses the base
+   * `$__bn_*` helpers plus a right shift and a division by a small number.
+   */
+  private emitToFixedHelper(): string {
+    const ld = (base: string, idx: string) => `(i32.load (i32.add ${base} (i32.shl ${idx} (i32.const 2))))`;
+    const at = (base: string, idx: string) => `(i32.add ${base} (i32.shl ${idx} (i32.const 2)))`;
+    const [nanOff, nanLen] = this.allocString("NaN");
+    const free = this.mode === "library" ? "" : `\n    (call $__free (local.get $buf) (i32.const 384))`;
+    return `  ;; a = a >> s
+  (func $__bn_shr (param $a i32) (param $len i32) (param $s i32) (result i32)
+    (local $limbs i32) (local $bits i32) (local $k i32) (local $lo i32) (local $hi i32) (local $n i32)
+    (local.set $limbs (i32.shr_u (local.get $s) (i32.const 5)))
+    (local.set $bits (i32.and (local.get $s) (i32.const 31)))
+    (if (i32.ge_u (local.get $limbs) (local.get $len)) (then (return (i32.const 0))))
+    (local.set $n (i32.sub (local.get $len) (local.get $limbs)))
+    (block $d (loop $l
+      (br_if $d (i32.ge_u (local.get $k) (local.get $n)))
+      (local.set $lo ${ld("(local.get $a)", "(i32.add (local.get $k) (local.get $limbs))")})
+      (local.set $hi (if (result i32) (i32.lt_u (i32.add (i32.add (local.get $k) (local.get $limbs)) (i32.const 1)) (local.get $len))
+        (then ${ld("(local.get $a)", "(i32.add (i32.add (local.get $k) (local.get $limbs)) (i32.const 1))")})
+        (else (i32.const 0))))
+      (i32.store ${at("(local.get $a)", "(local.get $k)")}
+        (if (result i32) (i32.eqz (local.get $bits))
+          (then (local.get $lo))
+          (else (i32.or (i32.shr_u (local.get $lo) (local.get $bits))
+            (i32.shl (local.get $hi) (i32.sub (i32.const 32) (local.get $bits)))))))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br $l)))
+    (call $__bn_norm (local.get $a) (local.get $n)))
+  ;; a = a / d; returns the remainder (the caller re-normalizes a)
+  (func $__bn_divsmall (param $a i32) (param $len i32) (param $d i32) (result i32)
+    (local $k i32) (local $r i64) (local $cur i64)
+    (local.set $k (local.get $len))
+    (block $dd (loop $l
+      (br_if $dd (i32.eqz (local.get $k)))
+      (local.set $k (i32.sub (local.get $k) (i32.const 1)))
+      (local.set $cur (i64.or (i64.shl (local.get $r) (i64.const 32)) (i64.extend_i32_u ${ld("(local.get $a)", "(local.get $k)")})))
+      (i32.store ${at("(local.get $a)", "(local.get $k)")} (i32.wrap_i64 (i64.div_u (local.get $cur) (i64.extend_i32_u (local.get $d)))))
+      (local.set $r (i64.rem_u (local.get $cur) (i64.extend_i32_u (local.get $d))))
+      (br $l)))
+    (i32.wrap_i64 (local.get $r)))
+  ;; Number.prototype.toFixed (ld38): (x, f) -> (ptr, len)
+  (func $__f64_to_fixed (param $x f64) (param $f i32) (result i32 i32)
+    (local $neg i32) (local $ax f64) (local $bits i64) (local $be i32) (local $m i64) (local $e i32)
+    (local $buf i32) (local $N i32) (local $D i32) (local $len i32) (local $k i32) (local $up i32)
+    (local $nd i32) (local $out i32) (local $olen i32) (local $o i32) (local $j i32)
+    (if (i32.gt_u (local.get $f) (i32.const 100)) (then (unreachable)))
+    (if (f64.ne (local.get $x) (local.get $x)) (then (return (i32.const ${nanOff}) (i32.const ${nanLen}))))
+    (local.set $neg (f64.lt (local.get $x) (f64.const 0)))
+    (local.set $ax (f64.abs (local.get $x)))
+    ;; |x| >= 1e21: String(x)
+    (if (f64.ge (local.get $ax) (f64.const 1e21))
+      (then
+        (local.set $out (call $__malloc (i32.const 32)))
+        (return (local.get $out) (call $__f64_to_str (local.get $x) (local.get $out)))))
+    ;; x = m * 2^e exactly
+    (local.set $bits (i64.reinterpret_f64 (local.get $ax)))
+    (local.set $be (i32.wrap_i64 (i64.shr_u (local.get $bits) (i64.const 52))))
+    (local.set $m (i64.and (local.get $bits) (i64.const 0xFFFFFFFFFFFFF)))
+    (if (local.get $be)
+      (then
+        (local.set $m (i64.or (local.get $m) (i64.const 0x10000000000000)))
+        (local.set $e (i32.sub (local.get $be) (i32.const 1075))))
+      (else (local.set $e (i32.const -1074))))
+    ;; N: 40 limbs (m * 10^100 * 2^18 < 2^410), then 224 bytes of digits
+    (local.set $buf (call $__malloc (i32.const 384)))
+    (local.set $N (local.get $buf))
+    (local.set $D (i32.add (local.get $buf) (i32.const 160)))
+    (i32.store (local.get $N) (i32.wrap_i64 (local.get $m)))
+    (i32.store offset=4 (local.get $N) (i32.wrap_i64 (i64.shr_u (local.get $m) (i64.const 32))))
+    (local.set $len (call $__bn_norm (local.get $N) (i32.const 2)))
+    (local.set $k (local.get $f))
+    (block $td (loop $tl
+      (br_if $td (i32.eqz (local.get $k)))
+      (local.set $len (call $__bn_muladd (local.get $N) (local.get $len) (i32.const 10) (i32.const 0)))
+      (local.set $k (i32.sub (local.get $k) (i32.const 1)))
+      (br $tl)))
+    ;; n = N * 2^e, rounded half up
+    (if (i32.ge_s (local.get $e) (i32.const 0))
+      (then (local.set $len (call $__bn_shl (local.get $N) (local.get $len) (local.get $e))))
+      (else
+        (local.set $k (i32.sub (i32.const 0) (local.get $e)))
+        (local.set $up (if (result i32)
+            (i32.lt_u (i32.shr_u (i32.sub (local.get $k) (i32.const 1)) (i32.const 5)) (local.get $len))
+          (then (i32.and (i32.shr_u ${ld("(local.get $N)", "(i32.shr_u (i32.sub (local.get $k) (i32.const 1)) (i32.const 5))")}
+            (i32.and (i32.sub (local.get $k) (i32.const 1)) (i32.const 31))) (i32.const 1)))
+          (else (i32.const 0))))
+        (local.set $len (call $__bn_shr (local.get $N) (local.get $len) (local.get $k)))
+        (if (local.get $up)
+          (then (local.set $len (call $__bn_muladd (local.get $N) (local.get $len) (i32.const 1) (i32.const 1)))))))
+    ;; its decimal digits, least significant first, at least f + 1 of them
+    (block $dz (loop $dl
+      (br_if $dz (i32.eqz (local.get $len)))
+      (i32.store8 (i32.add (local.get $D) (local.get $nd))
+        (i32.add (call $__bn_divsmall (local.get $N) (local.get $len) (i32.const 10)) (i32.const 48)))
+      (local.set $len (call $__bn_norm (local.get $N) (local.get $len)))
+      (local.set $nd (i32.add (local.get $nd) (i32.const 1)))
+      (br $dl)))
+    (block $pz (loop $pl
+      (br_if $pz (i32.gt_u (local.get $nd) (local.get $f)))
+      (i32.store8 (i32.add (local.get $D) (local.get $nd)) (i32.const 48))
+      (local.set $nd (i32.add (local.get $nd) (i32.const 1)))
+      (br $pl)))
+    ;; [-] int digits [. f digits]
+    (local.set $olen (i32.add (i32.add (local.get $neg) (local.get $nd)) (i32.ne (local.get $f) (i32.const 0))))
+    (local.set $out (call $__malloc (local.get $olen)))
+    (if (local.get $neg)
+      (then (i32.store8 (local.get $out) (i32.const 45)) (local.set $o (i32.const 1))))
+    (local.set $j (local.get $nd))
+    (block $wz (loop $wl
+      (br_if $wz (i32.eqz (local.get $j)))
+      (if (i32.and (i32.ne (local.get $f) (i32.const 0)) (i32.eq (local.get $j) (local.get $f)))
+        (then
+          (i32.store8 (i32.add (local.get $out) (local.get $o)) (i32.const 46))
+          (local.set $o (i32.add (local.get $o) (i32.const 1)))))
+      (local.set $j (i32.sub (local.get $j) (i32.const 1)))
+      (i32.store8 (i32.add (local.get $out) (local.get $o)) (i32.load8_u (i32.add (local.get $D) (local.get $j))))
+      (local.set $o (i32.add (local.get $o) (i32.const 1)))
+      (br $wl)))${free}
+    (local.get $out) (local.get $olen))`;
+  }
+
+  /** `$__dec_to_f64` itself (see emitDecToF64Helpers). */
+  private emitDecToF64(): string {
+    const free = this.mode === "library"
+      ? ""
+      : `\n    (call $__free (local.get $buf) (i32.shl (local.get $cap) (i32.const 3)))`;
+    return `  (func $__dec_to_f64 (param $p i32) (param $n i32) (param $neg i32) (result f64)
     (local $i i32) (local $c i32) (local $d i32) (local $dot i32) (local $nFrac i32) (local $ndAll i32)
     (local $nTaken i32) (local $w i64) (local $dropNZ i32) (local $ex i32) (local $exSign i32)
     (local $e i32) (local $ef i32) (local $r f64) (local $k i32)
