@@ -5,17 +5,38 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
+## For the workspace review — HOLD until wasmtk is done with its edits (owner, 2026-10-21)
+
+The owner asked for these to be noted for the workspace session to review **once this project is
+done with its current edits** (the open fix list below). Nothing here is written outside this repo;
+the workspace pulls it on its sweep.
+
+- **W1. The scripting rule changed here: Bun, not Deno** (owner, 2026-10-21: "since deno is going
+  away, we need to change from deno to bun for all scripts"). wasmtk's scripts and probe rule are
+  `bun` on `node:` builtins (INDEX.md rule 1, best-practices.md §4b, deno-exit-plan.md § P5). The
+  workspace floor still says Deno: `../cmem/working-rules.md` rule 1 ("Scripting is
+  Deno/TypeScript only") and the workspace `CLAUDE.md` ("Scripting is Deno/TypeScript (or the
+  repo's own language)"). Asked: decide whether the floor becomes Bun for every Deno repo
+  (binaryang is mid-migration; the frozen wabt-ts / binaryen-ts stay as they are), or records
+  wasmtk as differing.
+- **W2. Two kinds of exception the floor may want to name:** a probe that imports a repo's own
+  `src/` through deno.json's import map still runs with Deno until that repo's dependencies
+  resolve by bare name; and a script whose ORACLE is Deno (wasmtk's
+  `console/check_inspect_array_ref.ts`, `Deno.inspect`) stays Deno. Measured: `node:util`'s
+  inspect quotes with `'` (61 of 444 arrays differ), `Bun.inspect` does not group columns (334 of
+  441). Relevant to any repo comparing console output with Deno's.
+- **W3. Rule slips to watch for** (recorded honestly, 2026-10-21): one `sed -i` on a scratch file
+  and one inline `git commit -m` in this repo (the latter amended from a file before merging).
+
 ## Open now
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule
-> says `bun` (deno-exit-plan.md § P5 has every A/B and the two scripts that stay Deno). Found
-> on the way, NOT acted on: (1) `check_try_table_oz` reports binaryang 1.13.0's `-Oz` SAFE for
-> `try_table` (42 / 42): the `try_table` skip in `src/wasic.ts` may be liftable; its real test is
-> the full gate (`15_Exceptions`, `15_LexicalShadowing_Stress`), owner's call when; (2)
-> `src/wasm/caps_bytes.ts`'s embedded capability libraries are stale against the corpus
-> `*_lib_modc.wasm` (regenerating changes their bytes); (3) the workspace floor
-> (`../cmem/working-rules.md` rule 1) still says Deno: the workspace session's to change.
+> says `bun` (deno-exit-plan.md § P5 has every A/B and the two scripts that stay Deno). Then the
+> same day: (1) the `try_table` `-Oz` skip was found ALREADY removed (2026-08-27, binaryang
+> 1.5.2); `check_try_table_oz` (42 / 42 on 1.13.0) now reads as the regression guard it is;
+> (2) `src/wasm/caps_bytes.ts`'s six embedded capability libraries re-embedded from fresh `modc`
+> builds (6–17 % smaller each, WIT unchanged); (3) the workspace items above.
 > Then the fix order resumes: sw122, the 22 loud compiler rows, the 9 tool rows.
 
 > **2026-10-20, the loud rows, group 1 DONE: every round-2 row that built an INVALID module or

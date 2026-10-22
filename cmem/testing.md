@@ -112,7 +112,20 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-20, binaryang **1.13.0**; latest release v2.0.3)
+## Current pass counts (2026-10-21, binaryang **1.13.0**; latest release v2.0.3)
+
+> **2026-10-21, the embedded capability libraries re-embedded (`src/wasm/caps_bytes.ts`), gate
+> GREEN.** The six `*_lib_modc.wasm` rebuilt with `wasmtk modc` and embedded by
+> `bun scripts/gen_caps_bytes.ts`: set 870 → 726, map 1171 → 980, date 992 → 929, json 2909 → 2447,
+> regex 2007 → 1779, dynrt 45763 → 38653 bytes, every WIT unchanged. wasi **482/482** (its pipeline
+> programs `18h_VirtualCapabilityImports`, `18k_DynRuntimeVirtualImport`, `18q_DynAnyFoundation`
+> run the three bundles that import embedded capabilities; each self-checks and traps on a wrong
+> result) · golden-WAT 539, exactly those 3 pipeline entries moved (`vcap_bundle`,
+> `dynrt_vcap_bundle`, `dynrt_any_bundle`: the heap start, and dynrt's `$dynrt_global4` now a
+> mutable global set at start-up instead of a constant), re-recorded · wast 64,506 / 0 / 16 ·
+> cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath L1 151, L2 199 exact · api-surface
+> unchanged · `check_try_table_oz` 42 / 42 (the `try_table` `-Oz` skip it once decided has been
+> gone since 2026-08-27; the script now reads as its guard).
 
 > **2026-10-20, the loud rows' invalid-module group (ld48–ld50, ld52–ld57, ld59–ld61, ld63, ld64,
 > ld75; sw124, sw125), gate GREEN.** wasi **482/482** (+`4l_MixedOperandTypes`,
