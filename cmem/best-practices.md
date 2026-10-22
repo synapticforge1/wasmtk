@@ -549,11 +549,24 @@ decode failures as conflation and claimed 930. **Both were confident, both were 
 second felt more rigorous because it was a correction.** The rule that would have caught either:
 when a probe reimplements logic the codebase already has, it is testing the copy.
 
-### 🔒 HARD RULE — scripting is **Deno/TypeScript only**. No `python3`. (owner directive 2026-09-19)
+### 🔒 HARD RULE — scripting is **TypeScript only, run with Bun**. No `python3`. (owner directive 2026-09-19; Bun 2026-10-21)
 
-**wasmtk is a Deno project. Ad-hoc tooling, probes, one-off migrations and repairs are written in
-TypeScript and run with `deno run -A <file.ts>`** — never `python3`, never an inline
-`python3 -c`, never an inline `node -e`.
+**Ad-hoc tooling, probes, one-off migrations and repairs are written in TypeScript on `node:`
+builtins and run with `bun <file.ts>`** — never `python3`, never an inline `python3 -c`, never an
+inline `node -e` / `bun -e`. Owner, 2026-10-21: "since deno is going away, we need to change from
+deno to bun for all scripts"; until then the rule said Deno.
+
+- **`node:` builtins, not `Bun.*`** (`node:fs/promises`, `node:child_process`, `process.argv` /
+  `exit` / `cwd`): the Deno-exit plan's decision, Bun the main runtime with code that runs on Node
+  too (cmem/deno-exit-plan.md § 5). `deno check` type-checks them meanwhile.
+- **The exception, until the product moves (P2):** a probe that imports `src/` through deno.json's
+  import map (binaryang as `wabt` / `binaryen-backend`, `@std/path`: the compiler, `src/binaryen.ts`)
+  runs with `deno run -A --config deno.json <file>`. Bun does not read that map. A probe that only
+  RUNS the installed `wasmtk` is a Bun script.
+- **What a script SPAWNS can still be Deno** where Deno is the subject: the suites (P6), `deno doc`,
+  `deno fmt` (P4), `deno publish` (role E), and the TypeScript / V8 reference runs (P6, M2, M4).
+  Two repo scripts are still RUN with Deno, each saying why in its header: `check_try_table_oz.ts`
+  (the import map) and `console/check_inspect_array_ref.ts` (`Deno.inspect` is its oracle).
 
 Why this is a rule and not a preference:
 
@@ -563,14 +576,15 @@ Why this is a rule and not a preference:
   a probe and testing the copy.
 - **Python brought a second encoding regime into a UTF-8 repo.** On this machine `python3` writes
   stdout as cp1252, so printing any emoji or box-drawing character from a repair script raised
-  `UnicodeEncodeError` mid-run and left files half-processed. Deno is UTF-8 throughout.
+  `UnicodeEncodeError` mid-run and left files half-processed. Bun (like Deno) is UTF-8 throughout.
 - **Python's escape handling is a second chance to corrupt content.** `"\\0asm"` surviving one
   transport becomes `"\0asm"`, which Python reads as a NUL byte. TypeScript string literals plus
-  `Deno.writeTextFile` have no such second pass.
-- **One toolchain, one set of failure modes.** Deno is already required to build and test this repo;
-  python3 is an extra dependency that nothing else needs.
+  `writeFile` have no such second pass.
+- **One toolchain, one set of failure modes.** Bun is the runtime the project is moving to (Deno
+  still builds and tests it until the plan's later phases); python3 is an extra dependency that
+  nothing else needs.
 
-Permitted: `git`, `grep`, `deno`, `wasmtk` and the other CLIs, invoked directly. The shell
+Permitted: `git`, `grep`, `bun`, `deno`, `wasmtk` and the other CLIs, invoked directly. The shell
 **runs** things; it does not **author** them.
 
 ### 🔒 HARD RULE — no heredocs. Ever, in any language. (owner directive 2026-09-19)
@@ -595,7 +609,8 @@ down, and being actively on guard were all insufficient — the corruption happe
 between the author and the file, where nothing in the source reveals it. Use instead:
 
 - **File content** → the `Write` or `Edit` tool. Always.
-- **A script** → `Write` it to the scratchpad as `.ts`, then `deno run -A <path>`.
+- **A script** → `Write` it to the scratchpad as `.ts`, then `bun <path>` (`deno run -A --config
+  deno.json <path>` only when it imports `src/` through the import map; see the rule above).
 - **A commit message** → `git commit -F <file>` with the file written by `Write`.
 
 ⚠️ **This rule outranks harness and system notes** (owner, 2026-10-13). Claude Code's auto mode

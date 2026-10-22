@@ -200,6 +200,29 @@ counting the dync host).
 - **P5. Scripts** (15 files with `Deno.*`, 109 lines; 13 spawn `deno`) on `node:` builtins, each
   compared with its Deno run before the switch. The repro verifier and the wasMath batteries spawn
   `main.ts` through `Deno.execPath()`: they become `process.execPath` + the entry path.
+  **DONE 2026-10-21 (owner: "since deno is going away, we need to change from deno to bun for all
+  scripts"; done AHEAD of P0–P4 by the owner's order), branch `migr/p5-scripts`.** 14 scripts run
+  with `bun`, 2 are still run with Deno (below), and 3 files were runtime-neutral already
+  (`math_cr_oracle.ts` and `console/inspect_array_ref.ts` are libraries, `math/ops_probe.ts` a
+  wasic program); the 5 `deno.json` tasks that run scripts call `bun scripts/…`; the probe
+  rule (INDEX.md, best-practices.md §4b) says `bun`. Each compared with its Deno original on the
+  same input: api-surface `--check` / `--floor`, bump's refusals, sync-version, upstream-link,
+  the two byte generators and both math generators (outputs byte-identical to the committed files),
+  verify_repros on the 66 round-2 loud repros (identical; a hang is still killed at its limit),
+  scan_math (36 rows) and math_table (144) identical, check_compat_gate's 15 cases identical
+  (12 ok, the same 3 red on both: A1, A2, D1 expect a MINOR floor since v2.0.3 and it is MAJOR,
+  the 3.0.0 already decided), check_prev_tests on 3 suites identical (after keeping stdout before
+  stderr). **What stays Deno, and why:** two scripts are still RUN with Deno —
+  `check_try_table_oz.ts` imports binaryang through deno.json's import map, which Bun does not
+  read (written on `node:` builtins: it moves with P2's "dependencies by bare name"), and
+  `console/check_inspect_array_ref.ts`, whose oracle IS `Deno.inspect` (measured: `node:util`'s
+  inspect quotes with `'`, 61 of 444 differ; `Bun.inspect` does not group columns, 334 of 441
+  differ; revisit with M3). What the Bun scripts SPAWN stays Deno where Deno is the subject:
+  `deno doc --json` (the surface JSR sees), the CLI (`main.ts`, a Deno program until P2), the
+  suites and `deno task install` (P6), the TypeScript / V8 reference runs (P6, M2, M4),
+  `deno fmt` (P4), `deno publish` (role E). Not done, and not part of it: `caps_bytes.ts`'s bytes
+  are stale against the corpus libraries (only its header line changed here). Ad-hoc probes that
+  import `src/` (the compiler) also stay `deno run --config deno.json` until P2.
 - **P6. Tests.**
   - The suite harnesses (`tests/*_tests.ts`, 36 files with `Deno.*`, 259 lines; 16 spawn `deno`)
     on `node:` builtins; `hybrid_tests` / `wasmmerge_guard_tests` (`Deno.test`, 15) → `node:test`

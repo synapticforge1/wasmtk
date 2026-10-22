@@ -91,8 +91,8 @@ tree-shake, brief §7-#4). Wiring (one line each, the resolver in `tsbundler.ts`
   pipeline test `tests/wasi/wasm_wasi/18k_DynRuntimeVirtualImport.ts` (wasic → run). **PASS.**
 
 **To regenerate after editing the dynrt library:** `wasmtk modc
-tests/wasi/wasm_wasi_bundle/dynrt_bundle/dynrt_lib_modc.ts` → then `deno run --allow-read --allow-write
-scripts/gen_caps_bytes.ts` → then `deno task install` (so the installed binary carries the new bytes).
+tests/wasi/wasm_wasi_bundle/dynrt_bundle/dynrt_lib_modc.ts` → then `bun scripts/gen_caps_bytes.ts`
+→ then `deno task install` (so the installed binary carries the new bytes).
 
 Deferred from 1b (not blocking): a hashmap-backed property map and f64-aware `dynToNumber(string)`.
 
