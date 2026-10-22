@@ -2828,7 +2828,8 @@ class WasicTranspiler {
     }
     if (declared.size !== 1) return undefined; // unknown, or two declarations that disagree
     const t = [...declared][0] as WatType;
-    return t === "f64" || t === "f32" || t === "i64" ? t : undefined;
+    // (a string[]'s element is a string: `names.forEach((s) => …)`, ld96)
+    return t === "f64" || t === "f32" || t === "i64" || t === "string" ? t : undefined;
   }
 
   private substituteOneArrow(
@@ -3122,9 +3123,20 @@ class WasicTranspiler {
       // Build outer scope: params + declared locals of the enclosing function
       const outerScope = new Map<string, WatType>();
       for (const p of enclosingFn.params) outerScope.set(p.name, p.type);
+      let scopeDepth = 0;
       for (const bl of enclosingFn.bodyLines) {
+        const atDepth = scopeDepth;
+        scopeDepth += braceDepthOf(bl);
         // Use ([\w\[\]]+) for the type to handle array types like i32[], i32[][], etc.
         const lm = bl.match(/^(?:const|let|var)\s+(\w+)\s*(?::\s*([\w\[\]]+))?\s*=\s*(.+?)?;?$/);
+        // A top-level number / boolean literal becomes a module GLOBAL (parseModuleGlobals): the
+        // arrow reads and writes it directly. Captured, it updated a copy: `xs.forEach((x) =>
+        // { sum += x; })` left `sum` at 0 (ld96, 2026-10-22).
+        if (
+          lm && enclosingFn.name === "_start" && atDepth === 0 &&
+          /^(?:-?\d+(?:\.\d+)?n?|true|false)$/.test((lm[3] ?? "").trim()) &&
+          !/\|\s*(?:null|undefined)/.test(bl)
+        ) continue;
         if (lm && !lm[3]?.includes("=>")) {
           const t: WatType = lm[2]
             ? mapType(lm[2]) as WatType
@@ -4045,6 +4057,33 @@ class WasicTranspiler {
             }
             if (shared.size > 0) sharedMutableCaptures = shared;
           }
+        }
+        // An INLINE arrow (a callback, `v.forEach((x) => { n += x; })`) that mutates a local of
+        // this function is a closure over it too: the local lives in a box, or the arrow updated a
+        // copy and `n` stayed 0 (ld96, 2026-10-22). Its line is whole here (joinMultiLineArrowArgs).
+        {
+          const boxable = (t: string | undefined) => t === "i32" || t === "bool" || t === "f64";
+          const locals2 = new Set<string>(factoryParams.filter((p) => boxable(p.type)).map((p) => p.name));
+          for (const bl of bodyLines) {
+            const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*:\s*(\w+)\s*=/);
+            if (vm && boxable(mapType(vm[2]!))) locals2.add(vm[1]!);
+          }
+          const shared2 = new Set(sharedMutableCaptures ?? []);
+          for (const bl of bodyLines) {
+            if (/^return\s*\{/.test(bl)) continue; // the object literal above
+            const ai = firstCodeArrowIdx(bl);
+            if (ai === -1 || /^(?:var|let|const)\s+\w+\s*(?::[^=]*)?=\s*(?:async\s+)?\(/.test(bl)) continue;
+            const arrowBody = bl.slice(ai + 2);
+            for (
+              const mm of arrowBody.matchAll(
+                /\b(\w+)\s*(?:\+\+|--)|(?:\+\+|--)\s*(\w+)|\b(\w+)\s*(?:[+\-*\/%&|^]|<<|>>|>>>)?=(?![=>])/g,
+              )
+            ) {
+              const id = mm[1] || mm[2] || mm[3] || "";
+              if (locals2.has(id)) shared2.add(id);
+            }
+          }
+          if (shared2.size > 0) sharedMutableCaptures = shared2;
         }
       }
       this.functions.push({
@@ -9267,24 +9306,67 @@ class WasicTranspiler {
    *  when the callback takes the INDEX as a second parameter, `(x, i) => …` (it was called with the
    *  element only: a signature-mismatch trap, ld75, 2026-10-20). A third parameter (the array) is
    *  refused. Registers the call_indirect type, `(T[, i32]) -> result`. */
+  /** The type to emit an argument at: an inline ARRAY LITERAL for a `T[]` parameter is laid out
+   *  as `T` (the literal's builder reads its element type from this). `[1, 2, 3]` for an `f64[]`
+   *  was built of i32 words, so the callee read garbage (sw128, 2026-10-22). */
+  private literalArgType(p: FuncParam | undefined, arg: string, paramType: WatType): WatType {
+    const e = p?.arrayElemType;
+    return e && !p?.is2DArray && arg.trim().startsWith("[") && (e === "f64" || e === "i64") ? e : paramType;
+  }
+
+  /** The inner function of a capturing callback, `__anon_N__factory(caps)` (ld96); else undefined. */
+  private closureCallback(fnName: string): FuncDef | undefined {
+    const m = fnName.trim().match(/^(\w+)__factory\s*\(/);
+    return m ? this.functions.find((f) => f.name === m[1]) : undefined;
+  }
+
+  /** A callback argument to an array helper: a function's table index, or a capturing arrow's
+   *  closure (its factory call: the environment the `_cl` helper calls through, ld96). */
+  private cbArgWat(fnName: string, locals: Map<string, WatType>): string {
+    return this.closureCallback(fnName)
+      ? this.emitExpr(fnName.trim(), locals, "i32")
+      : `(i32.const ${this.getFuncTableIdx(fnName)})`;
+  }
+
+  /** `_cl` when the callback is a capturing arrow, for the helpers keyed without cbHelperKey. */
+  private clSuffix(fnName: string): string {
+    return this.closureCallback(fnName) ? "_cl" : "";
+  }
+
   private cbHelperKey(method: string, elemType: WatType, fnName: string, result: WatType | null): string {
     const fn = this.functions.find((f) => f.name === fnName);
     const n = fn ? fn.params.length - (fn.closureCaptures?.length ?? 0) : 1;
     // No helper passes a (ptr, len) element: a `string[]` callback was an invalid call_indirect
     // (found with ld92, 2026-10-22). Refused; `for (const s of names)` works.
-    if (elemType === "string" || fn?.params[0]?.type === "string") {
+    // forEach / some / every / findIndex take the (ptr, len) pair (ld96); the others would return
+    // or store strings
+    if (
+      (elemType === "string" || fn?.params[0]?.type === "string") &&
+      !/^(?:foreach|some|every|findindex)$/.test(method)
+    ) {
       this.diagnostics.push(
-        `'${method}' callback '${fnName}': a callback over a string[] is not supported; use for…of`,
+        `'${method}' callback '${fnName}': a ${method} callback over a string[] is not supported; use for…of`,
       );
     }
-    // A capturing callback is a closure-factory CALL; the helpers call a bare table index, so its
-    // text went into the table as a name, an invalid module (found with ld91, 2026-10-22).
-    const cap = fnName.match(/^\w+__factory\s*\(([^)]*)\)/);
-    if (cap) {
-      this.diagnostics.push(
-        `'${method}' callback: an arrow that captures a local ('${cap[1].trim()}') is not supported ` +
-          `here; use a for loop, or a module-level variable`,
-      );
+    // A capturing callback is a closure-factory CALL: the `_cl` helper, which calls it through its
+    // environment (ld96, 2026-10-22; it went into the table as a name, an invalid module, then was
+    // refused). Its parameter count is the inner function's, less the captures.
+    const cl = this.closureCallback(fnName);
+    if (cl) {
+      // a closure's trampoline passes one word per parameter, so not a string's two
+      const caps = cl.closureCaptures ?? [];
+      if (elemType === "string" || cl.params.some((p) => caps.includes(p.name) && p.type === "string")) {
+        this.diagnostics.push(
+          `'${method}' callback: an arrow that captures a variable, over a string[] or capturing a ` +
+            `string, is not supported; use for…of`,
+        );
+      }
+      const n2 = cl.params.filter((p) => !caps.includes(p.name) && p.name !== "__closure_ptr").length;
+      if (n2 >= 3) {
+        this.diagnostics.push(`'${method}' callback: a third parameter (the array itself) is not supported.`);
+      }
+      this.getOrCreateFuncType(n2 >= 2 ? [elemType, "i32"] : [elemType], result);
+      return `${method}_${elemType}${n2 >= 2 ? "_ix" : ""}_cl`;
     }
     if (n >= 3) {
       this.diagnostics.push(
@@ -9300,7 +9382,7 @@ class WasicTranspiler {
    *  is not i32 (`(x, y): f64 => x - y` was called through an `(f64, f64) -> i32` type: a
    *  signature-mismatch trap, ld49, 2026-10-20). Registers the call_indirect type. */
   private sortCmpKey(elemType: WatType, fnName: string): string {
-    const r = this.functions.find((f) => f.name === fnName)?.result;
+    const r = (this.closureCallback(fnName) ?? this.functions.find((f) => f.name === fnName))?.result;
     const res: WatType = r === "f64" || r === "f32" || r === "i64" ? r : "i32";
     this.getOrCreateFuncType([elemType, elemType], res);
     return res === "i32" ? `sortcmp_${elemType}` : `sortcmp_${elemType}_${res}`;
@@ -11506,16 +11588,16 @@ ${prefixed}
           const args = this.splitArgs(argsStr);
           const key = this.cbHelperKey(method, elemType, args[0]?.trim() ?? "", "i32");
           this.dynArrHelpers.add(key);
-          const fnIdx = this.getFuncTableIdx(args[0]?.trim() ?? "");
-          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
+          const fnIdx = this.cbArgWat(args[0]?.trim() ?? "", locals);
+          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${fnIdx})`;
         }
         // Phase 28: findIndex — returns index of first match or -1
         if (method === "findIndex") {
           const args = this.splitArgs(argsStr);
           const key = this.cbHelperKey("findindex", elemType, args[0]?.trim() ?? "", "i32");
           this.dynArrHelpers.add(key);
-          const fnIdx = this.getFuncTableIdx(args[0]?.trim() ?? "");
-          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
+          const fnIdx = this.cbArgWat(args[0]?.trim() ?? "", locals);
+          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${fnIdx})`;
         }
         // Phase 28: at(n) — element at index (supports negative wrap)
         if (method === "at") {
@@ -11553,10 +11635,10 @@ ${prefixed}
           const args = this.splitArgs(argsStr);
           const fnName = args[0]?.trim() ?? "";
           if (fnName) {
-            const key = this.sortCmpKey(elemType, fnName);
+            const key = this.sortCmpKey(elemType, fnName) + this.clSuffix(fnName); // (ld96)
             this.dynArrHelpers.add(key);
-            const fnIdx = this.getFuncTableIdx(fnName);
-            return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
+            const fnIdx = this.cbArgWat(fnName, locals);
+            return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${fnIdx})`;
           } else {
             const key = `sort_${elemType}`;
             this.dynArrHelpers.add(key);
@@ -11576,12 +11658,12 @@ ${prefixed}
         }
         // Phase 37: flatMap(fn) — map each element to an array, then flatten
         if (method === "flatMap") {
-          const key = `flatmap_${elemType}`;
+          const args = this.splitArgs(argsStr);
+          const key = `flatmap_${elemType}${this.clSuffix(args[0]?.trim() ?? "")}`; // (ld96)
           this.dynArrHelpers.add(key);
           this.getOrCreateFuncType([elemType], "i32"); // fn: (elem) → i32 ptr to inner array
-          const args = this.splitArgs(argsStr);
-          const fnIdx = this.getFuncTableIdx(args[0]?.trim() ?? "");
-          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
+          const fnIdx = this.cbArgWat(args[0]?.trim() ?? "", locals);
+          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${fnIdx})`;
         }
         // Phase 49: concat(other) — concatenate two arrays, return new array
         if (method === "concat") {
@@ -11593,12 +11675,13 @@ ${prefixed}
         // Callback methods: map, filter, find, reduce
         const args = this.splitArgs(argsStr);
         const fnName = args[0]?.trim() ?? "";
-        const fnIdx = this.getFuncTableIdx(fnName);
+        const fnIdx = this.cbArgWat(fnName, locals);
         // map / filter / find take the index too when the callback declares it (ld75); this also
         // pre-registers the callback funtype so emitFuncTypes() includes it
+        const cl = this.clSuffix(fnName); // a capturing reduce callback (ld96)
         const key = method === "map" || method === "filter" || method === "find"
           ? this.cbHelperKey(method, elemType, fnName, method === "map" ? elemType : "i32")
-          : `${method}_${elemType}`;
+          : `${method}_${elemType}${cl}`;
         // a reduce without an initial value uses reduce1_T instead (sw89)
         if (method !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key);
         if (method === "find") this.needsNullableResultFlag = true; // its found flag (sw90)
@@ -11607,15 +11690,15 @@ ${prefixed}
           // No initial value: the accumulator starts as element 0 (`reduce1_T`); it started at 0,
           // so a product was 0 (sw89, 2026-10-19).
           if (!args[1]?.trim()) {
-            this.dynArrHelpers.add(`reduce1_${elemType}`);
-            return `(call $__dynarr_reduce1_${elemType} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
+            this.dynArrHelpers.add(`reduce1_${elemType}${cl}`);
+            return `(call $__dynarr_reduce1_${elemType}${cl} ${this.arrGetWat(arrName)} ${fnIdx})`;
           }
           const initWat = this.emitExpr(args[1].trim(), locals, elemType);
           return `(call $__dynarr_${key} ${
             this.arrGetWat(arrName)
-          } (i32.const ${fnIdx}) ${initWat})`;
+          } ${fnIdx} ${initWat})`;
         }
-        return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} (i32.const ${fnIdx}))`;
+        return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${fnIdx})`;
       }
     }
 
@@ -11668,19 +11751,12 @@ ${prefixed}
             const chainArgs = chainParsed.args.trim();
             const innerWat = this.emitExpr(chainParsed.receiver, locals, "i32");
             const et = elemType as WatType;
-            if (method === "map") {
-              const key = "map_" + et;
+            // map / filter of a chain: the one-array keys (an index parameter, ld75; a capturing
+            // arrow, ld96), which registers the callback type too
+            if (method === "map" || method === "filter") {
+              const key = this.cbHelperKey(method, et, chainArgs, method === "map" ? et : "i32");
               this.dynArrHelpers.add(key);
-              this.getOrCreateFuncType([et], et);
-              const fnIdx = this.getFuncTableIdx(chainArgs);
-              return "(call $__dynarr_" + key + " " + innerWat + " (i32.const " + fnIdx + "))";
-            }
-            if (method === "filter") {
-              const key = "filter_" + et;
-              this.dynArrHelpers.add(key);
-              this.getOrCreateFuncType([et], "i32");
-              const fnIdx = this.getFuncTableIdx(chainArgs);
-              return "(call $__dynarr_" + key + " " + innerWat + " (i32.const " + fnIdx + "))";
+              return `(call $__dynarr_${key} ${innerWat} ${this.cbArgWat(chainArgs, locals)})`;
             }
             if (method === "concat") {
               const key = "concat_" + et;
@@ -12634,7 +12710,7 @@ ${prefixed}
             return [`(i32.const ${ptr})`];
           }
         }
-        return [this.emitExpr(a, locals, paramType)];
+        return [this.emitExpr(a, locals, this.literalArgType(fn.params[i], a, paramType))];
       });
       // Fill in default values for omitted trailing params
       const baseParamCount = fn.params.length - (fn.closureCaptures?.length ?? 0);
@@ -15889,14 +15965,15 @@ ${prefixed}
         const elemType = arrInfo.elemType as WatType;
         const args = this.splitArgs(argsStr);
         const fnName = args[0]?.trim() ?? "";
-        const fnIdx = this.getFuncTableIdx(fnName);
+        const fnIdx = this.cbArgWat(fnName, locals);
         const arrWat = this.arrGetWat(arrName); // the global, for a module array in a function
         // Normalize method name to lowercase for key/helper name consistency
         const methodLc = method.toLowerCase() as string;
         // every callback but reduce's may take the index as a second parameter (ld75); this
         // registers the callback funtype too
+        const cl = this.clSuffix(fnName); // a capturing reduce callback (ld96)
         const key = methodLc === "reduce"
-          ? `${methodLc}_${elemType}`
+          ? `${methodLc}_${elemType}${cl}`
           : this.cbHelperKey(
             methodLc,
             elemType,
@@ -15906,18 +15983,18 @@ ${prefixed}
         if (methodLc !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key); // sw89: reduce1_T
         if (methodLc === "find") this.needsNullableResultFlag = true; // sw90
         if (methodLc === "foreach") {
-          return `(call $__dynarr_${key} ${arrWat} (i32.const ${fnIdx}))`;
+          return `(call $__dynarr_${key} ${arrWat} ${fnIdx})`;
         }
         if (methodLc === "reduce") {
           this.getOrCreateFuncType([elemType, elemType], elemType);
           if (!args[1]?.trim()) { // sw89: element 0 starts the accumulator
-            this.dynArrHelpers.add(`reduce1_${elemType}`);
-            return `(drop (call $__dynarr_reduce1_${elemType} ${arrWat} (i32.const ${fnIdx})))`;
+            this.dynArrHelpers.add(`reduce1_${elemType}${cl}`);
+            return `(drop (call $__dynarr_reduce1_${elemType}${cl} ${arrWat} ${fnIdx}))`;
           }
           const initWat = this.emitExpr(args[1].trim(), locals, elemType);
-          return `(drop (call $__dynarr_${key} ${arrWat} (i32.const ${fnIdx}) ${initWat}))`;
+          return `(drop (call $__dynarr_${key} ${arrWat} ${fnIdx} ${initWat}))`;
         }
-        return `(drop (call $__dynarr_${key} ${arrWat} (i32.const ${fnIdx})))`;
+        return `(drop (call $__dynarr_${key} ${arrWat} ${fnIdx}))`;
       }
     }
 
@@ -15957,8 +16034,8 @@ ${prefixed}
           if (fnName) {
             const key = this.sortCmpKey(elemType, fnName);
             this.dynArrHelpers.add(key);
-            const fnIdx = this.getFuncTableIdx(fnName);
-            return `(drop (call $__dynarr_${key} (local.get $${arrName}) (i32.const ${fnIdx})))`;
+            const fnIdx = this.cbArgWat(fnName, locals);
+            return `(drop (call $__dynarr_${key} (local.get $${arrName}) ${fnIdx}))`;
           } else if (isStrArr2) {
             this.dynArrHelpers.add("sort_string");
             this.needsStringHelpers = true; // $__str_cmp (ld52: it was undefined, 2026-10-20)
@@ -17872,7 +17949,7 @@ ${prefixed}
         const emittedArgsList = args.flatMap((a, i) => {
           const pt = fn.params[i]?.type ?? "f64" as WatType;
           if (pt === "string") return [this.emitStringPtrLen(a, locals)];
-          return [this.emitExpr(a, locals, pt)];
+          return [this.emitExpr(a, locals, this.literalArgType(fn.params[i], a, pt))]; // sw128
         });
         // Fill in default values for omitted trailing params
         const baseParamCount = fn.params.length - (fn.closureCaptures?.length ?? 0);
@@ -20578,10 +20655,19 @@ ${sum}
     }
 
     // Emit only the helpers actually used in this module.
-    for (const key of this.dynArrHelpers) {
+    const closureHelpers: (() => void)[] = []; // the `_cl` rewrites, run after the loop (ld96)
+    for (const fullKey of this.dynArrHelpers) {
+      // `<key>_cl`: the callback is a CLOSURE, `$fn` its environment pointer (ld96, 2026-10-22).
+      // The helper is the base one with its call_indirect made a trampoline call (rewritten below).
+      const isCl = fullKey.endsWith("_cl");
+      const key = isCl ? fullKey.slice(0, -3) : fullKey;
+      const partsBefore = parts.length;
       const [method, elemType] = key.split("_") as [string, WatType];
       const isF64 = elemType === "f64";
-      const shift = isF64 ? 3 : 2;
+      // a string element is an 8-byte (ptr, len) pair, passed to the callback as both words (the
+      // forEach / some / every / findIndex callbacks over a string[], ld96)
+      const isStrElem = elemType === "string" && /^(?:foreach|some|every|findindex)$/.test(method);
+      const shift = isF64 || isStrElem ? 3 : 2;
       // f32 elements are 4-byte FLOATS: f32 ops and an f32 value type. They were i32 here, so
       // `ys.push(1.5)` on an f32[] passed an f32 to an i32 parameter (2026-10-06, with sw43).
       const valType = isF64 ? "f64" : elemType === "f32" ? "f32" : "i32";
@@ -20592,6 +20678,26 @@ ${sum}
       const ixArg = cbIx ? " (local.get $i)" : "";
       const cbType = (r: WatType | null) => this.getOrCreateFuncType(cbIx ? [elemType, "i32"] : [elemType], r);
       const name = `$__dynarr_${key}`;
+      // (after this key's branch below has pushed its helper)
+      if (isStrElem) closureHelpers.push(() => {
+        if (!parts[partsBefore]?.includes(`(func ${name} `)) return;
+        const one = "(i32.load (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3))))";
+        const addr = "(i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3)))";
+        parts[partsBefore] = parts[partsBefore]!.replaceAll(one, `(i32.load ${addr}) (i32.load offset=4 ${addr})`);
+      });
+      if (isCl) closureHelpers.push(() => {
+        if (!parts[partsBefore]?.includes(`(func ${name} `)) return;
+        parts[partsBefore] = parts[partsBefore]!
+          .replaceAll(`${name} `, `$__dynarr_${fullKey} `)
+          .replace(
+            /\(call_indirect \(type \$ftype_(\w+?)_r_(\w+)\)([\s\S]*?)\(local\.get \$fn\)\)/g,
+            (_m, ps: string, r: string, args: string) => {
+              const params = ps === "void" ? [] : ps.split("_") as WatType[];
+              const tt = this.getOrCreateFuncType(["i32" as WatType, ...params], r === "void" ? null : r as WatType);
+              return `(call_indirect (type ${tt}) (local.get $fn)${args}(i32.load (local.get $fn)))`;
+            },
+          );
+      });
 
       if (method === "push" && key !== "push_string") {
         parts.push(
@@ -21591,6 +21697,7 @@ ${sum}
         );
       }
     }
+    for (const rewrite of closureHelpers) rewrite();
     return parts.join("\n\n");
   }
 

@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 1 | 142 | 0 | 27 |
-| LOUD | 3 | 104 | 0 | 19 |
+| SILENT-WRONG | 1 | 143 | 0 | 27 |
+| LOUD | 2 | 105 | 0 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**ld96 FIXED 2026-10-22, sw128 found and fixed:** capturing array-method callbacks; an inline array
+literal for an `f64[]` parameter (silent); open loud 2 compiler (ld45, ld100), silent 1 (sw119);
+tests `5h_CapturingCallbacks`, `9_ArrayLiteralArguments`.
 **ld94, ld95 FIXED 2026-10-22:** `string[][]`, a literal array of functions; open loud 3 compiler
 (ld45, ld96, ld100); tests `63_StringMatrix`, `44_FunctionArrayLiterals`.
 **sw123 FIXED 2026-10-22** (owner: "fix the compiler issues first"): null and undefined are told
@@ -478,11 +481,21 @@ dynamic so that a push cannot move it under the caller; the non-growing methods 
 Found 2026-10-22 (all the same on main), OPEN: ld95 a LITERAL array of functions,
 `const ops: Op[] = [add, mul]`, is not a function array (`const f: Op = ops[i]` is "Unsupported
 function-typed initialiser", `console.log(ops[0](1, 2))` a console refusal; `Array<Op> = []` and
-`push` work); ld96 an array-method callback that CAPTURES a local (`v.forEach((x) => { n += x; })`
+`push` work); ~~ld95~~ FIXED 2026-10-22 (see its row); ~~ld96~~ FIXED 2026-10-22 an array-method callback that CAPTURES a local (`v.forEach((x) => { n += x; })`
 in a function, or a top-level `let` the lifter treats as captured) was an invalid module, now
 refused with a message (the helpers call a bare table index; a closure needs its environment).
 A `string[]` callback (`names.forEach((s) => …)`) is refused likewise (no helper passes a
-(ptr, len) element; it was refused before as well).
+(ptr, len) element; it was refused before as well). Fixed: a `<key>_cl` helper is the base
+helper with its call_indirect made a trampoline call through `$fn`, the closure (`cbArgWat`
+passes the factory call; `cbHelperKey`, the reduce / reduce1 / sortcmp / flatMap keys and a
+chain's map / filter take `_cl`); a function local an inline arrow MUTATES is boxed (Phase 5h's
+`sharedMutableCaptures` saw only a returned object literal's arrows); a top-level number /
+boolean literal is not captured but read as the module global it becomes. forEach / some / every /
+findIndex over a `string[]` pass each (ptr, len) element (an untyped `s` is a string); a closure
+over a `string[]` or capturing a string is refused (a trampoline passes one word per
+parameter). **sw128** FIXED 2026-10-22 (found with ld96; the same on main): an inline array
+literal for an `f64[]` (or `i64[]`) parameter was built of i32 words, `first([1, 2, 3])` read
+`4.24e-314` (`literalArgType` at both plain call sites; console hands such a call to wasic).
 
 **Loud, tools** (`round2/tools/`): ~~ld81~~ FIXED 2026-10-22 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
 to 131072 in a 1-page bundle: out of bounds) (the bundle keeps the largest memory a module
