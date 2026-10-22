@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 139 | 0 | 27 |
-| LOUD | 12 | 88 | 9 | 10 |
+| LOUD | 9 | 91 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud refusals, group 3 (strings, tuples, objects) FIXED 2026-10-22:** ld76, ld77, ld80; open loud
+9 compiler + 9 tool; test `28_StringsTuplesAndObjects`.
 **Loud refusals, group 2 (statements) FIXED 2026-10-22:** ld71, ld72, ld73, and ld78's default-from-
 an-earlier-parameter and two-declaration `for` (ld78 stays open for its callback forms); open loud
 12 compiler + 9 tool; tests `5f_IncrementsAndCompoundForms`, `5f_CompoundIndexSideEffectRefused`.
@@ -388,15 +390,26 @@ goes through `emitStringFieldStore`);
 returning string, `super()` with no base constructor, a struct alias's field store, generic and
 abstract classes; ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
 per function), `map((x, i) => …)` (signature mismatch; `<method>_<T>_ix` helpers for forEach, map,
-filter, find, findIndex, every, some; a third parameter is refused); ld76 destructuring from a call, a tuple holding a string; ld77 a string literal in
-expression position (`"abc" > "ab"`, nested string ternary, object with a string and a function
-field); ld78 ~~a default parameter using an earlier one~~ (FIXED 2026-10-22, `bindDefaultParam`: the
+filter, find, findIndex, every, some; a third parameter is refused); ~~ld76~~ FIXED 2026-10-22 destructuring from a call, a tuple holding a string
+(`destructSourceDef` / `destructSource`: a struct variable or a struct- / tuple-returning call,
+evaluated once into `$__destr_src`, in the three pre-scans (the start body had no object one) and
+both emitters; a tuple's string element stored by emitStringFieldStore and read by
+emitStringPtrLen, `isStringExpr`, `inferExprType` and console.log); ~~ld77~~ FIXED 2026-10-22 a string literal in
+expression position (`"abc" > "ab"`: a literal LEFT side compares as a string; nested string
+ternary: emitStringAssign split at the LAST `?`, now splitTernaryTop; object with a string and a
+function field: the lifting guard refused every arrow after a `:` on a declaration line, now only
+the annotation's own colon, and a declared literal of an interface with function fields builds
+closure factories as a returned one does, dispatched through `interfaceOf`); ld78 ~~a default parameter using an earlier one~~ (FIXED 2026-10-22, `bindDefaultParam`: the
 earlier arguments substituted at the call site, a side-effecting one refused), ~~`for (let i = 0, j =
 10; …)`~~ (FIXED 2026-10-22: `splitForInit` in both pre-scans and all three `for` emitters, a comma
 list of updates in `emitUpdate`, each declarator counter-checked), still OPEN: chained
 `filter().map().reduce()`, a function array called through a local; ld79 `for…of` over class /
-struct arrays (documented limit; virtual dispatch inside it); ld80 missing methods: `substring`,
-`lastIndexOf` (string, array), `splice` as a value, `(e as Error).message`, ~~`string[].join` into a
+struct arrays (documented limit; virtual dispatch inside it); ~~ld80~~ FIXED 2026-10-22 missing methods: `substring`
+(`$__str_substring`, clamped and swapped), `lastIndexOf` (string `$__str_lastindexof`, array
+`lastindexof_T` with `from`), `splice` as a value (the removed elements via the slice helper from
+the normalised start and clamped count, a side-effecting start / count refused),
+`(e as Error).message` (a cast of a name to a capitalised type before a member access is stripped
+in a pre-pass), ~~`string[].join` into a
 declaration (README says assignable)~~ (done 2026-10-19 with sw76).
 Found 2026-10-20 (all the same on main): ld91 a MULTI-LINE arrow callback at top level,
 `xs.forEach((x) => {` … `});`, is "Unsupported statement: });"; ld92 an expression-bodied arrow

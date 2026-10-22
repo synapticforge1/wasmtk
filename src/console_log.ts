@@ -1765,6 +1765,15 @@ function parseSingleArg(
   }
   let bracketMatch = token.match(/^(\w+)\[(.+)\]$/);
   if (bracketMatch && !parenDepthNeverNegative(bracketMatch[2])) bracketMatch = null;
+  // A tuple's STRING element, `mix[0]` (not an array): wasic's string resolver, which answers
+  // nothing for a number element (`${mix[0]}` printed the pointer, found with ld76, 2026-10-22)
+  if (
+    bracketMatch && _stringExprResolver && /^\w+\[\d+\]$/.test(token) && !arrayLookup?.(bracketMatch[1]) &&
+    (locals.get(bracketMatch[1]) ?? globals?.get(bracketMatch[1])) !== "string"
+  ) {
+    const r = _stringExprResolver(token, locals);
+    if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+  }
   // A STRING indexed, `s[i]`: one character, built by wasic's string resolver (the path
   // `const ch: string = s[i]` takes), whatever the index's type. The array handlers below never
   // matched a string, so every `s[i]` here was refused, an f64 index (ld34) and an i32 one alike.

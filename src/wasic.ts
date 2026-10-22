@@ -2048,6 +2048,8 @@ class WasicTranspiler {
   private needsNumericHelpers = false;
   private needsStringHelpers = false;
   private needsStringOpHelpers = false;
+  private needsStrSubstring = false; // ld80: $__str_substring
+  private needsStrLastIndexOf = false; // ld80: $__str_lastindexof
   /** sw08: the `$__<k>_to_new_str` helpers emitStringPtrLen's `String(x)` asked for. */
   private strOfHelpers: Set<string> = new Set();
   /** sw49: the `$__lor_<t>` scratch globals the operand form of `&&` / `||` used. */
@@ -2789,7 +2791,13 @@ class WasicTranspiler {
     // Guard: skip type-annotation declarations such as `let mathOp: (a: i32) => i32;`.
     // The `:` context is valid for object-literal values `{ key: (p) => ... }` but NOT
     // for variable type annotations that start with var/let/const.
-    if (line[beforeParens] === ":" && /^(?:var|let|const)\s/.test(line)) return line;
+    // Only THE annotation's colon, the one right after the declared name: an object literal's arrow
+    // field on a declaration line, `const add: Op = { run: (a, b) => a + b }`, was never lifted
+    // (ld77, 2026-10-22).
+    {
+      const declColon = line.match(/^(?:var|let|const)\s+[\w$]+\s*:/);
+      if (line[beforeParens] === ":" && declColon && beforeParens === declColon[0].length - 1) return line;
+    }
 
     // For `=` (assignment arrow): extract the target variable name.
     // If it's already a known module-level function (parsed by parseArrowFunctions), skip lifting.
@@ -3020,7 +3028,12 @@ class WasicTranspiler {
       // struct's dispatch), so it needs a closure object even with nothing to capture: a bare table
       // index there trapped, "function signature mismatch" (ld40, 2026-10-15). The same for a
       // local the function returns in such a literal, `{ g: g }` / `{ g }`.
-      const returnObj = /^return\s*\{/.test(line.trim()) && preceding === ":";
+      // ...and a DECLARED literal of an interface with function fields, `const add: Op = { run:
+      // (a, b) => a + b }`: the same closure objects interface dispatch calls (ld77, 2026-10-22)
+      const declIface = line.trim().match(/^(?:const|let|var)\s+\w+\s*:\s*(\w+)\s*=\s*\{/)?.[1];
+      const returnObj = (/^return\s*\{/.test(line.trim()) ||
+        (!!declIface && !!this.structDefs.get(declIface)?.fields.some((f) => f.funcType))) &&
+        preceding === ":";
       const returnedLocal = preceding === "=" && assignTarget !== "" &&
         enclosingFn.bodyLines.some((l) =>
           /^return\s*\{/.test(l.trim()) &&
@@ -6887,6 +6900,11 @@ class WasicTranspiler {
           continue;
         }
       }
+      // a STRING element, `[string, f64]` (ld76, 2026-10-22: emitted as a number, refused)
+      if (field.type === "string") {
+        stmts.push(this.emitStringFieldStore(`(local.get $${basePtr})`, baseOffset + field.offset, elem, locals));
+        continue;
+      }
       const storeOp = memStoreOp(field.type);
       const { valWat, flagWat } = this.fieldInit(field, elem, locals);
       stmts.push(
@@ -7216,7 +7234,7 @@ class WasicTranspiler {
     for (const line of lines) {
       // Method calls that require heap layout
       const m = line.match(
-        /\b(\w+)\.(push|pop|shift|unshift|indexOf|includes|slice|forEach|map|filter|find|reduce|every|some|findIndex|at|reverse|fill|join|sort|flat|flatMap|splice|concat)\s*\(/,
+        /\b(\w+)\.(push|pop|shift|unshift|indexOf|lastIndexOf|includes|slice|forEach|map|filter|find|reduce|every|some|findIndex|at|reverse|fill|join|sort|flat|flatMap|splice|concat)\s*\(/,
       );
       if (m) dynamic.add(m[1]);
       // Phase 6d: subscript method call: matrix[i].push(...) — outer array must be dynamic
@@ -7880,16 +7898,16 @@ class WasicTranspiler {
       }
     }
 
-    // Ternary: cond ? stringExpr1 : stringExpr2
+    // Ternary: cond ? stringExpr1 : stringExpr2. Split at the FIRST `?` and its own `:`
+    // (splitTernaryTop): the rightmost `?` made `c1 ? "A" : c2 ? "B" : "F"` a condition of
+    // `c1 ? "A" : c2`, refused (ld77, 2026-10-22).
     {
-      const qIdx = this.findBinaryOp(initExpr, "?");
-      if (qIdx !== -1) {
-        const rest = initExpr.slice(qIdx + 1);
-        const cIdx = this.findBinaryOp(rest, ":");
-        if (cIdx !== -1) {
-          const cond = initExpr.slice(0, qIdx).trim();
-          const thenExpr = rest.slice(0, cIdx).trim();
-          const elseExpr = rest.slice(cIdx + 1).trim();
+      const tern = this.splitTernaryTop(initExpr);
+      if (tern) {
+        {
+          const cond = tern[0].trim();
+          const thenExpr = tern[1].trim();
+          const elseExpr = tern[2].trim();
           // Both branches must be string expressions
           if (this.isStringExpr(thenExpr, locals) && this.isStringExpr(elseExpr, locals)) {
             const condWat = this.emitCond(cond, locals);
@@ -8729,6 +8747,49 @@ class WasicTranspiler {
     return out;
   }
 
+  /** The interface a receiver's methods dispatch through: an interface-typed result of a call (as
+   *  before), or a struct variable whose type has function fields, `const add: Op = { run: … }`
+   *  (ld77, 2026-10-22: `add.run(3, 4)` was refused). */
+  private interfaceOf(receiver: string): string | undefined {
+    const known = this.interfaceVars.get(receiver);
+    if (known) return known;
+    const def = this.structVars.get(receiver)?.def;
+    return def?.fields.some((f) => f.funcType) ? def.name : undefined;
+  }
+
+  /** The struct / tuple a destructuring declaration reads, from its `= …` tail: a struct variable,
+   *  or a CALL whose function returns a struct or tuple (`const [lo, hi] = mm(8, 2)`, `const { x,
+   *  y } = mk(4)`: refused before, ld76, 2026-10-22). */
+  private destructSourceDef(after: string): StructDef | undefined {
+    const m = after.match(/^=\s*([\s\S]+?)\s*;?$/);
+    const src = m?.[1]!.trim() ?? "";
+    if (/^\w+$/.test(src)) return this.structVars.get(src)?.def;
+    const cm = src.match(/^(\w+)\s*\(([\s\S]*)\)$/);
+    if (!cm || !parenDepthNeverNegative(cm[2]!)) return undefined;
+    const rn = this.functions.find((f) => f.name === cm[1])?.resultTsName;
+    return rn ? this.structDefs.get(rn) : undefined;
+  }
+
+  /** Emission side of destructSourceDef: the base pointer, and (for a call) the statement that
+   *  evaluates it ONCE into $__destr_src. */
+  private destructSource(
+    after: string,
+    locals: Map<string, WatType>,
+  ): { def: StructDef; baseWat: string; pre: string } | null {
+    const def = this.destructSourceDef(after);
+    if (!def) return null;
+    const src = after.match(/^=\s*([\s\S]+?)\s*;?$/)![1]!.trim();
+    if (/^\w+$/.test(src)) {
+      const sv = this.structVars.get(src)!;
+      return { def, baseWat: sv.ptr < 0 ? `(local.get $${src})` : `(i32.const ${sv.ptr})`, pre: "" };
+    }
+    return {
+      def,
+      baseWat: `(local.get $__destr_src)`,
+      pre: `(local.set $__destr_src ${this.emitExpr(src, locals, "i32")})`,
+    };
+  }
+
   /** `++x` / `x--` … on a number local or module global (not boxed, not nullable), else null (ld71). */
   private incDecParts(
     expr: string,
@@ -8782,6 +8843,8 @@ class WasicTranspiler {
     if (/^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(e) && this.fieldOfExpr(e, locals)?.type === "string") {
       return true;
     }
+    // ...and a tuple's string element, `mix[0]` (ld76)
+    if (/^\w+\[\d+\]$/.test(e) && this.fieldOfExpr(e, locals)?.type === "string") return true;
     // a conditional whose two branches are strings (`${c ? p.s : p.t}` printed the pointer)
     {
       const tern = this.splitTernaryTop(e);
@@ -8795,7 +8858,7 @@ class WasicTranspiler {
     }
     // String method calls on a string variable (slice, trim, charAt, case, replace, pad, repeat)
     const strMethodM = e.match(
-      /^(\w+)\.(slice|trim|trimStart|trimEnd|trimLeft|trimRight|charAt|toUpperCase|toLowerCase|replace|replaceAll|padStart|padEnd|repeat)\s*\(/,
+      /^(\w+)\.(slice|substring|trim|trimStart|trimEnd|trimLeft|trimRight|charAt|toUpperCase|toLowerCase|replace|replaceAll|padStart|padEnd|repeat)\s*\(/,
     );
     if (
       strMethodM &&
@@ -8971,6 +9034,12 @@ class WasicTranspiler {
       const redM = e.match(/^(\w+)\.reduce(?:Right)?\s*\(([\s\S]*)\)$/);
       const redI = redM && parenDepthNeverNegative(redM[2]!) ? this.arrayVars.get(redM[1]!) : undefined;
       if (redI && !redI.isStringArr && ["i32", "i64", "f64", "f32"].includes(redI.elemType)) return redI.elemType;
+    }
+    // A tuple element `t[N]` → its field's type (`${mix[0]}` of a `[string, f64]` printed the
+    // string's pointer, found with ld76, 2026-10-22)
+    if (/^\w+\[\d+\]$/.test(e) && !this.arrayVars.has(e.match(/^\w+/)![0])) {
+      const tf = this.fieldOfExpr(e, locals);
+      if (tf) return tf.type as WatType;
     }
     // Array element access arr[idx] → element type
     const bracketId = e.match(/^(\w+)\[/)?.[1];
@@ -9410,6 +9479,16 @@ ${prefixed}
       const [offset, len] = this.allocString(litMatch[1]);
       return `(i32.const ${offset}) (i32.const ${len})`;
     }
+    // A tuple's STRING element, `mix[0]` of a `[string, f64]` (ld76, 2026-10-22: refused)
+    {
+      const tm = expr.match(/^(\w+)\[(\d+)\]$/);
+      const sv = tm ? this.structVars.get(tm[1]!) : undefined;
+      const f = tm && sv && sv.def.fields.every((x) => /^_\d+$/.test(x.name)) ? sv.def.fields[+tm[2]!] : undefined;
+      if (sv && f?.type === "string") {
+        const baseWat = sv.ptr < 0 ? `(local.get $${tm![1]})` : `(i32.const ${sv.ptr})`;
+        return `(i32.load offset=${f.offset} ${baseWat}) (i32.load offset=${f.offset + 4} ${baseWat})`;
+      }
+    }
     // Struct string field: p.fieldName where p is a struct/class var with a string-typed field
     const structFieldSPLM = expr.match(/^(\w+)\.(\w+)$/);
     if (structFieldSPLM) {
@@ -9527,6 +9606,20 @@ ${prefixed}
     const sliceRecvParts = sliceSPLM && parenDepthNeverNegative(sliceSPLM[2])
       ? this.stringReceiverParts(sliceSPLM[1]!, locals)
       : null;
+    // str.substring(a[, b]): both clamped to [0, len], swapped when a > b ($__str_substring; ld80,
+    // 2026-10-22: refused)
+    {
+      const subM = expr.match(/^(.+)\.substring\s*\(([\s\S]*)\)$/);
+      const subRecv = subM && parenDepthNeverNegative(subM[2]!) ? this.stringReceiverParts(subM[1]!, locals) : null;
+      if (subM && subRecv) {
+        this.needsStringOpHelpers = true;
+        this.needsStrSubstring = true;
+        const subArgs = subM[2]!.trim() ? this.splitArgs(subM[2]!.trim()) : [];
+        const aWat = subArgs[0] ? this.emitArrayIndex(subArgs[0].trim(), locals) : "(i32.const 0)";
+        const bWat = subArgs[1] ? this.emitArrayIndex(subArgs[1].trim(), locals) : subRecv.len;
+        return `(call $__str_substring ${subRecv.ptr} ${subRecv.len} ${aWat} ${bWat})`;
+      }
+    }
     if (sliceSPLM && sliceRecvParts) {
       this.needsStringOpHelpers = true;
       const sliceArgs = this.splitArgs(sliceSPLM[2].trim());
@@ -10519,6 +10612,19 @@ ${prefixed}
       if (defaultType === "f64" || defaultType === "f32") return `(f64.convert_i32_s ${wat})`;
       return wat;
     }
+    // str.lastIndexOf(sub[, from]) → i32 offset or -1 ($__str_lastindexof; ld80, 2026-10-22: refused).
+    // `from` defaults to the length (JavaScript's +Infinity, clamped).
+    {
+      const sl = expr.match(/^(\w+)\.lastIndexOf\s*\(([\s\S]+)\)$/);
+      if (sl && parenDepthNeverNegative(sl[2]!) && (locals.get(sl[1]!) === "string" || this.moduleStringConsts.has(sl[1]!))) {
+        this.needsStrLastIndexOf = true;
+        const recv = this.stringReceiverParts(sl[1]!, locals)!;
+        const la = this.splitArgs(sl[2]!.trim());
+        const fromWat = la[1] ? this.emitExpr(la[1].trim(), locals, "i32") : recv.len;
+        const wat = `(call $__str_lastindexof ${recv.ptr} ${recv.len} ${this.emitStringPtrLen(la[0]!.trim(), locals)} ${fromWat})`;
+        return defaultType === "f64" || defaultType === "f32" ? `(f64.convert_i32_s ${wat})` : wat;
+      }
+    }
     // str.includes(sub) → i32 bool (1 = found, 0 = not found)
     const strIncludesMatch = expr.match(/^(\w+)\.includes\s*\((.+)\)$/);
     if (
@@ -10931,14 +11037,54 @@ ${prefixed}
     // Dynamic array read/query methods: arr.indexOf(val), arr.includes(val), arr.slice(start,end)
     // Dynamic array callback methods (expression form): arr.map(fn), arr.filter(fn), arr.find(fn), arr.reduce(fn,init)
     // Phase 28: arr.every(fn), arr.some(fn), arr.findIndex(fn), arr.at(n), arr.reverse(), arr.fill(val,...), arr.sort(fn?)
+    // `arr.splice(start[, count, ...items])` as a VALUE: the removed elements, as a new array (ld80,
+    // 2026-10-22: refused). The removed range is copied out by the slice helper from JavaScript's
+    // normalised start and clamped count, then the splice statement runs. start / count are
+    // evaluated twice, so a side-effecting one is refused.
+    {
+      const sp = expr.match(/^(\w+)\.splice\s*\(([\s\S]*)\)$/);
+      const ai = sp && parenDepthNeverNegative(sp[2]!) ? this.arrayVars.get(sp[1]!) : undefined;
+      if (sp && ai?.dynamic && !ai.is2D) {
+        const args = sp[2]!.trim() ? this.splitArgs(sp[2]!.trim()).map((a) => a.trim()) : [];
+        if (args.slice(0, 2).some((a) => /\w\s*\(|\+\+|--|[^=!<>]=(?!=)/.test(a))) {
+          this.diagnostics.push(
+            `'${expr.slice(0, 60)}': splice as a value with a side-effecting start or count is not ` +
+              `supported (they are evaluated twice); compute them first.`,
+          );
+          return "(i32.const 0)";
+        }
+        const isStr = ai.isStringArr || ai.elemType === "string";
+        const key = isStr ? "slice_string" : `slice_${ai.elemType}`;
+        this.dynArrHelpers.add(key);
+        const arrW = this.arrGetWat(sp[1]!);
+        const L = `(i32.load ${arrW})`;
+        const A = args[0] ? this.emitExpr(args[0], locals, "i32") : "(i32.const 0)";
+        const S = `(select (select (i32.add ${L} ${A}) (i32.const 0) (i32.gt_s (i32.add ${L} ${A}) (i32.const 0))) ` +
+          `(select ${A} ${L} (i32.lt_s ${A} ${L})) (i32.lt_s ${A} (i32.const 0)))`;
+        const rest = `(i32.sub ${L} (local.get $__splice_s))`;
+        let cnt = rest;
+        if (args.length >= 2) {
+          const B = this.emitExpr(args[1]!, locals, "i32");
+          const c1 = `(select ${B} ${rest} (i32.lt_s ${B} ${rest}))`;
+          cnt = `(select ${c1} (i32.const 0) (i32.gt_s ${c1} (i32.const 0)))`;
+        }
+        const stmt = this.emitStatement(`${sp[1]}.splice(${sp[2]});`, locals, null);
+        return `(block (result i32)
+      (local.set $__splice_s ${S})
+      (local.set $__splice_rm (call $__dynarr_${key} ${arrW} (local.get $__splice_s) (i32.add (local.get $__splice_s) ${cnt})))
+      ${stmt}
+      (local.get $__splice_rm))`;
+      }
+    }
     // Phase 37: arr.flat(), arr.flatMap(fn)
     const dynArrMethod = expr.match(
-      /^(\w+)\.(indexOf|includes|slice|map|filter|find|reduce|every|some|findIndex|at|reverse|fill|sort|flat|flatMap|concat)\s*\(([\s\S]*)\)$/,
+      /^(\w+)\.(indexOf|lastIndexOf|includes|slice|map|filter|find|reduce|every|some|findIndex|at|reverse|fill|sort|flat|flatMap|concat)\s*\(([\s\S]*)\)$/,
     );
     if (dynArrMethod && parenDepthNeverNegative(dynArrMethod[3].trim())) {
       const arrName = dynArrMethod[1];
       const method = dynArrMethod[2] as
         | "indexOf"
+        | "lastIndexOf"
         | "includes"
         | "slice"
         | "map"
@@ -10979,6 +11125,16 @@ ${prefixed}
           this.dynArrHelpers.add(key);
           const valWat = this.emitExpr(argsStr, locals, elemType);
           return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${valWat})`;
+        }
+        // lastIndexOf(v[, from]): searching back from `from` (default the last element; a negative
+        // `from` counts from the end), strict equality (ld80, 2026-10-22: refused)
+        if (method === "lastIndexOf" && !arrInfo.isStringArr && elemType !== "string") {
+          const key = `lastindexof_${elemType}`;
+          this.dynArrHelpers.add(key);
+          const la = this.splitArgs(argsStr);
+          const valWat = this.emitExpr(la[0]!.trim(), locals, elemType);
+          const fromWat = la[1] ? this.emitExpr(la[1].trim(), locals, "i32") : "(i32.const 2147483647)";
+          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${valWat} ${fromWat})`;
         }
         if (method === "includes") {
           // includes is SameValueZero: NaN finds NaN (indexOf, ===, does not). `sameval_T` for a
@@ -11810,7 +11966,7 @@ ${prefixed}
       }
 
       // Phase 12: interface method dispatch via closure trampoline
-      const ifaceNameExpr = this.interfaceVars.get(receiver);
+      const ifaceNameExpr = this.interfaceOf(receiver);
       if (ifaceNameExpr) {
         const structDefExpr = this.structDefs.get(ifaceNameExpr);
         const fieldExpr = structDefExpr?.fields.find((f) => f.name === methodName);
@@ -12463,7 +12619,10 @@ ${prefixed}
         const _lhsIsStrSlice = (_lhsSliceRecv !== undefined &&
           locals.get(_lhsSliceRecv) === "string") ||
           (STRING_CMP_OPS.has(op) && /^["'`]/.test(rhs.trim()) && !/^["'`]/.test(lhs.trim()) &&
-            !/^(undefined|null)$/.test(lhs.trim()));
+            !/^(undefined|null)$/.test(lhs.trim())) ||
+          // ...and a string LITERAL on the left, `"abc" > "ab"` (ld77, 2026-10-22: the literal was
+          // emitted as a number, "Unsupported expression")
+          (STRING_CMP_OPS.has(op) && /^["'`]/.test(lhs.trim()) && !/^(undefined|null)$/.test(rhs.trim()));
         const _lhsLeadId = !lhs.includes(".") ? lhs.match(/^(\w+)/)?.[1] : undefined;
         // For function calls, extract the leading function name even when args contain dots.
         // E.g. "intMin(tests[i].a, tests[i].b)" → _lhsFnName = "intMin" → result type f64
@@ -14460,14 +14619,12 @@ ${prefixed}
       const openIdx = line.indexOf("[");
       const closeIdx = findMatchingBracketAware(line, openIdx);
       const after = closeIdx !== -1 ? line.slice(closeIdx + 1).trim() : "";
-      const eqM = after.match(/^=\s*(\w+)\s*;?$/);
-      if (closeIdx !== -1 && eqM) {
-        const sv = this.structVars.get(eqM[1]);
-        if (sv) {
-          const pattern = line.slice(openIdx, closeIdx + 1);
-          const baseWat = sv.ptr < 0 ? `(local.get $${eqM[1]})` : `(i32.const ${sv.ptr})`;
-          return this.emitDestructurePattern(pattern, baseWat, sv.def, locals).join("\n      ");
-        }
+      // a tuple variable, or a call returning one (ld76)
+      const ds = closeIdx !== -1 ? this.destructSource(after, locals) : null;
+      if (ds) {
+        const pattern = line.slice(openIdx, closeIdx + 1);
+        return [ds.pre, ...this.emitDestructurePattern(pattern, ds.baseWat, ds.def, locals)].filter(Boolean)
+          .join("\n      ");
       }
     }
 
@@ -14541,15 +14698,16 @@ ${prefixed}
       const closeIdx = findMatchingBracketAware(line, openIdx);
       const after = closeIdx !== -1 ? line.slice(closeIdx + 1).trim() : "";
       const eqM = after.match(/^=\s*(\w+)\s*;?$/);
-      if (closeIdx !== -1 && eqM) {
-        const sv = this.structVars.get(eqM[1]);
-        if (!sv) {
-          this.diagnostics.push(`Destructuring: '${eqM[1]}' is not a known struct variable`);
-          return "";
-        }
+      // a struct variable, or a call returning a struct (ld76)
+      const ds = closeIdx !== -1 ? this.destructSource(after, locals) : null;
+      if (ds) {
         const pattern = line.slice(openIdx, closeIdx + 1);
-        const baseWat = sv.ptr < 0 ? `(local.get $${eqM[1]})` : `(i32.const ${sv.ptr})`;
-        return this.emitDestructurePattern(pattern, baseWat, sv.def, locals).join("\n      ");
+        return [ds.pre, ...this.emitDestructurePattern(pattern, ds.baseWat, ds.def, locals)].filter(Boolean)
+          .join("\n      ");
+      }
+      if (closeIdx !== -1 && eqM) {
+        this.diagnostics.push(`Destructuring: '${eqM[1]}' is not a known struct variable`);
+        return "";
       }
     }
 
@@ -16112,7 +16270,7 @@ ${prefixed}
             }
           }
           // Phase 5h/12: interface method dispatch (counter1.inc() etc.)
-          const ifaceName2 = this.interfaceVars.get(receiver2);
+          const ifaceName2 = this.interfaceOf(receiver2);
           if (ifaceName2) {
             const field2 = this.structDefs.get(ifaceName2)?.fields.find((f) =>
               f.name === methodName2
@@ -16607,7 +16765,7 @@ ${prefixed}
             }
           }
           // Phase 5h/12: interface method dispatch
-          const ifaceName2 = this.interfaceVars.get(receiver2);
+          const ifaceName2 = this.interfaceOf(receiver2);
           if (ifaceName2) {
             const field2 = this.structDefs.get(ifaceName2)?.fields.find((f) =>
               f.name === methodName2
@@ -16966,7 +17124,7 @@ ${prefixed}
       }
 
       // Phase 12: interface method dispatch via closure trampoline
-      const ifaceNameStmt = this.interfaceVars.get(receiver);
+      const ifaceNameStmt = this.interfaceOf(receiver);
       if (ifaceNameStmt) {
         const structDefStmt = this.structDefs.get(ifaceNameStmt);
         const fieldStmt = structDefStmt?.fields.find((f) => f.name === methodName);
@@ -18433,6 +18591,43 @@ ${prefixed}
     // $__str_indexof/$__str_gather from getStringOpHelperWat(), so emit op helpers together.
     if (this.needsStringOpHelpers || this.needsStrGatherHelper || this.needsStringExtHelpers) {
       parts.push(this.getStringOpHelperWat());
+    }
+    // ld80 (2026-10-22): substring and lastIndexOf, emitted only where used
+    if (this.needsStrSubstring) {
+      parts.push(`  ;; str.substring(a, b): both clamped to [0, len], swapped when a > b; then $__str_slice
+  (func $__str_substring (param $ptr i32) (param $len i32) (param $a i32) (param $b i32) (result i32 i32)
+    (local $t i32)
+    (local.set $a (select (i32.const 0) (local.get $a) (i32.lt_s (local.get $a) (i32.const 0))))
+    (local.set $a (select (local.get $len) (local.get $a) (i32.gt_s (local.get $a) (local.get $len))))
+    (local.set $b (select (i32.const 0) (local.get $b) (i32.lt_s (local.get $b) (i32.const 0))))
+    (local.set $b (select (local.get $len) (local.get $b) (i32.gt_s (local.get $b) (local.get $len))))
+    (if (i32.gt_s (local.get $a) (local.get $b))
+      (then (local.set $t (local.get $a)) (local.set $a (local.get $b)) (local.set $b (local.get $t))))
+    (call $__str_slice (local.get $ptr) (local.get $len) (local.get $a) (local.get $b)))`);
+    }
+    if (this.needsStrLastIndexOf) {
+      parts.push(`  ;; str.lastIndexOf(sub, from): the last match starting at or before from (clamped to
+  ;; [0, len]); an empty sub is found at from; -1 when none
+  (func $__str_lastindexof (param $ptr i32) (param $len i32) (param $sptr i32) (param $slen i32)
+      (param $from i32) (result i32)
+    (local $k i32) (local $j i32)
+    (local.set $from (select (i32.const 0) (local.get $from) (i32.lt_s (local.get $from) (i32.const 0))))
+    (local.set $from (select (local.get $len) (local.get $from) (i32.gt_s (local.get $from) (local.get $len))))
+    (if (i32.gt_s (local.get $slen) (local.get $len)) (then (return (i32.const -1))))
+    (local.set $k (i32.sub (local.get $len) (local.get $slen)))
+    (if (i32.lt_s (local.get $from) (local.get $k)) (then (local.set $k (local.get $from))))
+    (block $done (loop $scan
+      (br_if $done (i32.lt_s (local.get $k) (i32.const 0)))
+      (local.set $j (i32.const 0))
+      (block $miss (loop $cmp
+        (if (i32.ge_u (local.get $j) (local.get $slen)) (then (return (local.get $k))))
+        (br_if $miss (i32.ne (i32.load8_u (i32.add (local.get $ptr) (i32.add (local.get $k) (local.get $j))))
+          (i32.load8_u (i32.add (local.get $sptr) (local.get $j)))))
+        (local.set $j (i32.add (local.get $j) (i32.const 1)))
+        (br $cmp)))
+      (local.set $k (i32.sub (local.get $k) (i32.const 1)))
+      (br $scan)))
+    (i32.const -1))`);
     }
     if (this.needsExnStr) parts.push(this.getExnStrWat());
     if (this.strOfHelpers.size > 0) parts.push(this.getStrOfWat());
@@ -20031,6 +20226,23 @@ ${sum}
     )
     (i32.const -1)
   )`);
+      } else if (method === "lastindexof") {
+        parts.push(`  ;; Dynamic array lastindexof_${elemType}: search back from $from (negative: from the end), or -1 (ld80)
+  (func ${name} (param $arr i32) (param $val ${valType}) (param $from i32) (result i32)
+    (local $i i32) (local $len i32)
+    (local.set $len (i32.load (local.get $arr)))
+    (if (i32.lt_s (local.get $from) (i32.const 0)) (then (local.set $from (i32.add (local.get $from) (local.get $len)))))
+    (if (i32.ge_s (local.get $from) (local.get $len)) (then (local.set $from (i32.sub (local.get $len) (i32.const 1)))))
+    (local.set $i (local.get $from))
+    (block $brk (loop $lp
+      (br_if $brk (i32.lt_s (local.get $i) (i32.const 0)))
+      (if (${valType}.eq
+            (${loadOp} (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const ${shift}))))
+            (local.get $val))
+        (then (return (local.get $i))))
+      (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+      (br $lp)))
+    (i32.const -1))`);
       } else if (method === "indexof") {
         const cmpOp = `${valType}.eq`;
         parts.push(`  ;; Dynamic array indexof_${elemType}: linear search, returns index or -1.
@@ -21984,18 +22196,16 @@ ${sum}
         const openIdx = line.indexOf("[");
         const closeIdx = findMatchingBracketAware(line, openIdx);
         const after = closeIdx !== -1 ? line.slice(closeIdx + 1).trim() : "";
-        const eqM = after.match(/^=\s*(\w+)\s*;?$/);
-        if (closeIdx !== -1 && eqM) {
-          const sv = this.structVars.get(eqM[1]);
-          if (sv) {
-            const collected: Array<[string, WatType]> = [];
-            this.collectDestructureLocals(line.slice(openIdx, closeIdx + 1), sv.def, collected);
-            for (const [localName, ty] of collected) {
-              declaredLocals.push([localName, ty]);
-              locals.set(localName, ty);
-            }
-            continue;
+        // a tuple variable, or a call returning one (ld76)
+        const dDef = closeIdx !== -1 ? this.destructSourceDef(after) : undefined;
+        if (dDef) {
+          const collected: Array<[string, WatType]> = [];
+          this.collectDestructureLocals(line.slice(openIdx, closeIdx + 1), dDef, collected);
+          for (const [localName, ty] of collected) {
+            declaredLocals.push([localName, ty]);
+            locals.set(localName, ty);
           }
+          continue;
         }
       }
       // Struct object literal: const p: Point = { x: 1.5, y: 2.5 }
@@ -22431,18 +22641,18 @@ ${sum}
         const closeIdx = findMatchingBracketAware(line, openIdx);
         const after = closeIdx !== -1 ? line.slice(closeIdx + 1).trim() : "";
         const eqM = after.match(/^=\s*(\w+)\s*;?$/);
-        if (closeIdx !== -1 && eqM) {
-          const sv = this.structVars.get(eqM[1]);
-          if (sv) {
-            const collected: Array<[string, WatType]> = [];
-            this.collectDestructureLocals(line.slice(openIdx, closeIdx + 1), sv.def, collected);
-            for (const [localName, ty] of collected) {
-              declaredLocals.push([localName, ty]);
-              locals.set(localName, ty);
-            }
+        // a struct variable, or a call returning a struct (ld76)
+        const dDef = closeIdx !== -1 ? this.destructSourceDef(after) : undefined;
+        if (dDef) {
+          const collected: Array<[string, WatType]> = [];
+          this.collectDestructureLocals(line.slice(openIdx, closeIdx + 1), dDef, collected);
+          for (const [localName, ty] of collected) {
+            declaredLocals.push([localName, ty]);
+            locals.set(localName, ty);
           }
           continue;
         }
+        if (closeIdx !== -1 && eqM) continue;
       }
       // Phase 24: nullable variable declaration: const x: i32 | null = ...
       const nlPre = line.match(
@@ -22888,7 +23098,9 @@ ${sum}
       // ternary's branch $__obj_ret, and a string push in a one-line loop $__str_push_*; the
       // pre-scan knows only `(` / `,` before `[`, a line starting `return [`, and a push that
       // starts its line (ld09, sw30, ld44, 2026-10-15).
-      ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len"].filter((t) =>
+      // (and $__destr_src, a destructured call's result, ld76)
+      ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len", "__destr_src",
+        "__splice_s", "__splice_rm"].filter((t) =>
         new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)
       ).map((t) => `    (local $${t} i32)`),
     ].filter((d) => d !== "").join("\n");
@@ -23757,6 +23969,12 @@ ${sum}
     // This allows `key: keyof Person` and `const k: keyof T = "x"` to work via the existing string path.
     // Also strip `type Alias = keyof T` declarations (they become the `string` type inline).
     this.src = this.src.replace(/:\s*keyof\s+\w+/g, ": string");
+    // `(e as Error).message`: a cast of a NAME to a class / interface type before a member access is
+    // only a type assertion; it was refused (ld80, 2026-10-22). Number casts (`(x as f64)`, lower
+    // case) keep their conversion meaning.
+    this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
+      code.replace(/\(\s*([A-Za-z_$][\w$]*)\s+as\s+[A-Z][\w$]*\s*\)(?=\s*[.[])/g, "$1")
+    );
     this.src = this.src.replace(/(?:export\s+)?type\s+\w+\s*=\s*keyof\s+\w+\s*;?/gm, "");
     // Phase 51.4: pass-through utility types (Partial/Readonly/Required/NonNullable) → inner type,
     // before parseStructs so the unwrapped type is seen everywhere (incl. interface field types).
@@ -24122,18 +24340,34 @@ ${sum}
           const openIdx = line.indexOf("[");
           const closeIdx = findMatchingBracketAware(line, openIdx);
           const after = closeIdx !== -1 ? line.slice(closeIdx + 1).trim() : "";
-          const eqM = after.match(/^=\s*(\w+)\s*;?$/);
-          if (closeIdx !== -1 && eqM) {
-            const sv2 = this.structVars.get(eqM[1]);
-            if (sv2) {
-              const collected: Array<[string, WatType]> = [];
-              this.collectDestructureLocals(line.slice(openIdx, closeIdx + 1), sv2.def, collected);
-              for (const [localName, ty] of collected) {
-                startLocals.set(localName, ty);
-                startDeclaredLocals.push([localName, ty]);
-              }
-              continue;
+          // a tuple variable, or a call returning one (ld76)
+          const dDef2 = closeIdx !== -1 ? this.destructSourceDef(after) : undefined;
+          if (dDef2) {
+            const collected: Array<[string, WatType]> = [];
+            this.collectDestructureLocals(line.slice(openIdx, closeIdx + 1), dDef2, collected);
+            for (const [localName, ty] of collected) {
+              startLocals.set(localName, ty);
+              startDeclaredLocals.push([localName, ty]);
             }
+            continue;
+          }
+        }
+        // Object destructuring at top level (it had no start-body pre-scan; ld76): a struct
+        // variable, or a call returning a struct
+        const objDestructHeadPre2 = line.match(/^(?:var|let|const)\s*\{/);
+        if (objDestructHeadPre2) {
+          const openIdx = line.indexOf("{");
+          const closeIdx = findMatchingBracketAware(line, openIdx);
+          const after = closeIdx !== -1 ? line.slice(closeIdx + 1).trim() : "";
+          const dDef3 = closeIdx !== -1 ? this.destructSourceDef(after) : undefined;
+          if (dDef3) {
+            const collected: Array<[string, WatType]> = [];
+            this.collectDestructureLocals(line.slice(openIdx, closeIdx + 1), dDef3, collected);
+            for (const [localName, ty] of collected) {
+              startLocals.set(localName, ty);
+              startDeclaredLocals.push([localName, ty]);
+            }
+            continue;
           }
         }
         // Phase 31: TypedArray declaration (mirrors emitFunction pre-scan)
@@ -24731,7 +24965,7 @@ ${sum}
       }
       // an array literal built inline, `f([1, 2])`, a string push in a one-line loop (sw30, ld44;
       // see emitFunction)
-      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len"]) {
+      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__destr_src", "__splice_s", "__splice_rm"]) {
         if (new RegExp(`\\$${t}\\b`).test(bodyWat) && !declMap.has(t)) declMap.set(t, "i32");
       }
       // console.log's argument temporaries (sw68)

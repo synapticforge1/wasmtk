@@ -114,6 +114,11 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, loud refusals group 3 (ld76, ld77, ld80: strings, tuples, objects), gate GREEN.**
+> wasi **487/487** (+`28_StringsTuplesAndObjects`, failing on the old compiler) · golden-WAT
+> **544**, no existing entry moved · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 /
+> 7 / 12 · wasMath 151 / 199 exact · api-surface unchanged.
+
 > **2026-10-22, loud refusals group 2 (ld71–ld73, ld78's default and `for` forms), gate GREEN.**
 > wasi **486/486** (+`5f_IncrementsAndCompoundForms`, failing on the old compiler;
 > +`5f_CompoundIndexSideEffectRefused`, expect-fail) · golden-WAT **543**, one existing entry moved
