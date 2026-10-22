@@ -114,6 +114,17 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-21, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-21, sw122 (correctly rounded parseFloat / Number(string) / parseInt radix 10), gate
+> GREEN.** wasi **483/483** (+`53_NumberParseRounding`, 163 values; its probe battery differed on
+> 263 of 483 lines on the old compiler) · a 4,078-value probe (edge cases + random literals of up to
+> 30 digits, exponents ±350) identical to Deno · golden-WAT **540**, 41 moved, each reviewed: the
+> dynrt library and the 37 programs merging it (dynrt's interpreter parses literals with
+> `parseFloat`; `caps_bytes.ts` re-embedded, dynrt 38,653 → 40,369 bytes, the other five
+> unchanged), `53_NumberParse` and `4l_MixedOperandTypes` (only the new `$__bn_*` /
+> `$__dec_to_f64` helpers added), and the new test · typed_decl 45 · wast 64,506 / 0 / 16 ·
+> cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface unchanged ·
+> `check_try_table_oz` 42 / 42.
+
 > **2026-10-21, the embedded capability libraries re-embedded (`src/wasm/caps_bytes.ts`), gate
 > GREEN.** The six `*_lib_modc.wasm` rebuilt with `wasmtk modc` and embedded by
 > `bun scripts/gen_caps_bytes.ts`: set 870 → 726, map 1171 → 980, date 992 → 929, json 2909 → 2447,

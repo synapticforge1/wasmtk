@@ -7,7 +7,7 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 3 | 138 | 0 | 27 |
+| SILENT-WRONG | 2 | 139 | 0 | 27 |
 | LOUD | 22 | 78 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
@@ -22,7 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
-**Open silent-wrong in the compiler: 3; in the tools: 0** (2026-10-20, the loud rows' invalid-module
+**Open silent-wrong in the compiler: 2; in the tools: 0** (2026-10-21: sw122 fixed, parseFloat /
+Number / parseInt correctly rounded, `53_NumberParseRounding`; left sw119, owner-ruled on a branch,
+and sw123 with the nullable gaps). Before that, 3 (2026-10-20, the loud rows' invalid-module
 group: 16 loud rows fixed (ld48–ld50, ld52–ld57, ld59–ld61, ld63, ld64, ld75) and ld46, ld62 found
 already passing, 22 loud open; tests `4l_MixedOperandTypes`, `28_ArrayCallbackEdges`. Found on the
 way: sw122 and sw123 OPEN, sw124 and sw125 FIXED; loud ld91–ld93 open). Before that, 1 (2026-10-19, latest: sw120 fixed, a null
@@ -346,7 +348,7 @@ overwrite user files (sw113) at the top.
 | ~~sw116~~ | ✅ FIXED 2026-10-19: a non-numeric argument exits 1 with "'abc' is not a number", in `mod` and `run`'s library call. Test `tests/tool_rows_tests.ts`. Was: `mod lib.wasm add abc 5` turns `abc` into 0 | utils.ts:437 (also `runWasi` :299) |
 | ~~sw117~~ | ✅ FIXED 2026-10-19: the output path is resolved against the working directory before the toolchain runs (`cwd: baseDir`), and `report()` checks the artifact as zigwasic's does (missing or empty: `success: false`). Test `tests/tool_rows_tests.ts` (needs TinyGo; skipped and said so without it). Was: Go `build -o out/x.wasm` (relative) writes beside the SOURCE and reports success at the given path | gowasic.ts ~203/241/426 unresolved; `report()` ~573 unchecked (Zig's was fixed 2026-08-24) |
 | ~~sw118~~ | ✅ FIXED 2026-10-19: the first export keeps a WIT name, a later one kebabing to it is listed as `// skipped export foo_bar: its WIT name 'foo-bar' is already fooBar's`; `witPackageName` makes the package a WIT identifier (`2048` → `m2048`). The orphaned doc comment at witgen.ts:35 went with it. Test `tests/tool_rows_tests.ts`. Was: `witgen` writes duplicate exports (`fooBar`, `foo_bar` → `foo-bar` twice); package names unchecked (`local:2048`) | witgen.ts ~98, ~86 |
-| sw122 | OPEN (found with ld60, 2026-10-20; the same on main): `parseFloat` (and now `Number(string)`, which validates the text and calls it) is not correctly rounded: `$__parse_float` adds digit / 10ⁿ, so `parseFloat("0.123")` is `0.12300000000000001`, `"3.14159"` `3.1415900000000003`, `"1e-7"` `1.0000000000000002e-7`, `"1.7976931348623157e308"` `1.7976931348623145e+308`. Needs a correct decimal → double (Clinger's exact fast path for ≤ 15 digits and \|exp\| ≤ 22 covers most input; the rest needs big-number arithmetic or Eisel-Lemire) | wasic `emitNumParserHelpers` |
+| ~~sw122~~ | ✅ FIXED 2026-10-21: `$__dec_to_f64` converts a decimal literal CORRECTLY ROUNDED, for `parseFloat`, `Number(string)` and `parseInt` (radix 10): an exact fast path (≤ 19 significant digits in w, no nonzero digit dropped, w ≤ 2^53, \|e\| ≤ 22: one multiply / divide by an exact 10^\|e\|), out-of-range straight to ±Infinity / ±0, else exact big-integer division over every digit (u32 limbs in a `$__malloc` block: N / T scaled to a 54–55-bit quotient, the remainder as the sticky bit, ties to even, subnormals shifted first). parseFloat also takes `[+-]Infinity` (it was NaN) and an `e` only with digits after it. Probe: 4,078 values (edge cases + random literals of up to 30 digits, exponents ±350) identical to Deno; the old compiler differed on 263 of 483. dynrt's interpreter reads literals with `parseFloat`, so `caps_bytes.ts` was re-embedded (dynrt +1,716 bytes). Test `53_NumberParseRounding`. Was (found with ld60, 2026-10-20; the same on main): `parseFloat("0.123")` was `0.12300000000000001`, `"3.14159"` `3.1415900000000003`, `"1e-7"` `1.0000000000000002e-7`, `"1.7976931348623157e308"` `1.7976931348623145e+308` (`$__parse_float` added digit / 10ⁿ) | wasic `emitNumParserHelpers`, `emitDecToF64Helpers` |
 | sw123 | OPEN (found with ld64, 2026-10-20; the same on main for numbers): a `T \| undefined` local holding `undefined` prints `null` (`const n: i32 \| undefined = undefined; console.log(n)`); one flag holds null and undefined alike. A string's `s.at(10)` "undefined" text prints right. The nullable-gaps item (next-work.md item 5) | wasic nullable locals |
 | ~~sw124~~ | ✅ FIXED 2026-10-20 (found with ld57; the same on main): `console.log(new Box(1, 2).isBig())` printed `0` for `false`: the console's dot-call lookup typed a `new C(…).m(…)` chain as i32. It takes m's result type now (both lookups, console.log and console.error). Test `4l_MixedOperandTypes` | wasic dotCallLookup |
 | ~~sw125~~ | ✅ FIXED 2026-10-20 with ld53: `s.at(i)` out of range read past the text (length 1, a garbage byte; `` `[${s.at(5)}]` `` printed `[u]`). All four at() paths (declaration, concat, comparison operand, console) go through `$__str_index`: "undefined", as `s[i]`. Test `28_ArrayCallbackEdges` | wasic / console_log string at() |
