@@ -1721,9 +1721,23 @@ function parseSingleArg(
   // regex below rejects it (its index `i][j` fails parenDepthNeverNegative), so it used to fall to the
   // terminal `(i32.const 0)` stub. Load the row pointer (outer stores i32 row ptrs, shift=2), then the
   // element from the row (elemType shift/loadOp).
+  // A function array's element called, `ops[1](5, 6)`: wasic's emitExpr, typed by its table type
+  // (it was emitted as an i32 and refused, ld95, 2026-10-22)
+  if (/^\w+\[[^\[\]]+\]\s*\([\s\S]*\)$/.test(token) && _exprFallbackResolver) {
+    const r = _exprFallbackResolver(token, locals);
+    if (r) {
+      const kind = r.type === "f64" ? "f64expr" as const : r.type === "i64" ? "i64expr" as const : "i32expr" as const;
+      return [{ kind, wat: r.wat }];
+    }
+  }
   const twoDMatch = token.match(/^(\w+)\[([^\]]+)\]\[([^\]]+)\]$/);
   if (twoDMatch && arrayLookup) {
     const a2 = arrayLookup(twoDMatch[1]);
+    // a 2D STRING array's element is text: wasic's string resolver (ld94, 2026-10-22)
+    if (a2 && a2.is2D && a2.elemType === "string" && _stringExprResolver) {
+      const r = _stringExprResolver(token, locals);
+      if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+    }
     if (a2 && a2.is2D) {
       const base = a2.isGlobal
         ? `(global.get $${twoDMatch[1]})`

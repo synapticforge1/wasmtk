@@ -114,6 +114,11 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, ld94 (`string[][]`) and ld95 (function array literals), gate GREEN.** wasi
+> **494/494** (+`63_StringMatrix`, +`44_FunctionArrayLiterals`, both failing on the old compiler)
+> · golden-WAT **551**, none moved · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 /
+> 7 / 12 · wasMath 151 / 199 exact · api-surface unchanged.
+
 > **2026-10-22, sw123 (null vs undefined), gate GREEN.** wasi **492/492** (+`24_NullVersusUndefined`,
 > failing on the old compiler) · golden-WAT **549**, 9 existing entries moved and reviewed (find /
 > pop / out-of-range results carry kind 2; strict tests compare the kind; prints choose `null` or
