@@ -268,7 +268,8 @@ build invalid modules). bigint `+ - * / %` and unary `-` agree.
 
 ## Appendix: every `Math` member, one program per call (2026-10-09, Deno 2.9.7 / V8 15.0)
 
-Re-derive with `deno run -A scripts/math/math_table.ts <scratch dir>`. "—" = same as Deno.
+Re-derive with `bun scripts/math/math_table.ts <scratch dir>` (its reference column still runs
+Deno: a V8 oracle). "—" = same as Deno.
 
 | member | call | Deno | wasic |
 | --- | --- | --- | --- |

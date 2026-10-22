@@ -140,7 +140,7 @@ many special cases; may need triple-double or accept ≤1 ULP with documented no
    `i64.reinterpret_f64`; set mantissa exponent to `0x3ff` for `m∈[1,2)`; handle subnormal by
    scaling up `×2^54` and adjusting `e-=54`.
 3. **Regenerate:** `wasmtk convert src/wasm/mathlib.wat` then
-   `deno run --allow-read --allow-write scripts/gen_mathlib_bytes.ts`. (Installed `wasmtk` runs
+   `bun scripts/gen_mathlib_bytes.ts`. (Installed `wasmtk` runs
    `main.ts` LIVE, so it picks up the regenerated `mathlib_bytes.ts` with no reinstall.)
 4. **Validate END-TO-END:** emit a wasic program `console.log(Math.fn(id(v)))` for a battery of `v`
    (use `function id(x: f64): f64 { return x + 0.0; }` to force the runtime path, NOT compile-time
@@ -185,6 +185,6 @@ many special cases; may need triple-double or accept ≤1 ULP with documented no
 
 ```
 wasmtk convert src/wasm/mathlib.wat
-deno run --allow-read --allow-write scripts/gen_mathlib_bytes.ts
+bun scripts/gen_mathlib_bytes.ts
 deno run -A tests/wasi_tests.ts            # full numbered suite (must stay green)
 ```

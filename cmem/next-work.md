@@ -7,6 +7,17 @@ branch audit and superseded plan):** `git show ab5d1273644:cmem/next-work.md`.
 
 ## Open now
 
+> **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
+> the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule
+> says `bun` (deno-exit-plan.md § P5 has every A/B and the two scripts that stay Deno). Found
+> on the way, NOT acted on: (1) `check_try_table_oz` reports binaryang 1.13.0's `-Oz` SAFE for
+> `try_table` (42 / 42): the `try_table` skip in `src/wasic.ts` may be liftable; its real test is
+> the full gate (`15_Exceptions`, `15_LexicalShadowing_Stress`), owner's call when; (2)
+> `src/wasm/caps_bytes.ts`'s embedded capability libraries are stale against the corpus
+> `*_lib_modc.wasm` (regenerating changes their bytes); (3) the workspace floor
+> (`../cmem/working-rules.md` rule 1) still says Deno: the workspace session's to change.
+> Then the fix order resumes: sw122, the 22 loud compiler rows, the 9 tool rows.
+
 > **2026-10-20, the loud rows, group 1 DONE: every round-2 row that built an INVALID module or
 > trapped** (ld48–ld50, ld52–ld57, ld59–ld61, ld63, ld64, ld75; ld46, ld62 found already passing;
 > silent sw124, sw125 found and fixed). Gate green: wasi 482/482, golden 539, wast 64,506 / 0 / 16,
