@@ -220,8 +220,9 @@ counting the dync host).
   differ; revisit with M3). What the Bun scripts SPAWN stays Deno where Deno is the subject:
   `deno doc --json` (the surface JSR sees), the CLI (`main.ts`, a Deno program until P2), the
   suites and `deno task install` (P6), the TypeScript / V8 reference runs (P6, M2, M4),
-  `deno fmt` (P4), `deno publish` (role E). Not done, and not part of it: `caps_bytes.ts`'s bytes
-  are stale against the corpus libraries (only its header line changed here). Ad-hoc probes that
+  `deno fmt` (P4), `deno publish` (role E). (`caps_bytes.ts`'s bytes, found stale here, were re-embedded the
+  same day in their own commit; testing.md 2026-10-21. gen_caps_bytes' `deno fmt` step was
+  dropped: `src/wasm/` is excluded from formatting, so it could only fail.) Ad-hoc probes that
   import `src/` (the compiler) also stay `deno run --config deno.json` until P2.
 - **P6. Tests.**
   - The suite harnesses (`tests/*_tests.ts`, 36 files with `Deno.*`, 259 lines; 16 spawn `deno`)
