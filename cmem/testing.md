@@ -114,6 +114,11 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, ld100 (generic classes), ld101 (class string fields), ld102 (string method in
+> console), gate GREEN.** wasi **497/497** (+`29_GenericAndStringClasses`, failing on the old
+> compiler) · golden-WAT **554**, none moved · wast 64,506 / 0 / 16 · cross-check 1152 on baseline
+> · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface unchanged.
+
 > **2026-10-22, ld96 (capturing callbacks, string-array callbacks) and sw128 (array literal
 > arguments), gate GREEN.** wasi **496/496** (+`5h_CapturingCallbacks`, +`9_ArrayLiteralArguments`,
 > both failing on the old compiler) · golden-WAT **553**, 1 existing entry moved and reviewed

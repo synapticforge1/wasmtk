@@ -4865,6 +4865,83 @@ class WasicTranspiler {
    *   - Concrete monomorphized definitions prepended
    *   - All use sites rewritten to concrete names (e.g., identity_i32, Box_f64)
    */
+  /**
+   * Generic CLASSES by monomorphization (ld100, 2026-10-22; `class Box<T>` / `new Box<i32>(7)` was
+   * "Unsupported statement"): each `Name<args>` use becomes `Name_args`, a copy of the class with
+   * the type parameters substituted, written where the template stood (inheritance order kept).
+   * Type arguments must be written: `new Box(7)` of a generic class is refused, by name.
+   */
+  private expandGenericClasses(src: string): string {
+    type Tmpl = { name: string; params: string[]; headRest: string; body: string; start: number; end: number };
+    const mask = buildStringLiteralMask(src);
+    const tmpls: Tmpl[] = [];
+    const re = /(?:export\s+)?(?:abstract\s+)?class\s+([A-Z]\w*)\s*<([^<>{]+)>([^{]*)\{/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) {
+      if (mask[m.index]) continue;
+      let depth = 1;
+      let i = m.index + m[0].length;
+      for (; i < src.length && depth > 0; i++) {
+        if (mask[i]) continue;
+        if (src[i] === "{") depth++;
+        else if (src[i] === "}") depth--;
+      }
+      tmpls.push({
+        name: m[1]!,
+        params: m[2]!.split(",").map((s) => s.trim().split(/\s+extends\s+/)[0]!.trim()).filter(Boolean),
+        headRest: m[3]!,
+        body: src.slice(m.index + m[0].length, i - 1),
+        start: m.index,
+        end: i,
+      });
+    }
+    if (tmpls.length === 0) return src;
+    const concrete = new Map<string, { tmpl: Tmpl; text: string }>();
+    const mangle = (name: string, args: string[]) =>
+      `${name}_${args.map((a) => a.replace(/\[\]/g, "Arr").replace(/\W+/g, "_")).join("_")}`;
+    // rewrite every `Name<args>` of a template in `text`, creating its concrete class on first use
+    const rewrite = (text: string): string => {
+      for (const t of tmpls) {
+        text = text.replace(new RegExp(`\\b${t.name}\\s*<([^<>]+)>`, "g"), (_w, argStr: string) => {
+          const args = argStr.split(",").map((s) => s.trim());
+          const cname = mangle(t.name, args);
+          if (!concrete.has(cname)) {
+            concrete.set(cname, { tmpl: t, text: "" }); // placeholder: a self-reference recurses once
+            let head = t.headRest;
+            let body = t.body;
+            t.params.forEach((p, k) => {
+              const rx = new RegExp(`\\b${p}\\b`, "g");
+              head = head.replace(rx, args[k] ?? "i32");
+              body = body.replace(rx, args[k] ?? "i32");
+            });
+            concrete.set(cname, { tmpl: t, text: `class ${cname}${rewrite(head)}{${rewrite(body)}}` });
+          }
+          return cname;
+        });
+      }
+      return text;
+    };
+    // The source without the templates, its uses rewritten; each template's slot keeps a marker
+    let out = "";
+    let last = 0;
+    for (const t of tmpls) {
+      out += src.slice(last, t.start) + `\n/*__GENCLASS_${t.name}__*/\n`;
+      last = t.end;
+    }
+    out = rewrite(out + src.slice(last));
+    for (const t of tmpls) {
+      const copies = [...concrete.values()].filter((c) => c.tmpl === t).map((c) => c.text).join("\n");
+      out = out.replace(`/*__GENCLASS_${t.name}__*/`, copies);
+      // a bare use of the generic class has no type to substitute
+      if (new RegExp(`\\bnew\\s+${t.name}\\s*\\(|:\\s*${t.name}\\b(?!\\s*<)`).test(out)) {
+        this.diagnostics.push(
+          `generic class '${t.name}': write its type arguments at each use (\`new ${t.name}<i32>(…)\`, \`: ${t.name}<i32>\`)`,
+        );
+      }
+    }
+    return out;
+  }
+
   private expandGenerics(src: string): string {
     type GFuncTmpl = {
       typeParams: string[];
@@ -6098,8 +6175,11 @@ class WasicTranspiler {
             );
             if (fm) {
               const type = mapType(fm[2]);
-              const size = (type === "f64" || type === "i64") ? 8 : 4;
-              if (fieldOffset % size !== 0) fieldOffset = Math.ceil(fieldOffset / size) * size;
+              // a string field is its (ptr, len) pair, as an interface's is; it was one word, so the
+              // next field sat on its length (`new Item("hi", 7)` printed "hihihih", ld101)
+              const size = (type === "f64" || type === "i64" || type === "string") ? 8 : 4;
+              const align = type === "string" ? 4 : size;
+              if (fieldOffset % align !== 0) fieldOffset = Math.ceil(fieldOffset / align) * align;
               fields.push({
                 name: fm[1],
                 type,
@@ -9949,14 +10029,19 @@ ${prefixed}
           } ${baseWat})`;
         }
       }
-      const cv = this.classVars.get(structFieldSPLM[1]);
+      // `this.name` in a method: the instance is $__self (ld101: `return this.name` was refused)
+      const cv = structFieldSPLM[1] === "this" && this.currentMethodClass
+        ? { className: this.currentMethodClass, ptr: -1, self: true }
+        : this.classVars.get(structFieldSPLM[1]);
       if (cv) {
         const cd = this.classDefs.get(cv.className);
         const field = cd?.struct.fields.find((f) =>
           f.name === structFieldSPLM[2] && f.type === "string"
         );
         if (field) {
-          const baseWat = cv.ptr < 0
+          const baseWat = "self" in cv
+            ? `(local.get $__self)`
+            : cv.ptr < 0
             ? `(local.get $${structFieldSPLM[1]})`
             : `(i32.const ${cv.ptr})`;
           return `(i32.load offset=${field.offset} ${baseWat}) (i32.load offset=${
@@ -10252,6 +10337,23 @@ ${prefixed}
           ? `(call $${callee} ${watArgs.join(" ")})`
           : `(call $${callee})`;
         return `${callExpr} (global.get $__str_ret_ptr) (global.get $__str_ret_len)`;
+      }
+    }
+    // ...and a string-returning METHOD, `n.label()` (own or inherited, a chain too): the instance
+    // first. In console.log it was an invalid module, the void call used as a value (ld102, 2026-10-22)
+    {
+      const mc = expr.endsWith(")") ? this.splitLastMethodCall(expr) : null;
+      const cls = mc ? this.classOfExpr(mc.receiver) : undefined;
+      const fnName = cls ? this.resolveMethodFunc(cls, mc!.method) : null;
+      const strFn = fnName ? this.functions.find((f) => f.name === fnName && f.result === "string") : undefined;
+      if (mc && strFn && parenDepthNeverNegative(mc.args)) {
+        const argList = mc.args.trim() ? this.splitArgs(mc.args.trim()) : [];
+        const watArgs = argList.map((a, i) => {
+          const p = strFn.params[i + 1];
+          return p?.type === "string" ? this.emitStringPtrLen(a.trim(), locals) : this.emitExpr(a.trim(), locals, p?.type ?? "i32");
+        });
+        const recvWat = this.emitExpr(mc.receiver, locals, "i32");
+        return `(call $${fnName} ${[recvWat, ...watArgs].join(" ")}) (global.get $__str_ret_ptr) (global.get $__str_ret_len)`;
       }
     }
     // Sentinel: this string form is unsupported. Callers that recover gracefully wrap the call in
@@ -11795,6 +11897,7 @@ ${prefixed}
           const args = argsStr ? this.splitArgs(argsStr) : [];
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? defaultType;
+            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           return `(call $${funcName} (local.get $__self) ${emittedArgs.join(" ")})`.trim();
@@ -12304,9 +12407,10 @@ ${prefixed}
             const ctorName = `${ncHead[1]}_constructor`;
             const ctorFn = this.functions.find((f) => f.name === ctorName);
             const ctorArgs = expr.slice(openIdx + 1, ctorEnd).trim();
-            const ctorEmitted = (ctorArgs ? this.splitArgs(ctorArgs) : []).map((a, i) =>
-              this.emitExpr(a, locals, ctorFn?.params[i + 1]?.type ?? ("i32" as WatType))
-            );
+            const ctorEmitted = (ctorArgs ? this.splitArgs(ctorArgs) : []).map((a, i) => {
+              const pt = ctorFn?.params[i + 1]?.type ?? ("i32" as WatType);
+              return pt === "string" ? this.emitStringPtrLen(a, locals) : this.emitExpr(a, locals, pt); // ld101
+            });
             const ctorCall = ctorFn
               ? `(call $${ctorName} (i32.const ${ptr}) ${ctorEmitted.join(" ")})`.trim()
               : "";
@@ -12337,6 +12441,8 @@ ${prefixed}
           const args = argsStr ? this.splitArgs(argsStr) : [];
           const emittedArgs = args.flatMap((a, i) => {
             const pt = ctorFn.params[i + 1]?.type ?? ("i32" as WatType);
+            // a string parameter takes the (ptr, len) pair: `new Item("hi", 7)` was refused (ld101)
+            if (pt === "string") return [this.emitStringPtrLen(a, locals)];
             return [this.emitExpr(a, locals, pt)];
           });
           const ctorCall = `(call $${constructorName} (i32.const ${ptr}) ${emittedArgs.join(" ")})`
@@ -12433,6 +12539,7 @@ ${prefixed}
           const baseWat = cv.ptr < 0 ? `(local.get $${receiver})` : `(i32.const ${cv.ptr})`;
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? defaultType;
+            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           return `(call $${funcName} ${baseWat} ${emittedArgs.join(" ")})`.trim();
@@ -15315,6 +15422,8 @@ ${prefixed}
           const args = argsStr ? this.splitArgs(argsStr) : [];
           const emittedArgs = args.flatMap((a, i) => {
             const pt = ctorFn.params[i + 1]?.type ?? ("i32" as WatType);
+            // a string parameter takes the (ptr, len) pair: `new Item("hi", 7)` was refused (ld101)
+            if (pt === "string") return [this.emitStringPtrLen(a, locals)];
             return [this.emitExpr(a, locals, pt)];
           });
           const ctorCall = `(call $${constructorName} (i32.const ${ptr}) ${emittedArgs.join(" ")})`
@@ -15590,6 +15699,11 @@ ${prefixed}
             }
             return parts.join("\n      ");
           }
+        }
+        // a string field stores both words (ld101); the struct-field store handles every
+        // string form (a concat, a template) through its $__str_op pair
+        if (field.type === "string") {
+          return this.emitStringFieldStore(`(local.get $__self)`, field.offset, thisWriteMatch[2].trim(), locals);
         }
         const storeOp = memStoreOp(field.type);
         const valWat = this.emitExpr(thisWriteMatch[2], locals, field.type);
@@ -17670,6 +17784,7 @@ ${prefixed}
         if (fn) {
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? ("i32" as WatType);
+            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           // the instance's version of an overridden or abstract method (ld74, ld79)
@@ -17701,6 +17816,7 @@ ${prefixed}
           const baseWat = cv.ptr < 0 ? `(local.get $${receiver})` : `(i32.const ${cv.ptr})`;
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? ("i32" as WatType);
+            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           const call = `(call $${funcName} ${baseWat} ${emittedArgs.join(" ")})`.trim();
@@ -24628,6 +24744,7 @@ ${sum}
     this.src = rewriteOutsideStringsAndComments(this.src, rewriteOptChainNullish);
     this.src = rewriteOutsideStringsAndComments(this.src, (code) => code.replace(/[?][.]/g, "."));
     // Pre-pass: expand generic templates by monomorphization before any other parsing
+    this.src = this.expandGenericClasses(this.src); // `class Box<T>` (ld100)
     this.src = this.expandGenerics(this.src);
     // Phase 36: resolve conditional type declarations before any parse pass (after expandGenerics,
     // so monomorphized use sites are resolved too).
