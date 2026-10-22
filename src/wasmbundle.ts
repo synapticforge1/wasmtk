@@ -277,6 +277,7 @@ export async function runWasmBundle(
   // names. Without a synthesis here, the WAT compile step fails with
   // "undefined function $__malloc".
   let anyDroppedAllocator = false;
+  let minPages = 0; // the largest memory a module declared (ld81)
 
   for (const mod of modules) {
     // Build exportOverrides for this module:
@@ -300,6 +301,12 @@ export async function runWasmBundle(
       allNotices.push(`  ℹ️  ${basename(mod.filePath)}: ${notice}`);
     }
     if (result.droppedAllocator) anyDroppedAllocator = true;
+    // A module's mutable globals (a stack pointer, a heap cursor) point into ITS memory: the bundle
+    // keeps at least the pages the module declared, and wasic's 3-page floor when it has such
+    // globals. A 1-page bundle took a library whose cursor sat at 131072: out of bounds (ld81,
+    // 2026-10-22).
+    const ownPages = parseInt(mod.wat.match(/\(memory\s+(?:\(;\d+;\)\s+)?(?:\(export\s+"[^"]*"\)\s+)?(\d+)/)?.[1] ?? "0");
+    minPages = Math.max(minPages, ownPages, result.hasMutableGlobals ? 3 : 0);
 
     // Advance dataOffset: next module's data goes above this module's data region.
     // getDataMaxEnd returns the highest original address + length in this module's
@@ -318,7 +325,7 @@ export async function runWasmBundle(
   // Memory pages: enough for the combined static data PLUS at least one growth
   // page for the shared bump heap (Phase 18.5). Without the +1, an immediately-
   // first allocation can land at the page boundary and trap.
-  const pagesNeeded = Math.max(1, Math.ceil(dataOffset / 65536) + (anyDroppedAllocator ? 1 : 0));
+  const pagesNeeded = Math.max(1, minPages, Math.ceil(dataOffset / 65536) + (anyDroppedAllocator ? 1 : 0));
 
   // WASI imports — one (import ...) per unique WASI function referenced
   const wasiDecls = [...allWasiNames]

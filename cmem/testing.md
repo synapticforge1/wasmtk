@@ -114,6 +114,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, loud tool rows group 3 (ld81 wasmbundle, ld82 / ld83 bindgen bindings), gate
+> GREEN; all loud tool rows closed.** tool_rows **34** (+1) · merge_layout **10** (+1) · bindgen
+> 142 (8 fixtures regenerated: the binding's env Proxy and loader) · wasi 491/491 · golden-WAT 548,
+> none moved · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 /
+> 199 exact · api-surface unchanged.
+
 > **2026-10-22, loud tool rows group 2 (ld84, ld85 bundler; ld87 `mod` i64), gate GREEN.**
 > merge_layout **9** (+2) · tool_rows **33** (+3) · wasi 491/491 · golden-WAT 548, none moved ·
 > wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact ·

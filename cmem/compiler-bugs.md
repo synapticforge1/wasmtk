@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 141 | 0 | 27 |
-| LOUD | 5 | 102 | 4 | 15 |
+| LOUD | 5 | 102 | 0 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,9 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud tool rows, group 3 FIXED 2026-10-22:** ld81 (`wasmbundle` memory), ld82 (bindgen camelCase
+import), ld83 (deno binding: a relative path, a view's offset); **all loud tool rows closed**; open
+loud 5 compiler + 0 tool (the ld83 pair counts twice in the "other" column).
 **Loud tool rows, group 2 FIXED 2026-10-22:** ld84 (bundler exports), ld85 (one basename twice),
 ld87 (`mod` i64); open loud 5 compiler + 4 tool.
 **Loud tool rows, group 1 FIXED 2026-10-22:** ld89 (`dync` scaffold and doubled errors), ld90 (flag
@@ -476,10 +479,17 @@ refused with a message (the helpers call a bare table index; a closure needs its
 A `string[]` callback (`names.forEach((s) => …)`) is refused likewise (no helper passes a
 (ptr, len) element; it was refused before as well).
 
-**Loud, tools** (`round2/tools/`): ld81 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
-to 131072 in a 1-page bundle: out of bounds); ld82 `bindgen` host imports with a camelCase method
-never link (`display_show_value` vs `display_showValue`); ld83 the deno binding cannot load a
-relative path (`fetch(String(source))`), and a typed-array view ignores byteOffset; ~~ld84~~ FIXED 2026-10-22 the bundler
+**Loud, tools** (`round2/tools/`): ~~ld81~~ FIXED 2026-10-22 `wasmbundle` ignores `hasMutableGlobals` (a cursor moved
+to 131072 in a 1-page bundle: out of bounds) (the bundle keeps the largest memory a module
+declared, and wasic's 3-page floor for a module with mutable globals); ~~ld82~~ FIXED 2026-10-22 `bindgen` host imports with a camelCase method
+never link (`display_show_value` vs `display_showValue`) (a WIT name is lower-kebab, so the module's
+spelling is lost; the binding's `env` is a Proxy that finds an import by its name with case, `_`
+and `-` ignored); ~~ld83~~ FIXED 2026-10-22 the deno binding cannot load a
+relative path (`fetch(String(source))`), and a typed-array view ignores byteOffset (a path or a
+`file:` URL is read from disk, only http / data / blob URLs fetched; a view is passed to
+`instantiate` as given, in all three runtimes, since a Node `readFileSync` Buffer's `.buffer` is
+the shared pool too; `tests/tool_rows_tests.ts` drives the Deno binding, and the node / bun
+bindings were run under Bun by hand); 8 bindgen fixtures regenerated; ~~ld84~~ FIXED 2026-10-22 the bundler
 handles neither `export class` nor `export { name }` (`class` / `abstract class` joined the
 named-export rename, with a CAPITALISED prefix, `Shapes_Box`, since wasic reads `new X` by its
 capital; a local `export { a, b as c };` renames each declaration and maps the exported name);

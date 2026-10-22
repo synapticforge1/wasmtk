@@ -49,16 +49,19 @@ export async function loadModule(
   const env: Record<string, unknown> = {};
   env["__host_call"] = (fnIdx: number, argsArr: number) => _hostCallImpl(fnIdx, argsArr);
   env["__host_print"] = (ptr: number, len: number) => _hostPrintImpl(ptr, len);
-  const importObj = { env, wasi_snapshot_preview1: _wasi };
-  let raw: ArrayBuffer;
-  if (source instanceof ArrayBuffer) {
+  const _norm = (k: string) => k.toLowerCase().replace(/[-_]/g, "");
+  const _envByNorm = new Map(Object.entries(env).map(([k, v]) => [_norm(k), v]));
+  const _env = new Proxy(env, { get: (t, k: string) => Object.prototype.hasOwnProperty.call(t, k) ? t[k] : _envByNorm.get(_norm(String(k))) });
+  const importObj = { env: _env, wasi_snapshot_preview1: _wasi };
+  let raw: BufferSource;
+  if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
     raw = source;
-  } else if (ArrayBuffer.isView(source)) {
-    raw = (source as Uint8Array).buffer as ArrayBuffer;
-  } else {
+  } else if (/^(?:https?|data|blob):/i.test(String(source))) {
     raw = await (await fetch(String(source))).arrayBuffer();
+  } else {
+    raw = await Deno.readFile(source instanceof URL || /^file:/i.test(source) ? new URL(source) : source);
   }
-  const { instance } = await WebAssembly.instantiate(raw, importObj);
+  const { instance } = await WebAssembly.instantiate(raw, importObj as unknown as WebAssembly.Imports);
   const exp = instance.exports as Record<string, unknown>;
   const _kebab = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/_/g, "-").toLowerCase();
   const _exCache: Record<string, unknown> = {};

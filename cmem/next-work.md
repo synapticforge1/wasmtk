@@ -29,7 +29,10 @@ the workspace pulls it on its sweep.
   and one inline `git commit -m` in this repo (the latter amended from a file before merging).
   2026-10-22: one scratch probe written by a shell redirect (`grep -v … > file`) instead of
   `Write`; scratch only, nothing in the repo. The pattern: a quick "this file minus one line"
-  probe reaches for the shell.
+  probe reaches for the shell. And one `sed -n` READ of src/wasic.ts (no edit) where `Read` was
+  the rule. Also learned: the installed `wasmtk` shim runs the CURRENT `src/` (a stash changed
+  its behaviour without a reinstall), so an inversion check must stash, not merely skip the
+  reinstall.
 
 ## Open now
 
@@ -50,8 +53,10 @@ the workspace pulls it on its sweep.
 > breaking), a feature, NOT started. The loud compiler groups are done; left: ld45, ld94–ld96,
 > ld100 (features / gaps, each refused with a message), then the 9 tool rows. Tool group 1
 > (ld89 `dync`, ld90 CLI flags) DONE; group 2 (ld84 bundler exports, ld85 same-basename imports,
-> ld87 `mod` i64) DONE; next ld83 (deno binding), ld82 (bindgen camelCase), ld81 (wasmbundle
-> globals). Open: loud 5 compiler + 4 tool.
+> ld87 `mod` i64) DONE; group 3 (ld81 wasmbundle memory, ld82 bindgen camelCase, ld83 deno
+> binding) DONE: **all loud tool rows closed**. Open: loud 5 compiler (ld45, ld94–ld96, ld100,
+> features each refused with a message), silent 2 (sw119 owner decision, sw123). Next per the
+> earlier plan: items 3–5 (binaryang 1.10.0 items, H10, nullable gaps incl. sw123).
 
 > **2026-10-21, the Deno-exit plan's P5 (scripts) DONE, ahead of P0–P4 by the owner's order:**
 > the repo scripts and the 5 script tasks run with `bun` on `node:` builtins, and the probe rule
