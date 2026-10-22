@@ -8,7 +8,7 @@
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
 | SILENT-WRONG | 2 | 139 | 0 | 27 |
-| LOUD | 22 | 78 | 9 | 10 |
+| LOUD | 15 | 85 | 9 | 10 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,6 +22,8 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**Loud refusals, group 1 (expressions) FIXED 2026-10-22:** ld38, ld43, ld66–ld70; open loud 15
+compiler + 9 tool; test `4m_ExpressionGaps`.
 **Open silent-wrong in the compiler: 2; in the tools: 0** (2026-10-21: sw122 fixed, parseFloat /
 Number / parseInt correctly rounded, `53_NumberParseRounding`; left sw119, owner-ruled on a branch,
 and sw123 with the nullable gaps). Before that, 3 (2026-10-20, the loud rows' invalid-module
@@ -242,10 +244,10 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~ld46~~ | ✅ FOUND FIXED 2026-10-20 (it passes; closed by sw100's `.length` of a string-valued call, 2026-10-19). Was (found with sw71, 2026-10-15; the same on main): `console.log(s.charAt(far).length)` builds an invalid module (an i32 block where an f64 is expected); `const c: string = s.charAt(far)` then `c.length` works | console_log |
 | ~~sw72~~ | ✅ FIXED 2026-10-15 (found with ld22; the same on main): a function-typed declaration whose initialiser was neither a closure-factory call nor a plain function name EMITTED NOTHING (`return ""`): the local stayed 0, and a call through it reached table slot 0, whatever function that was (an assembler error only when the table was empty). Any other initialiser is now a compile error; ld39 and ld01 closed the forms that reached it | wasic function-typed declaration |
 | ~~sw73~~ | ✅ FIXED 2026-10-15 (found with ld12; the same on main): a function's local array named like a top-level array (`function mk() { const m: i32[][] = …; }` beside a top-level `m`) made the top-level one a module global, because `detectModuleArrayGlobals` counted the function's OWN `m` as a use; _start then initialised it as a local and read the global: `3 7 9` → `3 0 0`. A name the function declares (param, `const` / `let` / `var`) no longer counts. `13_variadic-functions`' `nums` became a plain local (golden re-recorded) | wasic module arrays |
-| ld38 | OPEN (found 2026-10-15): `Number.prototype.toFixed` is not implemented: `console.log(x.toFixed(1))` and `const t: string = x.toFixed(2)` are refused (only a user function named `toFixed` exists in the library code). A capability gap, loud | wasic numbers |
+| ~~ld38~~ | ✅ FIXED 2026-10-22: `$__f64_to_fixed(x, f)`, exact as JavaScript's: x = m·2^e, n = m·10^f·2^e in big integers, ties to the larger n (`(1.005).toFixed(2)` is "1.00", 1.005 being a little below it), NaN "NaN", \|x\| ≥ 1e21 and ±Infinity are String(x), f outside 0..100 traps (JavaScript: RangeError). It reuses sw122's `$__bn_*` helpers (plus a right shift and a small division), emitted once when both are used. Declarations, templates, concatenations and console.log. Test `4m_ExpressionGaps`. Was (found 2026-10-15): `Number.prototype.toFixed` is not implemented: `console.log(x.toFixed(1))` and `const t: string = x.toFixed(2)` are refused | wasic numbers |
 | ld41 | OPEN (found with sw73, 2026-10-15; the same on main): a TOP-LEVEL 2D array read inside a function, `return grid[r][c]`, is refused (the module-global 2D path is missing) | wasic module arrays |
 | ld42 | OPEN (found with ld01, 2026-10-15; the same on main): a top-level `boolean` constant read inside a function, `if (useTri)`, is "Unsupported expression" (an i32 constant beside it works) | wasic module globals |
-| ld43 | OPEN (found with sw26, 2026-10-15): `.length` of a parenthesised string expression in console.log, `("pre" + s).length`, is refused | console_log |
+| ~~ld43~~ | ✅ FIXED 2026-10-22: emitExprCore's `.length` of a string-valued receiver unwraps parentheses and builds a concatenation into the `$__str_op` pair (emitStringAssign); it also takes a string FIELD of an element (ld70) and stays out of a sum (`a.length + t.length`) and of a plain element read (`arr[j].length`, its direct load). `isStringExpr` now knows `L + R` with a string on either side (the last additive operator being that `+`, nothing looser at top level): `(s + s).length` was refused. Test `4m_ExpressionGaps`. Was (found with sw26, 2026-10-15): `.length` of a parenthesised string expression in console.log, `("pre" + s).length`, is refused | console_log |
 | ~~sw74~~ | ✅ FIXED 2026-10-15 (found with ld37; the same on main): a whole STRUCT array in console.log printed its element POINTERS, `[ 260, 264 ]` for `[ { x: 1 }, { x: 2 } ]`: the refusal list missed `structTypeName`, and the elements are i32. Refused now (ld45 is the printing) | console_log |
 | ~~ld44~~ | ✅ FIXED 2026-10-15 (found with ld37; the same on main): a string `push` with an expression in a ONE-LINE loop at top level, `for (…) grown.push("w" + i)`, used an undeclared `$__str_push_ptr` (the pre-scan wants the push at the start of its line); declared after emission now, as `$__arr_tmp`. Test `7h_ConsoleWholeArrays` | wasic temps |
 | ld45 | OPEN (2026-10-15): printing a whole struct array, `console.log(ps)` (Deno `[ { x: 1 }, { x: 2 } ]`), is refused; needs an object writer (util.inspect's `{ k: v }`, its own line-breaking) | console array writer |
@@ -370,9 +372,9 @@ path; emitExpr converts an i32 NUMBER to an asked-for f64, never a pointer, `isI
 ~~ld61~~ FIXED 2026-10-20 console `reduce` returning f64; ~~ld62~~ FOUND FIXED 2026-10-20 console `s.length > 2 && arr[1] > 1`;
 ~~ld63~~ FIXED 2026-10-20 console `nm() < s` (bad local); ~~ld64~~ FIXED 2026-10-20 a nullable string local (`$s_ptr` unresolved;
 prints `null` / its text); ~~ld65~~ FIXED 2026-10-19 with sw97 a NaN
-parenthesised compare traps (sw97); ld66 `1e-7 * 1.5` in a declaration (the `-` of the exponent
-splits); ld67 console `n ** 2` of an i32; ld68 console `typeof b === "boolean"`; ld69 console
-`x > 1 || s === "q"` (splits at `===` first); ld70 `users[0].name.length` in a declaration; ld71
+parenthesised compare traps (sw97); ~~ld66~~ FIXED 2026-10-22 `1e-7 * 1.5` in a declaration (the `-` of the exponent
+splits; `isLiteralExponentSign` in findBinaryOp); ~~ld67~~ FIXED 2026-10-22 console `n ** 2` of an i32 (`**` makes it a float); ~~ld68~~ FIXED 2026-10-22 console `typeof b === "boolean"` (wasic's compile-time boolean); ~~ld69~~ FIXED 2026-10-22 console
+`x > 1 || s === "q"` (splits at `===` first; the string comparison waits for `&&` / `||` / `??` / `?:`); ~~ld70~~ FIXED 2026-10-22 `users[0].name.length` in a declaration (with ld43); ld71
 `++` / `--` as a value (console and declaration; `while (m-- > 0)`); ld72 compound assignment / `++`
 on an array element or element field (`arr[i] += 1`, `ps[1].x += 5`; README claims support);
 ld73 one-line `do { … } while (…)`; ld74 classes: inherited getter, `return this`, a method

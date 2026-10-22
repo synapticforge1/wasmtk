@@ -1346,7 +1346,7 @@ function parseSingleArg(
   // The WHOLE argument must be that one call: `s.charAt(i) === ""` started like one and printed
   // the comparison as a number, `1` (sw75, 2026-10-15; the same on main).
   const strMethodWhole = token.match(
-    /^.+\.(toUpperCase|toLowerCase|trim|trimStart|trimEnd|trimLeft|trimRight|slice|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat|toString)\s*\(([\s\S]*)\)$/,
+    /^.+\.(toUpperCase|toLowerCase|trim|trimStart|trimEnd|trimLeft|trimRight|slice|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat|toString|toFixed)\s*\(([\s\S]*)\)$/,
   );
   if (_stringExprResolver && strMethodWhole && parenDepthNeverNegative(strMethodWhole[2]!)) {
     const r = _stringExprResolver(token, locals);
@@ -2230,7 +2230,9 @@ function parseSingleArg(
   // twin, 2026-10-06); printing an integral value as f64 gives the same text, so this is safe.
   const hasKnownFloat = [...token.matchAll(/(?<![\w.])(-?\d+\.\d*(?:[eE][+-]?\d+)?|[A-Za-z_]\w*)/g)]
     .some((m) => isKnownFloat(m[1]!, locals, globals)) || hasFloatField(token, structLookup) ||
-    hasFloatElem(token, arrayLookup);
+    hasFloatElem(token, arrayLookup) ||
+    // `**` of numbers is a float (Math.pow): `n ** 2` of an i32 n was asked for as i32 (ld67)
+    findTopLevelOp(token, "**") > 0;
   if ((leadType === "i32" || leadType === "bool") && !hasKnownFloat) {
     return [{
       kind: "i32expr",
@@ -2514,7 +2516,11 @@ function exprToWat(
   const exprLenM = expr.match(/^(.+)\.length$/);
   if (exprLenM && !/^\w+$/.test(exprLenM[1].trim())) {
     const r = _stringExprResolver?.(exprLenM[1].trim(), locals);
-    if (r) return `(block (result i32) (drop ${r.ptrWat}) ${r.lenWat})`;
+    // an i32, at the type asked for (`users[0].name.length` went to the f64 printer raw, ld70)
+    if (r) {
+      const w = `(block (result i32) (drop ${r.ptrWat}) ${r.lenWat})`;
+      return widenNumeric(w, "i32", expectedType) ?? w;
+    }
   }
 
   // Bug fix 2026-06-30: 2D dynamic-array element `arr[i][j]` as an OPERAND (e.g. `arr[0][0] + arr[0][1]`).
@@ -3169,7 +3175,11 @@ function exprToWat(
   // code unit; with a number on either side JavaScript compares numbers, so both must be strings.
   // `a < b` of two strings reached the numeric table and read `$a` as a number (ld03, 2026-10-15).
   const STR_CMP_OPS = ["===", "!==", "==", "!=", "<=", ">=", "<", ">"];
-  for (const strOp of STR_CMP_OPS) {
+  // Not across a looser operator: `x > 1 || s === "q"` is an `||` of two comparisons; it was split
+  // at the `===` (ld69, 2026-10-22). The logical / ternary handlers below take it apart first.
+  const looser = findTopLevelOp(expr, "||") !== -1 || findTopLevelOp(expr, "&&") !== -1 ||
+    findTopLevelOp(expr, "??") !== -1 || splitTernary(expr) !== null;
+  for (const strOp of looser ? [] : STR_CMP_OPS) {
     const strOpIdx = findTopLevelOp(expr, strOp);
     if (strOpIdx === -1) continue;
     const strLhs = expr.slice(0, strOpIdx).trim();
@@ -3186,6 +3196,15 @@ function exprToWat(
     if (isEquality ? !lStr && !rStr : !(lStr && rStr)) break;
     // A string against `undefined` / `null` is wasic's (`$__str_is_nullish`: no text, or an
     // out-of-range `s[i]`'s "undefined", sw71); compared as text it was false.
+    // `typeof x === "boolean"` is wasic's compile-time boolean (ld68, 2026-10-22: the `typeof`
+    // side was refused as a string operand)
+    if (
+      isEquality && [strLhs, strRhs].some((x) => /^typeof\s+\w+$/.test(x)) && _exprFallbackResolver
+    ) {
+      const r = _exprFallbackResolver(expr, locals);
+      const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
+      if (widened !== null) return widened;
+    }
     if (isEquality && [strLhs, strRhs].some((x) => x === "undefined" || x === "null") && _exprFallbackResolver) {
       const r = _exprFallbackResolver(expr, locals);
       const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;

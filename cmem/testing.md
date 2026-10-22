@@ -112,7 +112,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-21, binaryang **1.13.0**; latest release v2.0.3)
+## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
+
+> **2026-10-22, loud refusals group 1 (ld38 toFixed, ld43, ld66–ld70), gate GREEN.** wasi
+> **484/484** (+`4m_ExpressionGaps`, failing to compile on the old compiler) · golden-WAT **541**,
+> nothing else moved (the wider `.length` handler and `isStringExpr`'s `L + R` rule moved no
+> existing program once kept out of sums and plain element reads; a first try moved
+> `30_sorting-by-functions` and broke `4k_LastSilentRows`) · typed_decl 45 · wast 64,506 / 0 / 16 ·
+> cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface unchanged.
 
 > **2026-10-21, sw122 (correctly rounded parseFloat / Number(string) / parseInt radix 10), gate
 > GREEN.** wasi **483/483** (+`53_NumberParseRounding`, 163 values; its probe battery differed on
