@@ -114,6 +114,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
 
+> **2026-10-22, ld96 (capturing callbacks, string-array callbacks) and sw128 (array literal
+> arguments), gate GREEN.** wasi **496/496** (+`5h_CapturingCallbacks`, +`9_ArrayLiteralArguments`,
+> both failing on the old compiler) · golden-WAT **553**, 1 existing entry moved and reviewed
+> (`28_StringsTuplesAndObjects`: a top-level `k` read as its global, not captured) · wast 64,506 /
+> 0 / 16 · cross-check 1152 on baseline · go 7 / 7 / 12 · wasMath 151 / 199 exact · api-surface
+> unchanged.
+
 > **2026-10-22, ld94 (`string[][]`) and ld95 (function array literals), gate GREEN.** wasi
 > **494/494** (+`63_StringMatrix`, +`44_FunctionArrayLiterals`, both failing on the old compiler)
 > · golden-WAT **551**, none moved · wast 64,506 / 0 / 16 · cross-check 1152 on baseline · go 7 /
