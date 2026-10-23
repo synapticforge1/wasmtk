@@ -9,11 +9,14 @@
  *   deno run --allow-read --allow-write --allow-run --allow-env tests/bindgen_tests.ts
  */
 
-import { join, toFileUrl } from "jsr:@std/path";
+import { basename, join } from "jsr:@std/path";
 import { bold, cyan, green, magenta, red, yellow } from "jsr:@std/fmt/colors";
 import { generateBindings, parseWit } from "../src/bindgen.ts";
 
 const FIXTURES = join(import.meta.dirname!, "module", "bindgen_fixtures");
+// The host runners are committed, so they name their siblings relatively: an absolute file URL
+// would publish this machine's path and break the runner on any other checkout.
+const rel = (p: string) => "./" + basename(p);
 const WASMTK_BIN = "wasmtk";
 
 // ── Assertion harness ────────────────────────────────────────────────────────
@@ -339,13 +342,13 @@ async function testIntegrationMath() {
   ok("binding written", true);
 
   // Step 4: write and run host test script
-  const bindingUrl = toFileUrl(fixtureBinding).href;
-  const wasmUrl = toFileUrl(fixtureWasm).href;
+  const bindingUrl = rel(fixtureBinding);
+  const wasmUrl = rel(fixtureWasm);
   const hostSrc = `
 // auto-generated host runner for math_50 bindgen test
 import { loadModule } from "${bindingUrl}";
 
-const wasmBytes = await Deno.readFile(new URL("${wasmUrl}"));
+const wasmBytes = await Deno.readFile(new URL("${wasmUrl}", import.meta.url));
 const m = await loadModule(wasmBytes);
 console.log(m.add(3, 4));
 console.log(m.multiply(2.5, 4.0));
@@ -396,11 +399,11 @@ async function testIntegrationKebab() {
   // The loader must resolve capital-heavy names via _ex(...), not a bare exp[...].
   ok("loader uses _ex resolver", ts.includes("const _ex = (n: string)"));
 
-  const bindingUrl = toFileUrl(fixtureBinding).href;
-  const wasmUrl = toFileUrl(fixtureWasm).href;
+  const bindingUrl = rel(fixtureBinding);
+  const wasmUrl = rel(fixtureWasm);
   const hostSrc = `
 import { loadModule } from "${bindingUrl}";
-const wasmBytes = await Deno.readFile(new URL("${wasmUrl}"));
+const wasmBytes = await Deno.readFile(new URL("${wasmUrl}", import.meta.url));
 const m = await loadModule(wasmBytes);
 // Binding methods use the WIT-derived camelCase (readId/toHtml); _ex() bridges
 // them to the original-cased wasm exports readID/toHTML at call time.
@@ -447,11 +450,11 @@ async function testIntegrationBool() {
   const ts = generateBindings(witSrc);
   await Deno.writeTextFile(fixtureBinding, ts);
 
-  const bindingUrl2 = toFileUrl(fixtureBinding).href;
-  const wasmUrl2 = toFileUrl(fixtureWasm).href;
+  const bindingUrl2 = rel(fixtureBinding);
+  const wasmUrl2 = rel(fixtureWasm);
   const hostSrc = `
 import { loadModule } from "${bindingUrl2}";
-const wasmBytes = await Deno.readFile(new URL("${wasmUrl2}"));
+const wasmBytes = await Deno.readFile(new URL("${wasmUrl2}", import.meta.url));
 const m = await loadModule(wasmBytes);
 console.log(m.isPositive(1.0));
 console.log(m.isPositive(-1.0));
@@ -506,11 +509,11 @@ async function testIntegrationStrings() {
   contains("binding has _writeStr", ts, "_writeStr");
   contains("binding has cabi_realloc", ts, "_cabi_realloc");
 
-  const bindingUrl3 = toFileUrl(fixtureBinding).href;
-  const wasmUrl3 = toFileUrl(fixtureWasm).href;
+  const bindingUrl3 = rel(fixtureBinding);
+  const wasmUrl3 = rel(fixtureWasm);
   const hostSrc = `
 import { loadModule } from "${bindingUrl3}";
-const wasmBytes = await Deno.readFile(new URL("${wasmUrl3}"));
+const wasmBytes = await Deno.readFile(new URL("${wasmUrl3}", import.meta.url));
 const m = await loadModule(wasmBytes);
 console.log(m.greet("World"));
 console.log(m.shout("hi"));
@@ -558,11 +561,11 @@ async function testIntegrationImports() {
   contains("binding has ModuleImports", ts, "ModuleImports");
   contains("envMul in interface", ts, "envMul?:");
 
-  const bindingUrl4 = toFileUrl(fixtureBinding).href;
-  const wasmUrl4 = toFileUrl(fixtureWasm).href;
+  const bindingUrl4 = rel(fixtureBinding);
+  const wasmUrl4 = rel(fixtureWasm);
   const hostSrc = `
 import { loadModule } from "${bindingUrl4}";
-const wasmBytes = await Deno.readFile(new URL("${wasmUrl4}"));
+const wasmBytes = await Deno.readFile(new URL("${wasmUrl4}", import.meta.url));
 const m = await loadModule(wasmBytes, {
   env: {
     envMul: (a, b) => a * b,
@@ -616,11 +619,11 @@ async function testIntegrationFnAny() {
   ok("binding written", true);
 
   // 4. host calls getDoubler() → JS proxy → invoke it → unbox the result
-  const bindingUrl = toFileUrl(fixtureBinding).href;
-  const wasmUrl = toFileUrl(fixtureWasm).href;
+  const bindingUrl = rel(fixtureBinding);
+  const wasmUrl = rel(fixtureWasm);
   const hostSrc = `
 import { loadModule } from "${bindingUrl}";
-const wasmBytes = await Deno.readFile(new URL("${wasmUrl}"));
+const wasmBytes = await Deno.readFile(new URL("${wasmUrl}", import.meta.url));
 const m = await loadModule(wasmBytes);
 const dbl = m.getDoubler() as ((x: number) => number) & { release(): void };
 console.log(dbl(21));
@@ -671,11 +674,11 @@ async function testIntegrationHostFn() {
   ok("binding installs the host-call handler", ts.includes("_hostCallImpl ="));
 
   // 4. host passes JS callbacks IN; the core calls them back
-  const bindingUrl = toFileUrl(fixtureBinding).href;
-  const wasmUrl = toFileUrl(fixtureWasm).href;
+  const bindingUrl = rel(fixtureBinding);
+  const wasmUrl = rel(fixtureWasm);
   const hostSrc = `
 import { loadModule } from "${bindingUrl}";
-const wasmBytes = await Deno.readFile(new URL("${wasmUrl}"));
+const wasmBytes = await Deno.readFile(new URL("${wasmUrl}", import.meta.url));
 const m = await loadModule(wasmBytes);
 console.log(m.applyTwice((n: number) => n + 1, 10));
 console.log(m.combine((a: number, b: number) => a * b, 6, 7));

@@ -1,6 +1,6 @@
 
-import { loadModule } from "file:///<repo-root>/tests/module/bindgen_fixtures/kebabcase_50.bindings.ts";
-const wasmBytes = await Deno.readFile(new URL("file:///<repo-root>/tests/module/bindgen_fixtures/kebabcase_50.wasm"));
+import { loadModule } from "./kebabcase_50.bindings.ts";
+const wasmBytes = await Deno.readFile(new URL("./kebabcase_50.wasm", import.meta.url));
 const m = await loadModule(wasmBytes);
 // Binding methods use the WIT-derived camelCase (readId/toHtml); _ex() bridges
 // them to the original-cased wasm exports readID/toHTML at call time.
