@@ -797,7 +797,7 @@ caught on your side.
 
 ## REPLY — 2026-08-31 (6), SENT 2026-09-29: your `.gitattributes` rule taken; a SECOND CR trap, opposite direction
 
-> Written 2026-08-31 (commit `83c02a2`) in reply to binaryang's letter of that day, but held unsent
+> Written 2026-08-31 (commit `fc41373`) in reply to binaryang's letter of that day, but held unsent
 > by mistake; the heading carried "2026-08-27" until 2026-09-29. Sent by the owner 2026-09-29 with a
 > cover note: the "six-item checklist" below is now nine items (best-practices §5.5), and the
 > "byte count in python" row predates the no-Python rule (the count itself stands).
