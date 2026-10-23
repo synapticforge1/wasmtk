@@ -47,7 +47,7 @@
    change: output only.
 2. **wast: 24 false passes removed** (the same refusals had counted as `assert_invalid` verdicts);
    gate 64,434 / 0 / 105. `tests/engine_tests.ts` (11).
-3. Two binaryang items found and handed over (next-work.md census (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`)): limits above u32 fail in the
+3. Two binaryang items found and handed over (next-work.md census (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`)): limits above u32 fail in the
    encoder; a branch hint on a non-branch is accepted. ✅ Closed 2026-09-29 by item 5.
 4. **H12 sw01 + sw33 (2026-09-29):** `throw new TypeError(…)` / `throw 42` exited 0 with no catch
    run; now catchable, an uncaught one exits 1, and throwing an object is a compile error.
@@ -204,7 +204,7 @@
 
 **Released from `main` 2026-09-28** (owner: "bump and publish", once binaryang 1.7.0 was gated).
 **Verified on JSR:** `latest` = 2.0.3 (created 2026-09-29T02:34Z), provenance attested (rekor log
-2992087896), package score **100** (every check true). Release commit `43c4d8ef02f`, tag `v2.0.3`.
+2992087896), package score **100** (every check true). Release commit `2597f1fd4b2`, tag `v2.0.3`.
 Version **2.0.3**, the ordinary counter step: the owner chose it over a round-number jump, since the
 README's Breaking Changes table is where breakage is announced. **Two BREAKING changes** (items 6
 and 11), both in that table under `2.0.3`. User-facing summary: `CHANGELOG.md`.
@@ -214,7 +214,7 @@ and 11), both in that table under `2.0.3`. User-facing summary: `CHANGELOG.md`.
     `tests/typed_decl_tests.ts`. Landing it fixed an i32-call-in-f64-context invalid module and an
     annotated 2D array that read as empty, and filed sw30–32 / ld09–14 (compiler-bugs.md).
 12. **Phase 36 conditional types restored** from the never-merged `1.4.1` branch (branch audit,
-    next-work.md (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`)), hardened so string literals are not rewritten.
+    next-work.md (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`)), hardened so string literals are not rewritten.
 13. **Backend → binaryang 1.7.0** (after 1.6.0, item 1). All five items of our report fixed; the
     wast gate scopes the custom-descriptors V8 flag to its proposal → 64,458 / 0 / 81.
 14. **H12 Phase 0a/0b:** golden-WAT harness (483 entries) and audit round 1 (compiler-bugs.md).
@@ -233,7 +233,7 @@ Items 1–10 below were the earlier unreleased block, carried into this release:
    group was then fixed (script grammar, `either`, `assert_exception`, GC results, trap trampoline) →
    726, none of them ours; then `exnref` via the trampoline and the gate's experimental V8 flag → 618;
    then a false-pass audit demoted 186 passes that rested on the wrong failure → 63,800 / 804.
-   See [next-work.md](next-work.md) (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`).
+   See [next-work.md](next-work.md) (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`).
 5. **Workspace letter H4** (memory drift T1–T11) closed in `cmem/`.
 6. ⚠️ **BREAKING: `wasmtk run` exit status at parity with wasmtime.** An uncaught exception → 1,
    `proc_exit(N)` → N, and `run x.ts` propagates the program's exit code. It also closed the README's
@@ -259,7 +259,7 @@ zig 20/20 · rust 10/10 · every other suite 0 failed. (Before items 11–14: wa
 
 **v2.0.2 is PUBLISHED to JSR and ATTESTED** — `rekorLogId 2666522017`, `createdAt 17:56:16.616` →
 `updatedAt 17:56:21.068` (4.45s, the attested signature). Patch bump from v2.0.1, no breaking
-changes, no API change. Tagged `v2.0.2` at `14b4edcc028`.
+changes, no API change. Tagged `v2.0.2` at `1f305cac0a9`.
 
 What it carries:
 
@@ -298,7 +298,7 @@ open question is now "why did it come back", not "is it broken".
 ## Release status (2026-08-27) — v2.0.1: standard EH, merged backend, a memory-corruption fix
 
 **v2.0.1 is PUBLISHED to JSR.** Patch bump from v2.0.0, no breaking changes. Tagged `v2.0.1` and
-pushed from `main` at `ebebd4e1f60`; 30 commits shipped in one release.
+pushed from `main` at `9acf13a3cfc`; 30 commits shipped in one release.
 
 **Backend: `@jrmarcum/binaryang@1.5.1` → `1.5.2`** — wabt-ts and binaryen-ts MERGED into one package
 on 2026-08-27 (two compat subpaths, one exact version). See design-decisions.md.
@@ -330,7 +330,7 @@ how the answer is read; the leading candidate is that v2.0.1 is the first releas
 ## Release status (2026-07-30) — v2.0.0: Phase 34 inline predicate targets + `./utils` slimmed
 
 **v2.0.0 is PUBLISHED to JSR** (`@jrmarcum/wasmtk@2.0.0` is `latest`) — merged to `main` from
-`fix/phase34-inline-predicate-target-2026-07-30` (commits `300f712` → `ff93147`, six commits) via
+`fix/phase34-inline-predicate-target-2026-07-30` (commits `039dde2` → `35beebf`, six commits) via
 `--ff-only`; branch deleted local + remote. Backend unchanged (wabt-ts 1.3.5 + binaryen-ts 1.4.3).
 The two sections below are the batches this release carries; they were working-tree entries and are
 promoted here on release. JSR now reports `percentageDocumentedSymbols: 1` (**100%**, up from
@@ -350,7 +350,7 @@ every other suite 0 failures. `deno doc --lint` clean across 16 entrypoints, doc
 `deno-version` pinned to `v2.9.1` (the last Deno that ever produced an attested release) to test the
 Deno-version hypothesis. **It published unattested anyway** (`rekorLogId` null), so the clean
 2.9.1/2.9.2 correlation was coincidental and **Deno is ruled out**. The pin was reverted to floating
-`v2.x` in `06e0b4f` right after. Elimination list and remaining suspects in
+`v2.x` in `f6f8eaf` right after. Elimination list and remaining suspects in
 [design-decisions.md](design-decisions.md).
 
 **The verification step earned its place:** the v2.0.0 run shows `Publish to JSR → success` and
@@ -431,7 +431,7 @@ The CHANGELOG entry still needs writing at release time and should lead with the
 ## Release status (2026-07-30) — v1.11.12: intersection base-typed parameters
 
 **v1.11.12 — merged to `main` from `fix/phase33-intersection-base-prefix-2026-07-30` (commits
-`217f418` + `49291f6`) and published to JSR.** Backend unchanged (wabt-ts 1.3.5 + binaryen-ts
+`251ac0e` + `8d2a302`) and published to JSR.** Backend unchanged (wabt-ts 1.3.5 + binaryen-ts
 1.4.3). Pre-publish gate: `deno publish --dry-run` clean, `deno doc --lint` clean across all 16 JSR
 entrypoints. Full regression gate: wasi **412/412**, wast 41 files / 12444 assertions / 0 failed,
 every other suite 0 failures.
@@ -462,8 +462,8 @@ reaches `wasic.ts`'s emitters. +2 regressions (`33_IntersectionBasePrefixGuard`
 
 ## Release status (2026-07-30) — v1.11.11: discriminated-union shared variant fields
 
-**v1.11.11 — merged to `main` from `test/phase19-union-stress-2026-07-30` (commits `84bf88f` +
-`fa72036`) and published to JSR.** Backend unchanged (wabt-ts 1.3.5 + binaryen-ts 1.4.3).
+**v1.11.11 — merged to `main` from `test/phase19-union-stress-2026-07-30` (commits `d933cc9` +
+`c1dc72a`) and published to JSR.** Backend unchanged (wabt-ts 1.3.5 + binaryen-ts 1.4.3).
 Pre-publish gate: `deno publish --dry-run` clean, `deno doc --lint` clean across all 16 JSR
 entrypoints. Full regression gate: wasi **407/407**, wast 41 files / 12444 assertions / 0 failed,
 every other suite 0 failures.
@@ -509,14 +509,14 @@ directive during this batch and is now recorded in INDEX.md, testing.md, workflo
 **No README row**: nothing user-facing changed (a passing stress test documents no new capability).
 
 **Branch deleted 2026-07-30.** `test/phase31-typedarray-stress-2026-07-30` was never pushed and
-never needed to exist — a batch with no `src/` fix has nothing to isolate. Its commit `4e32a7f5056`
+never needed to exist — a batch with no `src/` fix has nothing to isolate. Its commit `f89bc3bd036`
 is an ancestor of the Phase 19 branch, so the three tests reached `main` with that merge and shipped
 in v1.11.11. The rule this produced is at the top of [workflow.md](workflow.md): **branch only when
 a test fails and needs a fix.**
 
 ## Release status (2026-07-30) — v1.11.10: namespace members
 
-**v1.11.10 — merged to `main` from `test/phase30-stress-2026-07-29` (commits `713bd1f` + `8ae8556`)
+**v1.11.10 — merged to `main` from `test/phase30-stress-2026-07-29` (commits `4ba4b6d` + `33eaf60`)
 and published to JSR.** Backend unchanged (wabt-ts 1.3.5 + binaryen-ts 1.4.3). Pre-publish gate:
 `deno publish --dry-run` clean, `deno doc --lint` clean across all 16 JSR entrypoints. Full
 regression gate: wasi **400/400**, wast 41 files / 12444 assertions / 0 failed, every other suite
@@ -545,7 +545,7 @@ Suite **395 → 400/400**; wast 12444/0; every other suite 0 failures.
 
 ## Release status (2026-07-29) — v1.11.9: operator-precedence fix
 
-**v1.11.9 — merged to `main` from `test/phase29-stress-2026-07-29` (commit `852c531`) and published
+**v1.11.9 — merged to `main` from `test/phase29-stress-2026-07-29` (commit `3d104a8`) and published
 to JSR.** Backend unchanged (wabt-ts 1.3.5 + binaryen-ts 1.4.3). Pre-publish gate: `deno publish
 --dry-run` clean, `deno doc --lint` clean across all 16 JSR entrypoints. Full regression gate: wasi
 **395/395**, wast 41 files / 12444 assertions / 0 failed, every other suite 0 failures.
@@ -587,8 +587,8 @@ score 94. Full regression gate: wasi **391/391**, wast 41 files / 12444 assertio
 bindgen, bundle 4/4, merge, go_merge, both dync, mod, varscope, wasmmerge_guard, hybrid, jstyper,
 go_bindgen, go_asyncify all 0 failures.
 
-Commits: `bfe0f5a` (stress batch, 6 fixes) → `9245c9d` (StructImport) → `3fb62af` (Phase 27 string
-parity) → `d2c8aa1` (regression-gate policy) → `04c8cf0` (memory consolidation) → `05bc662`
+Commits: `c6264be` (stress batch, 6 fixes) → `dfa2196` (StructImport) → `fd6dced` (Phase 27 string
+parity) → `43d1d01` (regression-gate policy) → `851471e` (memory consolidation) → `d4ee2bc`
 (Phase 28 join + bracket-concat) → v1.11.8 bump.
 
 **The 10 fixes:** `as`-cast source type for `**`/`Math.*`; `T | null` tuple/struct returns;
@@ -661,11 +661,11 @@ separate trigger, so "outlier" is relative to which FILE changed, never absolute
 
 **v1.11.5 released to JSR** (score 100). On backend **wabt-ts 1.3.5 + binaryen-ts 1.4.3**.
 Regression gate green: wasi **375/375**, `go_merge` 7/7, `go_bindgen` 7/7, **`go_asyncify` 12/12**
-(now incl. `nested`), `hybrid` 10/10. The "B-items" backlog from `next-work.md` (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`) (B3/B4/B5) is done;
+(now incl. `nested`), `hybrid` 10/10. The "B-items" backlog from `next-work.md` (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`) (B3/B4/B5) is done;
 B6 stays deferred (no consumer). (v1.11.4 shipped the same code but scored 94 — `src/wast.ts` lacked
 an `@module` tag so JSR's `allEntrypointsDocs` was false; v1.11.5 added it, restoring 100. JSR
 provenance is absent since ≥v1.11.3 — a GitHub org OIDC-policy infra issue, not a code fix; see
-next-work.md (before 2026-09-30: `git show ab5d1273644:cmem/next-work.md`) "Published state".)
+next-work.md (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`) "Published state".)
 
 ### v1.11.7 (2026-07-28) — producer/dync/README pass
 
@@ -883,7 +883,7 @@ dropped it to 94 were fixed at 1.7.0 and remain fixed:
   id-token), not the YAML. A diagnostic step ("Check OIDC availability") was added before
   `deno publish` to surface a missing OIDC token in the run log; the 1.7.0 run published with
   provenance.
-- **Docs: `percentageDocumentedSymbols` 0.79 → 0.97** (≥0.80 threshold cleared). Commit `e64595f`
+- **Docs: `percentageDocumentedSymbols` 0.79 → 0.97** (≥0.80 threshold cleared). Commit `5dec7eb`
   added JSDoc to the 57 `missing-jsdoc` symbols across 9 files, exported the 3 producer result types
   (`GoResult`/`ZigResult`/`RustResult`) to clear 5 `private-type-ref` errors, and gave `DATA_BASE`
   an explicit type. `deno doc --lint` is now clean across all 15 entrypoints — keep it clean on
