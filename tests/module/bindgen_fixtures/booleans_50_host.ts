@@ -1,6 +1,6 @@
 
-import { loadModule } from "file:///<repo-root>/tests/module/bindgen_fixtures/booleans_50.bindings.ts";
-const wasmBytes = await Deno.readFile(new URL("file:///<repo-root>/tests/module/bindgen_fixtures/booleans_50.wasm"));
+import { loadModule } from "./booleans_50.bindings.ts";
+const wasmBytes = await Deno.readFile(new URL("./booleans_50.wasm", import.meta.url));
 const m = await loadModule(wasmBytes);
 console.log(m.isPositive(1.0));
 console.log(m.isPositive(-1.0));
