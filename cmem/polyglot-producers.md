@@ -71,7 +71,7 @@ host is the same code path, so adding a language = adding a producer, not a tool
 
 ### Rust producer = `rsxtk` (owner's Rust-side toolkit, 2026-06-03)
 
-**`rsxtk`** (crates.io: <https://crates.io/crates/rsxtk>; repo `jrmarcum/rsxtk`; v0.4.4 2026-04-20;
+**`rsxtk`** (crates.io: <https://crates.io/crates/rsxtk>; repo `synapticforge1/rsxtk`, moved from `jrmarcum` 2026-10-20; v0.4.4 2026-04-20;
 MIT OR Apache-2.0) — _"A high-performance Rust WASM Toolkit for managing and running WASI scripts,
 WAT, and WASM modules."_ This is the owner's Rust counterpart to wasmtk and is **the Rust producer's
 build+run driver**. Run individual Rust files as scripts with dependency management + WASM compile.

@@ -33,6 +33,66 @@ the workspace pulls it on its sweep.
   the rule. Also learned: the installed `wasmtk` shim runs the CURRENT `src/` (a stash changed
   its behaviour without a reinstall), so an inversion check must stash, not merely skip the
   reinstall.
+- **W4. rsxtk DOES publish** (measured 2026-10-23, crates.io API: crate `rsxtk`, 34 versions,
+  default 0.4.4, created 2026-01-06). The workspace says it "publishes nowhere": `projects.md:20,37`,
+  `working-rules.md:202`, letter H19 item (11). So rsxtk's `Cargo.toml` contact email falls inside
+  the 2026-10-23 maintainer-email exception rather than being an owner question. wasmtk's README
+  tells users `cargo install rsxtk`, which depends on that crate.
+- **W5. H18 counts EIGHT `bindgen_fixtures/*_host.ts`; there are SEVEN** (math, kebabcase, booleans,
+  strings, imports, fnany, hostfn; `git ls-files`, 2026-10-23). They are also GENERATED:
+  `tests/bindgen_tests.ts` rewrites each one on every run with `toFileUrl(...)` absolute paths
+  (`:342-348` and six more), so hand-editing the fixtures as the letter suggests would be undone by
+  the next run. The fix belongs in the generator (L3 below).
+
+## Workspace letters H15–H20 + the 2026-10-23 email rule — scoped 2026-10-23
+
+Read from `../cmem/handoffs.md` and `../cmem/working-rules.md` on 2026-10-23. None of these were
+recorded here before. Measured the same day: `origin` = `jrmarcum/wasmtk`, `main` 131 ahead of
+`origin/main`, no `maintenance.strategy`, the local `user.email` is the owner's personal address
+(not noreply), and the drive-path scan (working-rules § Records) hits 11 tracked files.
+
+- **L1. rsxtk moved to `synapticforge1/rsxtk`: DONE 2026-10-23** (owner-directed). Three mentions:
+  `polyglot-producers.md:74`, `vision.md:83`, `roadmap.md:1418` (that one also wrongly called the
+  crate `jrmarcum/rsxtk`; the crate is `rsxtk`). No other repo URL for rsxtk exists in tracked
+  files; the crates.io links stay as they are.
+- **L2. H17 (1): two stale binaryang clone URLs: DONE 2026-10-23** → `synapticforge1/binaryang`:
+  `scripts/upstream-link.ts:52` (a printed hint) and `workflow.md:17`. No suite reaches either.
+- **L3. H18: drive paths in tracked files: DONE 2026-10-23.** (a) `tests/bindgen_tests.ts` writes
+  the seven host runners with relative specifiers (`./<name>.bindings.ts`, `new URL("./<name>.wasm",
+  import.meta.url)`) instead of `toFileUrl(...)`; regenerated. Gate: `bindgen_tests` 142/142 (= the
+  recorded baseline; a test-harness change, no `src/` edit). Inverted from a copy of the folder
+  with its `.wasm` corrupted: the new runner fails (exit 1), the old absolute runner still printed
+  7 / 10 / 25 from the original checkout, so before the fix the runners never read their own
+  folder. (b) memory lines: `legacy-claude-archive.md:852,893` (→ `<home>\TMP\…`; otherwise
+  verbatim), `roadmap.md:1123` and `vision.md:178` (→ `../universalWasmLoader/`; both had also
+  named the old `GithubProjects\` location). Scan: zero hits outside `upstream/`.
+- **L4. H19: purge personal information from history — wasmtk FIRST, before the 131 commits are
+  pushed.** Needs the owner's go-ahead (it rewrites every ref and ends in a force-push with lease).
+  Template: loader-dotnet `cmem/overview.md:150-164`. Rewrite the author/committer address on all
+  721+ commits to the noreply address and the L3 paths in every tree; all 77 branches and 77 tags;
+  keep every TAGGED tree byte-identical (metadata only on tagged commits); record the old→new map
+  tag by tag (JSR provenance for 2.0.3 and earlier keeps the old hashes); no host Python, so
+  `filter-branch`. **Before it, the owner chooses:** set the local `user.email` to the noreply
+  address (every new commit adds another personal-address commit until then). After it, the H7
+  stamp `f50c8e4` gets a new hash: loader-js re-stamps from the PUSHED commit (drift X8). The vendored
+  `upstream/binaryang` clone must not push the old history.
+- **L5. H16: `.git` on exFAT** (126 packs / 2.90 GiB on 2026-10-22). AFTER L4 and the push:
+  `git stash list` → `gc --prune=now` → `fsck --connectivity-only` →
+  `config --local maintenance.strategy gc`; record in `cmem/local/environment.md`. Owner's OK.
+- **L6. H17 (2) + H20: the move to `synapticforge1/wasmtk`: DONE 2026-10-23.** The owner moved
+  the repo and updated JSR's GitHub link before the purge. Here: `origin` set to
+  `synapticforge1/wasmtk` (`git ls-remote` answers; its `main` was `673d7e305986`, the pre-purge
+  `origin/main`); `scripts/publish.ts:52` and `vision.md:79,355` updated. The JSR scope stays
+  `@jrmarcum` (every `@jrmarcum/wasmtk` specifier is a package name, not a location);
+  `legacy-claude-archive.md:2522` keeps the old name as history. Still to check before 3.0.0's
+  publish: that the JSR publishing path works from the new location (H20).
+- **L7. H15 (scripting rule): record only.** The floor is now TypeScript on Bun, which wasmtk
+  already does (2026-10-21); nothing to port. The letter closes W1–W3. W2's first exception (a probe
+  needing the import map) is in the floor; its second (a Deno ORACLE, `Deno.inspect`) is not.
+- **L8. 2026-10-23 maintainer-email exception: nothing to do.** `deno.json` has no author field and
+  JSR reads none; wasmtk carries no contact email and needs none.
+
+Order: L1–L3 and L6 done 2026-10-23; the owner said "proceed" on L4 and L5 the same day.
 
 ## Open now
 

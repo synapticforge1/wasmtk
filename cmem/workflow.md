@@ -14,7 +14,7 @@ The backend is a first-party sibling project and the two repos trade bug reports
 local checkout lives at **`upstream/binaryang`** — **gitignored, not vendored, not a submodule**.
 
 ```bash
-git clone https://github.com/jrmarcum/binaryang.git upstream/binaryang   # once
+git clone https://github.com/synapticforge1/binaryang.git upstream/binaryang   # once
 deno task upstream:link        # regenerate deno.upstream.json from deno.json
 deno run -A --config deno.upstream.json <script>     # run anything against the checkout
 deno task upstream:install     # installs as `wasmtk-upstream`, NOT `wasmtk`
