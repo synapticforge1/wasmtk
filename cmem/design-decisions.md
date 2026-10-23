@@ -1593,7 +1593,9 @@ silently break (all `src/wasic.ts`):
   binaryang merge, which published three packages from this same scope on the same day and hit — and
   then did not hit — the same problem.
 
-  1. **A global JSR- or GitHub-side change is REFUTED.** That was the standing leading hypothesis
+  1. ~~**A global JSR- or GitHub-side change is REFUTED.**~~ **WITHDRAWN 2026-10-23** (see the
+     next entry): the three attested publishes below came AFTER the outage had ended for the whole
+     scope, so they say nothing about the window. The original text: that was the standing leading hypothesis
      ("remaining suspects: JSR-side or GitHub-side changes in the 2026-07-03 → 07-09 window").
      `binaryen-ts@1.5.1`, `wabt-ts@1.5.1` and `binaryang@1.5.1` all published **attested** on
      2026-08-27 — `rekorLogId` 2618865672, 2618866200 and 2618802426. Provenance works on this
@@ -1605,6 +1607,28 @@ silently break (all `src/wasic.ts`):
   3. **A cached/stale API read is not it either.** The absence was re-verified with cache-busted
      requests: v1.11.2 returns `rekorLogId` 2053916008, and v1.11.3, v1.11.5, v1.11.12 and v2.0.0
      all return null with `updatedAt == createdAt`. **The absence is real.**
+
+- 🆕 **The outage was SCOPE-WIDE, outside this repo (binaryang letter, 2026-10-23; spot-checked
+  here the same day).** binaryang read `rekorLogId` for every version of all five `@jrmarcum`
+  packages published 2026-06-01 → 09-01:
+  - **Every publish in the scope from 07-08 00:36 to 07-30 lacked provenance, 17 of 17**:
+    binaryen-ts 1.3.6–1.4.3 (7) and wasmtk 1.11.3–2.0.0 (10). The last attested before it: wabt-ts
+    1.3.5 and wasmtk 1.11.2, both 07-03 ~03:30–03:52.
+  - Nothing in the scope published 07-31 → 08-24; from 08-25 every publish was attested (wabt-ts,
+    binaryen-ts, binaryang, then wasmtk 2.0.1 on 08-27).
+  - An earlier, shorter gap of the same shape, **06-10 → 06-11**: binaryen-ts 1.3.5, wabt-ts 1.3.3
+    and wasmtk 1.6.5 all unattested, everything before and after attested.
+
+  Re-read here, cache-busted (`api.jsr.io/scopes/jrmarcum/packages/wasmtk/versions/<v>`): 1.6.4
+  (06-07) attested · **1.6.5 (06-11) none** · 1.7.0 (06-15) attested · 1.11.2 (07-03 03:52)
+  attested · **1.11.3 (07-09), 1.11.12, 2.0.0 (07-30 22:26) none** · 2.0.1 (08-27), 2.0.3 attested —
+  every figure as the letter gives it. **Conclusion:** the start falls between 07-03 03:52 and
+  07-08 00:36 and the end between 07-30 22:26 and 08-25 00:06, in two independent repos at once, so
+  the cause was outside both (JSR, GitHub's OIDC or Sigstore; the data does not say which). This is
+  the 2026-07-30 suspect ("JSR-side or GitHub-side changes in the 07-03 → 07-09 window"), and
+  candidate 2 of "we do not know why it came back". **Nothing in wasmtk has to explain the outage
+  or its end**; it does not show the v2.0.1-era changes were unneeded — the cache-busted verify
+  step stays, it is what makes a pass believable. "Specific to wasmtk" (item 1 above) is withdrawn.
 
 - 🆕 **The verify step could not have been believed — it did not cache-bust. FIXED.** The JSR version
   endpoint is cached, and attestation is written a few seconds AFTER publish, so a plain re-read can
