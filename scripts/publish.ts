@@ -49,4 +49,4 @@ run(["git", "push"]);
 run(["git", "push", "origin", tag]);
 
 console.log(`\nTag ${tag} pushed. GitHub Actions will publish to JSR with provenance.`);
-console.log(`Watch progress at: https://github.com/jrmarcum/wasmtk/actions`);
+console.log(`Watch progress at: https://github.com/synapticforge1/wasmtk/actions`);
