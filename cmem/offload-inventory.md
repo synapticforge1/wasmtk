@@ -73,4 +73,4 @@ the `wasm2js` verb uses it.
    row with a trigger (I10's instruction).
 
 Found while taking this inventory, and fixed: `wasmbundle`'s optimise step swallowed failures
-silently (`781c4b6`), the same hole as the Go/Zig producers (`3c2ada9`).
+silently (`23cd614`), the same hole as the Go/Zig producers (`e97cbc4`).

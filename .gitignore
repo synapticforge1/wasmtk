@@ -85,3 +85,6 @@ scripts/*.wasm
 # truth for what we ship, and a second pin living in this repo could disagree with it.
 upstream/
 deno.upstream.json
+
+# Private, machine-local memory (workspace working-rules § Records): real paths, clone settings.
+cmem/local/
