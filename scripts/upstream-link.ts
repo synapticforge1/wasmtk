@@ -49,7 +49,7 @@ try {
   await stat(new URL("deno.json", CHECKOUT));
 } catch {
   console.error("❌ upstream/binaryang is not checked out. Clone it first:");
-  console.error("   git clone https://github.com/jrmarcum/binaryang.git upstream/binaryang");
+  console.error("   git clone https://github.com/synapticforge1/binaryang.git upstream/binaryang");
   process.exit(1);
 }
 

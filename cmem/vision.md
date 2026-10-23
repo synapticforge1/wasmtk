@@ -76,11 +76,11 @@ prototype with a Rust production implementation is a one-line manifest change.
 
 ### Project 1 — wasmtk (active)
 
-**Repository:** `jrmarcum/wasmtk`
+**Repository:** `synapticforge1/wasmtk` (moved from `jrmarcum/wasmtk`, 2026-10-23; JSR scope stays `@jrmarcum`)
 **Role:** TypeScript-to-WASM compiler; reference language pillar; polyglot build
 orchestrator CLI
 
-**Rust-side sibling toolkit:** `jrmarcum/rsxtk` (crates.io `rsxtk`, v0.4.4 / 2026-04-20,
+**Rust-side sibling toolkit:** `synapticforge1/rsxtk` (crates.io `rsxtk`, v0.4.4 / 2026-04-20,
 MIT OR Apache-2.0) — *"A high-performance Rust WASM Toolkit for managing and running
 WASI scripts, WAT, and WASM modules."* It is the **Rust producer's build+run driver**:
 compiles Rust → `wasm32-wasip1` (+ `.cwasm` precompile), runs via wasmtime. No
@@ -175,7 +175,7 @@ Additions scoped here (Stage 1):
 **Role:** Per-language host runtimes; each implements the UniversalWasmLoader Spec
 
 **Local checkouts:** all loader repos live under
-`<projects>\GithubProjects\universalWasmLoader\` (each its own git
+the sibling folder `../universalWasmLoader/` (each its own git
 repo on `main`). Each carries its own portable `cmem/` memory (set up 2026-06-15) and a `cmem/INDEX.md`
 with the same "update the project memory" / "look for code issues" triggers as wasmtk.
 
@@ -352,7 +352,7 @@ Sections:
 
 ### Project 5 — Polyglot Build Orchestrator (new, extends wasmtk CLI)
 
-**Lives in:** `jrmarcum/wasmtk` as additional CLI commands
+**Lives in:** `synapticforge1/wasmtk` as additional CLI commands
 
 **Role:** The pixi-aware project manager that ties all components together
 
