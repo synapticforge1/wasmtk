@@ -78,7 +78,11 @@ recorded here before. Measured the same day: `origin` = `jrmarcum/wasmtk`, `main
   [history-purge-2026-10-23.md](history-purge-2026-10-23.md); the 100 hashes cited in this repo's
   Markdown were rewritten through the map. The H7 stamp (old `f50c8e4`) is now `84b3e180eba`, on
   the pushed `main`: loader-js can re-stamp from it (drift X8). Never push from the private
-  pre-purge bundle or an old clone.
+  pre-purge bundle or an old clone. **Open (owner): the GitHub Support request** — old commits are
+  still served by hash (measured 2026-10-23: the old v2.0.3 commit returns 200); 0 forks, 0 pull
+  requests, first changed commit = the old root `91bb017952f`. Draft ready in the gitignored
+  `cmem/local/github-support-request-2026-10-23.md`; only the owner's account can send it.
+  `upstream/binaryang` was re-cloned after binaryang's own purge (binaryang letter, below).
 - **L5. H16: `.git` on exFAT: DONE 2026-10-23.** After the push: `gc --prune=now` → 1 pack /
   34 MiB (was 126 / 2.90 GiB), `fsck` clean, `maintenance.strategy gc` set; the one stash kept.
   Details in the gitignored `cmem/local/environment.md` (new this day; `.gitignore` line checked).
