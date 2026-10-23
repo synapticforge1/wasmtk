@@ -5,11 +5,12 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show f21bfb5f810:cmem/next-work.md`.
 
-## For the workspace review — HOLD until wasmtk is done with its edits (owner, 2026-10-21)
+## For the workspace review — all taken up (W1–W3 closed by letter H15, W4–W5 by the workspace, 2026-10-23)
 
-The owner asked for these to be noted for the workspace session to review **once this project is
-done with its current edits** (the open fix list below). Nothing here is written outside this repo;
-the workspace pulls it on its sweep.
+Kept as the record of what was raised. W1 (the Bun rule) is the workspace floor now; W2's first
+exception (a probe needing the import map) is in the floor, its second (a Deno ORACLE,
+`Deno.inspect`) is not, which the workspace may still name; W3 is a log of rule slips, nothing to
+act on. Nothing here is written outside this repo; the workspace pulls it on its sweep.
 
 - **W1. The scripting rule changed here: Bun, not Deno** (owner, 2026-10-21: "since deno is going
   away, we need to change from deno to bun for all scripts"). wasmtk's scripts and probe rule are
@@ -106,7 +107,7 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > struct is refused today, sw127), then ld103 (`this.items.push(x)` on an array field), ld104 (a
 > field of a call's result, `c.bump().n`), ld105 (`xs.filter(…).length` in console.log). sw119
 > (i32 overflow) waits for the owner. Then items 3–5 (binaryang 1.10.0 items, H10, nullable gaps).
-> Workspace-review notes W1–W3 (rule slips logged under W3) stay on HOLD until wasmtk is done.
+> Workspace-review notes W1–W5: all taken up 2026-10-23 (section above).
 
 > **2026-10-22, the loud refusals in progress, branch `fix/loud-refusals`, one commit per group:**
 > group 1 (expressions: ld38 `toFixed`, ld43, ld66–ld70) DONE, gate green, `4m_ExpressionGaps`;
@@ -303,7 +304,9 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > "Merge (wasmmerge) invariants"): block types printed by index, and `$__malloc` inlined away
 > (a wasic library now exports `__heap_ptr`).
 >
-> **2026-10-13: Go asyncify broken by a toolchain update (OPEN, loud).** The machine now has Go
+> **2026-10-13: Go asyncify broken by a toolchain update — CLOSED 2026-10-15** (binaryang 1.12.1
+> fixed both Asyncify bugs; `go_asyncify_tests` 12 / 12 since that pin, and on 1.13.0 2026-10-20;
+> the "9 / 12 is EXPECTED" rule below is retired). The record as written: the machine now has Go
 > 1.27.2 + TinyGo 0.43.0 (testing.md records Go 1.26.7 + TinyGo 0.41.1 green, and that TinyGo 0.42
 > was the first to support Go 1.27). `go_asyncify_tests` 9 / 12: WaitGroup+Mutex, pipeline and
 > nested fail in the in-house asyncify step, `Flatten: unresolved call target
