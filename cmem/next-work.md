@@ -110,6 +110,19 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 
 ## Open now
 
+> **2026-10-23, the owner's order: the smaller items, then the remaining compiler fixes, then
+> sw119.** Smaller items done (wast mirror guard: S1 BLOCKED on binaryang's `delegate` fix;
+> engine baseline +189; `wasmbundle` imports; H6 Rule 4 + CI's gate on the tag); binaryang 1.15.0
+> then 1.16.1 pinned. **ld103–ld105 FIXED**, and with them **four silent bugs found and fixed**
+> (sw129 a `push` method compiled as an array push; sw130 a string `unshift` appended; sw131
+> class field initialisers dropped; sw132 a derived class without a constructor skipped its
+> base's) plus ld110; ld106–ld109 found, open, loud (compiler-bugs.md, the 2026-10-23 entry).
+> **Next: ld45 (the object writer, designed: per-type writers into the console buffer, Deno's
+> 80-column / depth / grouping rules, the class name from the tag, a literal whose key order
+> differs from its interface refused), then sw119** (owner 2026-10-23: the `--i32-check` flag is
+> REMOVED, the check always on; still to do: console / template operators, `++` / `--`,
+> `45_random-numbers` to wasMath).
+
 > **PAUSED 2026-10-22 (owner: "update the project memory files and pause until later today").**
 > Branch `fix/loud-refusals` = main (main PUSHED 2026-10-23 after the H19 purge; the branch
 > itself is local only), last compiler commit "fix(wasic): generic classes

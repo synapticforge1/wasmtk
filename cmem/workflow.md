@@ -236,7 +236,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
   tests/hybrid_tests.ts tests/wasmmerge_guard_tests.ts     # expect 17 passed (13 + 4; 2026-10-13)
 #     A hand-rolled gate script must switch to `deno test` for any file containing `Deno.test(`.
 
-# 2c. typed_decl_tests + engine_tests + wast_runner_tests + golden_wat_tests (`deno run`); golden expects 554 / 0 diverged (2026-10-22, +`29_GenericAndStringClasses`, +`5h_CapturingCallbacks`, +`9_ArrayLiteralArguments`, +`63_StringMatrix`, +`44_FunctionArrayLiterals`, +`24_NullVersusUndefined`, +`7i_ConsoleWholeStructRefused`, +`29_ClassDispatchAndChaining`, +`5h_CallbacksChainsAndLoops`, +`63_ModuleGlobals2DAndBoolean`, +`28_StringsTuplesAndObjects`, +`5f_IncrementsAndCompoundForms`, +`5f_CompoundIndexSideEffectRefused` (fails on purpose: 10), +`4m_ExpressionGaps`; 2026-10-21, +`53_NumberParseRounding`; 2026-10-20, +`4l_MixedOperandTypes`, +`28_ArrayCallbackEdges`), 9 entries that fail on purpose (2026-10-19, +`28_SpliceItemReadsArrayRefused`, +`28_SpreadOfExpressionRefused`, +`15_FinallyStringReturnRefused`; `7i_NullishStringFieldRefused` removed with sw120 — `--record` does NOT delete a removed test's golden, delete it by hand); typed_decl 45
+# 2c. typed_decl_tests + engine_tests + wast_runner_tests + golden_wat_tests (`deno run`); golden expects 557 / 0 diverged (2026-10-23, +`29_FieldArraysAndCallResults`, +`29_FieldInitializersAndImplicitConstructors`, +`28_ArrayNamedMethodsAndStringUnshift`; 2026-10-22, +`29_GenericAndStringClasses`, +`5h_CapturingCallbacks`, +`9_ArrayLiteralArguments`, +`63_StringMatrix`, +`44_FunctionArrayLiterals`, +`24_NullVersusUndefined`, +`7i_ConsoleWholeStructRefused`, +`29_ClassDispatchAndChaining`, +`5h_CallbacksChainsAndLoops`, +`63_ModuleGlobals2DAndBoolean`, +`28_StringsTuplesAndObjects`, +`5f_IncrementsAndCompoundForms`, +`5f_CompoundIndexSideEffectRefused` (fails on purpose: 10), +`4m_ExpressionGaps`; 2026-10-21, +`53_NumberParseRounding`; 2026-10-20, +`4l_MixedOperandTypes`, +`28_ArrayCallbackEdges`), 9 entries that fail on purpose (2026-10-19, +`28_SpliceItemReadsArrayRefused`, +`28_SpreadOfExpressionRefused`, +`15_FinallyStringReturnRefused`; `7i_NullishStringFieldRefused` removed with sw120 — `--record` does NOT delete a removed test's golden, delete it by hand); typed_decl 45
 
 # 3. the Go suites — ONE AT A TIME (see traps)
 #    go_bindgen go_merge go_asyncify
@@ -246,7 +246,7 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 #    again, "✅ ON BASELINE — N known failure(s) still standing" is the pass condition.
 #    The known failures print in red every run by design; the gate fails only if a count MOVES.
 
-# 5. engine_cross_check → expect 1341 pairs on baseline (2026-10-23), 0 regressed, 0 improved,
+# 5. engine_cross_check → expect 1353 pairs on baseline (2026-10-23, later), 0 regressed, 0 improved,
 #    0 not in the baseline (re-recorded 2026-10-23: +189 pairs, the `36_*` modules and every test
 #    added since 2026-09-30). A new corpus test adds unpinned pairs: re-record them deliberately.
 deno run --allow-read --allow-run --allow-env --allow-write tests/engine_cross_check_tests.ts
