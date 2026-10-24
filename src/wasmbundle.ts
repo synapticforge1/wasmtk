@@ -278,6 +278,7 @@ export async function runWasmBundle(
   // names. Without a synthesis here, the WAT compile step fails with
   // "undefined function $__malloc".
   let anyDroppedAllocator = false;
+  let anyExnTag = false; // a module throws or catches wasic's exception (sw119)
   let minPages = 0; // the largest memory a module declared (ld81)
 
   for (const mod of modules) {
@@ -305,6 +306,7 @@ export async function runWasmBundle(
       allNotices.push(`  ℹ️  ${basename(mod.filePath)}: ${notice}`);
     }
     if (result.droppedAllocator) anyDroppedAllocator = true;
+    if (result.usesExnTag) anyExnTag = true;
     // A module's mutable globals (a stack pointer, a heap cursor) point into ITS memory: the bundle
     // keeps at least the pages the module declared, and wasic's 3-page floor when it has such
     // globals. A 1-page bundle took a library whose cursor sat at 131072: out of bounds (ld81,
@@ -360,6 +362,10 @@ export async function runWasmBundle(
   if (importParts.length > 0) watParts.push("  " + importParts.join("\n  "));
   watParts.push(`  (memory ${pagesNeeded})`);
   if (sharedAllocatorParts.length > 0) watParts.push(sharedAllocatorParts.join("\n"));
+  // one exception for every module: its tag and the kind in flight (sw119)
+  if (anyExnTag) {
+    watParts.push(`  (tag $__exn_tag (export "__exn_tag") (param i32 i32))\n  (global $__exn_kind (mut i32) (i32.const 0))`);
+  }
   if (funcParts.length > 0) watParts.push("  " + funcParts.join("\n  "));
   if (globalParts.length > 0) watParts.push("  " + globalParts.join("\n  "));
   if (dataParts.length > 0) watParts.push("  " + dataParts.join("\n  "));
