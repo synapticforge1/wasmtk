@@ -146,6 +146,12 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > (the portable opcode set; `throw` / `try_table` portable, legacy `try` lowered by
 > `TranslateToExnref`; standalone runtimes measured at their maximum switches — wazero at its
 > defaults refuses exception handling, which is why sw119 traps without a try).
+> **2026-10-24: 3.0.0 PUBLISHED** (owner: "push", then "Publish 3.0.0 now"): `deno task publish`
+> tagged `v3.0.0` (at `e6159331`) and pushed; CI run 40083193079 green in every step — the
+> compatibility gate on the tag, `deno publish`, the `release/v3.0.0` branch, the GitHub Release,
+> and **provenance RECORDED on JSR** (the verify step passed). JSR latest 3.0.0. **H20 DONE:** JSR's
+> `@jrmarcum/wasmtk` is linked to `synapticforge1/wasmtk` (api.jsr.io `githubRepository`), and the
+> publish from it worked. (The bump, before it:)
 > **2026-10-24: 3.0.0 BUMPED and pushed (owner: "lets bump and push"), NOT tagged, NOT published.**
 > The gate's floor since v2.0.3 is MAJOR. Before it: `deno doc --lint` was RED (8 errors: five
 > setters typed `typeof` a private variable, three exports whose JSDoc had been separated from them)
@@ -154,7 +160,8 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > from `synapticforge1`: the JSR package is `@jrmarcum/wasmtk`, linked to the moved repo?), then
 > `deno task publish` (tags v3.0.0 and pushes; CI's gate on the tag, then `deno publish`).
 > **Next:** nothing open in the compiler (silent 0, loud 0). Open elsewhere: the binaryang report
-> (`delegate`) and the GitHub Support request, both for the owner to send; H20; the 3.0.0 publish.
+> (`delegate`) and the GitHub Support request, both for the owner to send. (H20 and the 3.0.0
+> publish: DONE, above.)
 
 > **PAUSED 2026-10-22 (owner: "update the project memory files and pause until later today").**
 > Branch `fix/loud-refusals` = main (main PUSHED 2026-10-23 after the H19 purge; the branch

@@ -38,10 +38,10 @@
 > replace it with the real version at publish time. A breaking change may ALSO warrant a Feature
 > Status row if it ships alongside a feature — but the Breaking Changes row is mandatory.
 
-## Release status (2026-10-24) — v3.0.0 BUMPED (owner: "bump and push"), not yet published
+## Release status (2026-10-24) — v3.0.0: JavaScript's numbers, whole-object printing, binaryang 2.2.0
 
-Versioned 3.0.0 on `main` and pushed; the tag and the JSR publish wait for the owner (`deno task
-publish`), and H20's check that JSR publishing works from `synapticforge1` comes first. The items
+PUBLISHED 2026-10-24 (tag `v3.0.0`, CI run green, provenance recorded on JSR; the first release
+from `synapticforge1/wasmtk`). The items
 below were the unreleased block (2026-09-28 → 2026-10-15); after it, through 2026-10-24: the H12
 loud rows and audit round 2 (compiler-bugs.md), owner rules 1–4 (sw95, sw87, ld88, sw119), ld45
 (console.log of whole objects), binaryang 1.12.1 → 2.2.0, the API-surface gate with Rule 4 (H6),
