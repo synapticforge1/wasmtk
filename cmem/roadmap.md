@@ -38,7 +38,16 @@
 > replace it with the real version at publish time. A breaking change may ALSO warrant a Feature
 > Status row if it ships alongside a feature — but the Breaking Changes row is mandatory.
 
-## Unreleased (on `main`, 2026-09-28, after v2.0.3)
+## Release status (2026-10-24) — v3.0.0 BUMPED (owner: "bump and push"), not yet published
+
+Versioned 3.0.0 on `main` and pushed; the tag and the JSR publish wait for the owner (`deno task
+publish`), and H20's check that JSR publishing works from `synapticforge1` comes first. The items
+below were the unreleased block (2026-09-28 → 2026-10-15); after it, through 2026-10-24: the H12
+loud rows and audit round 2 (compiler-bugs.md), owner rules 1–4 (sw95, sw87, ld88, sw119), ld45
+(console.log of whole objects), binaryang 1.12.1 → 2.2.0, the API-surface gate with Rule 4 (H6),
+and the wasi suite's per-step timeout. CHANGELOG.md § 3.0.0 is the user-facing summary.
+
+### The unreleased block (on `main`, 2026-09-28 → 2026-10-15, after v2.0.3)
 
 1. **The engine is named when it is the reason** (owner request). `src/engine.ts`: V8's terse
    refusals (custom page sizes: `invalid memory limits flags 0x8`; a memory64 above V8's 16 GiB cap;

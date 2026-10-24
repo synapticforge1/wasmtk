@@ -3,6 +3,65 @@
 All notable, user-facing changes to `wasmtk`. Versions follow the `deno.json` version and the
 published [`@jrmarcum/wasmtk`](https://jsr.io/@jrmarcum/wasmtk) JSR package.
 
+## 3.0.0 — JavaScript's numbers, `console.log` of whole objects, located errors, `binaryang` 2.2.0 (2026-10-24)
+
+**Breaking.** Each change below is in the README's Breaking Changes table with its migration.
+
+### Breaking: the program must say which number it means
+
+- **`+ - *` of `i32` values give JavaScript's result.** Printed, compared or kept in a `number`,
+  `65536 * 65536` is `4294967296` (it wrapped to `0`). Storing a result that does not fit an `i32`
+  — a variable, field, parameter, return, `x += …`, or `++` / `--` past the limit — stops with
+  "RangeError: the result of '*' does not fit an i32 (wasMath's i32.mul wraps it)": catchable in a
+  program with a `try` / `throw` of its own (and in a library), else printed to stderr before the
+  program stops, with no exception handling needed. `x | 0` and `x >>> 0` wrap as in JavaScript.
+  Code that relies on wrapping says so with `i32.add` / `i32.sub` / `i32.mul`.
+- **A plain `/` between two integers is a compile error**: say `i32.div(a, b)` or `f64.div(a, b)`.
+- **A float stored into an integer is a compile error**, and so is `x as i32` on a float: say
+  `f64.toI32(x)`, `f64.toI32Sat(x)` or `f64.toI32Wrap(x)`.
+- **A float index into a string is a compile error**; an index out of range gives `undefined`.
+
+### Added
+
+- **`wasMath`** (`jsr:@jrmarcum/wasmtk/wasMath`): WebAssembly's number types and every number
+  operation as TypeScript functions that compute exactly what the instruction computes, so
+  `deno run` and the compiled program agree. `Math` is correctly rounded in both.
+- **`console.log` of a whole struct, class instance or struct array** prints as Deno prints it:
+  `{ x: 1, y: 2.5 }`, `Circle { kind: "circle", r: 2 }`, nested objects and arrays, one entry per
+  line past 80 columns, `[Object]` past depth 4. What cannot be shown exactly is refused, naming why.
+- **Arrays print as Deno prints them** (string, boolean and bigint arrays too, typed arrays at
+  their element width, Deno's column layout).
+- **Compile errors name the place**: `error[code]: …`, `--> file:line:col`, the source line and a
+  `help:` line.
+- **The engine is named when it is the reason** a module does not run (`wasmtk run`, `mod`, `wast`).
+
+### Fixed
+
+Many programs that compiled and printed the wrong answer now print the right one, and many that
+were refused or built an invalid module now compile (`cmem/compiler-bugs.md` in the repository
+lists each). Among them: string ternaries and
+calls inside `console.log`; operator precedence and grouping; values converted to strings; closures
+that change what they capture; nullable fields; thrown values keeping their kind; top-level code
+beside a `main` function; class field initialisers and inherited constructors; template literals
+with nested templates and arrows; a top-level object literal written over several lines; merged
+libraries that printed numbers wrong once their data grew past about 800 bytes; `sort()` in string
+order; an out-of-range array read giving `undefined`.
+
+### Backend: `@jrmarcum/binaryang` 2.2.0
+
+From 1.7.0. wasmtk's own output is unchanged by the last re-pin (1.16.1 → 2.2.0: every compiled
+program's WAT is byte-identical). The repo's spec gate reads **64,506 passed, 0 failed, 16
+skipped**.
+
+### API
+
+- **Changed (breaking):** `./console_log`'s `LogSegment` and `ArrayLookup` types; `./wast`'s
+  `WastResult` and `./wasmmerge`'s `WatMergeResult` gained required fields (only code that builds
+  them is affected).
+- **Added:** `./wasMath`; `./console_log` `arrInspectKind`, `consoleTempLocals`,
+  `setObjectInspectResolver`, `setI32SlotResolver`; `./wasmmerge` `dataExtent`; `./wast`
+  `WastOptions`; `./tsbundler` `BundleResult.files`.
+
 ## 2.0.3 — Typed declarations, `wasmtk run` exit codes at parity with wasmtime, `binaryang` 1.7.0 (2026-09-28)
 
 **Two breaking changes.** Both are in the README's Breaking Changes table with the exact migration.

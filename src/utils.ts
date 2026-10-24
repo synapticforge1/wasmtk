@@ -39,7 +39,7 @@ interface WabtModule {
 }
 
 /** The current version of the wasmtk toolkit. */
-export const VERSION = "2.0.3";
+export const VERSION = "3.0.0";
 
 let wasiInstance: WebAssembly.Instance | undefined;
 /** The running WASI program's argv (its name, then its arguments), set by `runWasi` (sw115). */
