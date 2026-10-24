@@ -318,7 +318,11 @@ let _objectInspectResolver:
   | ((token: string, locals: Map<string, string>) => { ptrWat: string; lenWat: string } | undefined)
   | undefined = undefined;
 /** Inject the object writer's resolver (ld45). Pass `undefined` to clear it. */
-export function setObjectInspectResolver(fn: typeof _objectInspectResolver): void {
+export function setObjectInspectResolver(
+  fn:
+    | ((token: string, locals: Map<string, string>) => { ptrWat: string; lenWat: string } | undefined)
+    | undefined,
+): void {
   _objectInspectResolver = fn;
 }
 
@@ -366,7 +370,9 @@ let _inNullPrint = false;
  *  declared types (wasMath L4, 2026-10-13). */
 let _u64Resolver: ((expr: string, locals: Map<string, string>) => boolean) | undefined = undefined;
 /** Inject the `u64` resolver. Pass `undefined` to clear it. */
-export function setU64Resolver(fn: typeof _u64Resolver): void {
+export function setU64Resolver(
+  fn: ((expr: string, locals: Map<string, string>) => boolean) | undefined,
+): void {
   _u64Resolver = fn;
 }
 /** Marks the i64 segment of a `u64` expression `unsigned` (printed by `$__u64_to_str`). */
@@ -380,12 +386,21 @@ function markU64(segs: LogSegment[], token: string, locals: Map<string, string>)
 }
 
 /** Inject the null-printing resolver (sw51). Pass `undefined` to clear it. */
-export function setNullPrintResolver(fn: typeof _nullPrintResolver): void {
+export function setNullPrintResolver(
+  fn: ((token: string, locals: Map<string, string>) => string | undefined) | undefined,
+): void {
   _nullPrintResolver = fn;
 }
 
 /** Inject the `&&` / `||` resolver (sw49). Pass `undefined` to clear it. */
-export function setLogicalResolver(fn: typeof _logicalResolver): void {
+export function setLogicalResolver(
+  fn:
+    | ((
+      token: string,
+      locals: Map<string, string>,
+    ) => { wat: string; type: string } | { rewrite: string } | undefined)
+    | undefined,
+): void {
   _logicalResolver = fn;
 }
 
@@ -437,7 +452,9 @@ export function setExprFallbackResolver(
 let _i32SlotResolver: ((token: string, locals: Map<string, string>) => string | undefined) | undefined =
   undefined;
 /** Inject the checked i32 store's resolver (sw119). Pass `undefined` to clear it. */
-export function setI32SlotResolver(fn: typeof _i32SlotResolver): void {
+export function setI32SlotResolver(
+  fn: ((token: string, locals: Map<string, string>) => string | undefined) | undefined,
+): void {
   _i32SlotResolver = fn;
 }
 

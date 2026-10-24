@@ -27108,14 +27108,6 @@ function mergeOneWasmImport(
 // Public entry point
 // ---------------------------------------------------------------------------
 
-/**
- * Compiles a TypeScript file (numeric subset) to a standalone WASI module.
- * Transpiles to WAT then applies Binaryen size-optimisation, producing a
- * runtime-free binary significantly smaller than Javy output.
- *
- * @param tsPath - Path to the source .ts file.
- * @param outPath - Optional output path; defaults to same name with .wasm extension.
- */
 /** A bundler failure as the CLI prints it: a file that could not be read says so; anything else
  *  (a refused program, sw112's name collision) is the bundler's own message, not "Cannot read". */
 function bundleErrorText(tsPath: string, err: unknown): string {
@@ -27125,6 +27117,14 @@ function bundleErrorText(tsPath: string, err: unknown): string {
     : msg;
 }
 
+/**
+ * Compiles a TypeScript file (numeric subset) to a standalone WASI module.
+ * Transpiles to WAT then applies Binaryen size-optimisation, producing a
+ * runtime-free binary significantly smaller than Javy output.
+ *
+ * @param tsPath - Path to the source .ts file.
+ * @param outPath - Optional output path; defaults to same name with .wasm extension.
+ */
 export async function compileWasiTs(
   tsPath: string,
   outPath?: string,

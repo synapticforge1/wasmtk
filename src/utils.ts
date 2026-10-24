@@ -517,6 +517,7 @@ function exportCallArgs(
   return { args };
 }
 
+/** `wasmtk info`: prints a module's callable exported functions with their signatures. */
 export async function showInfo(path: string): Promise<void> {
   try {
     const bytes = await getWasmBytes(path);

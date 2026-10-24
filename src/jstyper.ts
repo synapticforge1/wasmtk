@@ -16,6 +16,8 @@ import { assertNotInput, defaultOutPath } from "./outpath.ts";
 /** The JavaScript extensions whose sibling `.d.ts` / `.ts` the paths are derived from (sw113). */
 const JS_EXTS = [".js", ".mjs", ".cjs"];
 
+/** What `--any-policy` does with an `any` in a `.d.ts`: skip the function, warn and use i32, or
+ *  use i32 silently. */
 export type AnyPolicy = "skip" | "warn" | "default";
 
 /** Options controlling a {@link runJstyper} invocation. */
