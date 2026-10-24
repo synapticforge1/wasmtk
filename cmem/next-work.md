@@ -587,11 +587,10 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
      or renamed). 1.14.0 adds `Memory64Lowering` (`--memory64-lowering`, opt-in; no other output
      moves). 1.15.0 runs `SSANoMerge` first at `-O3` / `-Os` / `-Oz`: **optimizer output moves**,
      so expect the golden-WAT PIPELINE entries that merge an `-Oz` library to move again (43 did on
-     1.13.0); wasic's own output should not. **Not bumped:** the owner's order (2026-10-09) puts
-     the open compiler bugs before a pin bump, which moves every optimized binary. On the bump
-     (to 1.15.0, a full gate): send back that the gate holds as on 1.13.0 — wast 64,506 / 0 / 16,
-     soundness guard 0, `go_asyncify_tests` 12 / 12, and which golden WATs moved with behaviour
-     unchanged.
+     1.13.0); wasic's own output should not. **1.15.0 PINNED 2026-10-23** (owner: "bump now,
+     first", ahead of the remaining fixes): gate green, every prediction held — wast 64,506 / 0 /
+     16, guard 0, `go_asyncify` 12 / 12, 43 pipeline goldens moved, only merged-library functions
+     (testing.md, 2026-10-23). Reply DRAFTED in `scripts/binaryang-report.md` (top section).
   2. **binaryang's history was rewritten too (H19, on GitHub 2026-10-23).** `upstream/binaryang`
      was RE-CLONED here the same day from `synapticforge1/binaryang` (the old clone had no local
      work: clean, no stash, `main` only; the new one is at `v1.15.0` `ae9e871`, 22 tags). A
@@ -600,7 +599,7 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
   3. **The provenance outage was scope-wide** — recorded in design-decisions.md § JSR provenance
      (2026-10-23 entry; our "specific to wasmtk" conclusion withdrawn).
 
-  Nothing to reply on 2 and 3; the reply on 1 waits for the bump.
+  Nothing to reply on 2 and 3; the reply on 1 is drafted (owner to send).
 
 ## Deferred (no consumer)
 

@@ -112,7 +112,19 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-22, binaryang **1.13.0**; latest release v2.0.3)
+## Current pass counts (2026-10-23, binaryang **1.15.0**; latest release v2.0.3)
+
+> **2026-10-23, binaryang 1.13.0 → 1.15.0 pinned, gate GREEN, nothing known-failing.** Predicted
+> from the changelog: 1.14.0's `Memory64Lowering` runs only when asked (nothing moves); 1.15.0's
+> `SSANoMerge` runs first at `-O3` / `-Os` / `-Oz`, so PIPELINE goldens merging a `-Oz` library
+> move, corpus goldens do not, nothing we parse changed, wast and the guard unchanged. Held, every
+> prediction: wast **64,506 / 0 / 16** (ALL CLEAN; 33 on 23 lowered modules; guard 0) ·
+> golden-WAT 554, **43 moved, all PIPELINE entries merging a `-Oz` library**; compared function by
+> function against the 1.13.0 snapshot: 56 distinct functions changed, every one a merged
+> library's (`*_modc_*` / `*_Modc_*`), no main-program function and no text outside functions;
+> re-recorded; failed compiles 11 (the on-purpose ones, as before) · wasi **497/497** (runs those
+> pipelines against Deno) · cross-check 1152 on baseline, 0 regressed · go 7 / 7 / **12** · `-Oz`
+> try_table guard passes · every other suite at its count. Timing: wasi 540 s, golden 67 s.
 
 > **2026-10-22, ld100 (generic classes), ld101 (class string fields), ld102 (string method in
 > console), gate GREEN.** wasi **497/497** (+`29_GenericAndStringClasses`, failing on the old
