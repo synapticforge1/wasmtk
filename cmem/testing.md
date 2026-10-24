@@ -119,7 +119,15 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-23, binaryang **1.16.1**; latest release v2.0.3)
+## Current pass counts (2026-10-24, binaryang **1.16.1**; latest release v2.0.3)
+
+> **2026-10-24, ld45 (the object writer), ld113, sw134–sw136, gate GREEN.** wasi **503/503**
+> (+`7j_ConsoleObjectWriter`, failing with `main`'s compiler; `7i_ConsoleWholeStructRefused` now the
+> nullable-field refusal) · golden-WAT **560**, re-recorded: `7i` (the refusal text), `7j` (new),
+> `13b_ZeroCostExceptions` (a call's struct result now goes through the writer: its helpers, data
+> texts, heap start 260 → 297; output unchanged); the other 557 identical · typed_decl 46 · wast
+> 64,506 / 0 / 16 · cross-check 1359 on baseline · go 7 / 7 / 12 · every other suite green.
+> `wasic_seam` flagged a local named `rt` (its host-I/O pattern is `rt.`); renamed.
 
 > **2026-10-23, ld106–ld109, ld111, ld112, sw133, gate GREEN.** wasi **502/502**
 > (+`29_StringArgumentsAndFieldMethods`, +`28_TemplateHoles`, each failing with `main`'s compiler)

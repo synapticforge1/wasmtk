@@ -660,6 +660,30 @@ deliberately "any user call", not "a call that prints": helpers share the scratc
 `-Oz` folds the temporaries. Every function emitter must declare the temporaries it finds
 (`consoleTempLocals`; `_start` does the same); a new emitter that skips it gets an invalid module.
 
+## console.log's object writer prints EXACTLY what Deno prints, or refuses (ld45, 2026-10-24)
+
+A whole struct, class instance or struct array as a console.log argument goes through
+`inspectConsoleArg` (registered as console_log's `setObjectInspectResolver`, consulted only for a
+WHOLE argument, never inside a template or a concatenation). Two halves:
+- **Layout, `src/inspect_wat.ts`**: Node's `reduceToSingleString` and `groupArrayElements`, ported
+  rule for rule (one line when no entry holds a newline, `currentDepth − depth < 3`, and
+  `2n + indent + brace + 10 + Σwidth ≤ 80`; columns past 6 entries; 100 entries then `... N more
+  items`; depth 4 then `[Object]` / `[Name]` / `[Array]`; a long string with newlines split
+  `+`-joined). Node's `ctx.currentDepth` is the global `$__insp_cur`: set by a writer that FORMATS
+  (non-empty, not abbreviated) before its entries, read after them. A value's indent is its
+  parent's + 2 (`formatProperty`'s `indentationLvl += 2`).
+- **Per-type writers, wasic `inspWriterFor`**: `(p, ind, lvl) -> (ptr, len)`, a fresh heap string,
+  generated once per type; a class with subclasses dispatches on its tag to each class's own writer.
+  Fields are read by their declared TS type, `StructField.tsType` (an i32 may be a number, a struct
+  pointer or an enum).
+- **The refusal list is load-bearing** (`inspectRefusal`): every case where the bytes cannot tell
+  what Deno would print is a compile error naming the reason: a nullable field (0 is also a value),
+  a function field, a tuple, a string enum, a discriminated union, a type inside itself, a class
+  field its code never assigns (Deno: `undefined`), an interface whose object literals write the
+  keys in another order (Deno prints the literal's order; `objectLiteralKeyOrders` scans the
+  source), an array literal mixing objects and other values. Widening the writer means removing a
+  refusal only once that case prints exactly.
+
 ## The compile-error report (owner decision D6, built 2026-10-13)
 
 "We should show compile time notes when issues that stop the compile are thrown." When `wasic` or

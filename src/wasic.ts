@@ -155,6 +155,7 @@ import {
   SCRATCH_BASE,
   setConsoleDiagnosticSink,
   setEnumStrVarResolver,
+  setObjectInspectResolver,
   setExprFallbackResolver,
   setFuncTableLookup,
   setInstanceofResolver,
@@ -171,6 +172,7 @@ import {
   type StructFieldLookup,
   unescapeString,
 } from "./console_log.ts";
+import { getInspectHelperWat } from "./inspect_wat.ts";
 
 // ---------------------------------------------------------------------------
 // wabt type stubs (same pattern as utils.ts)
@@ -867,6 +869,9 @@ interface StructField {
    *  `structVar.field.length` / `structVar.field[i]` directly (report issue 4). */
   arrayElemType?: WatType;
   arrayIsString?: boolean;
+  /** ld45: the declared type as written (`i32`, `P`, `string[]`): console.log's object writer
+   *  tells an i32 from a struct pointer or an enum by it. */
+  tsType?: string;
 }
 
 interface StructDef {
@@ -2288,6 +2293,11 @@ class WasicTranspiler {
   private instanceFieldInits: Map<string, [string, string][]> = new Map();
   // Phase 47: derived class name → base class name (populated by parseClasses)
   private classInheritance: Map<string, string> = new Map();
+  // ld45: each class's body text (which fields its code assigns), and console.log's object writers
+  private classBodySrc: Map<string, string> = new Map();
+  private inspectWriters: Map<string, string> = new Map();
+  private inspectTexts: Map<string, number> = new Map();
+  private literalKeyOrders: string[][] | null = null;
   // Phase 47: className → integer tag (1, 2, ...) assigned when any class uses extends
   private classTags: Map<string, number> = new Map();
   // Phase 47: 4 when any class in this module uses extends (all classes get a 4-byte tag header), 0 otherwise.
@@ -4541,12 +4551,14 @@ class WasicTranspiler {
     }
   }
 
-  /** Joins multi-line array literal declarations in startBodyLines into single lines.
+  /** Joins multi-line array and object literal declarations in startBodyLines into single lines.
    *  e.g. `const x: T[] = [` followed by element lines followed by `]` → one joined line.
-   *  This allows the array pre-scan regexes (which need `[...]` on one line) to match. */
+   *  This allows the array pre-scan regexes (which need `[...]` on one line) to match. An OBJECT
+   *  literal, `const d: Doc = {` with a field per line, was registered empty and its field lines
+   *  emitted as stub comments: `d` printed zeros (sw135, found with ld45, 2026-10-24). */
   private joinMultilineArrayLiterals(): void {
-    // Count net [ ] depth while skipping characters inside string literals.
-    const netBrackets = (s: string): number => {
+    // Count net [ ] (and, for an object literal, { }) depth, skipping string literals.
+    const netBrackets = (s: string, braces: boolean): number => {
       let d = 0, inSQ = false, inDQ = false, inTmpl = false;
       for (let ci = 0; ci < s.length; ci++) {
         const c = s[ci];
@@ -4567,8 +4579,8 @@ class WasicTranspiler {
           continue;
         }
         if (inSQ || inDQ || inTmpl) continue;
-        if (c === "[") d++;
-        else if (c === "]") d--;
+        if (c === "[" || (braces && c === "{")) d++;
+        else if (c === "]" || (braces && c === "}")) d--;
       }
       return d;
     };
@@ -4580,18 +4592,21 @@ class WasicTranspiler {
       // Check if this is an array declaration that opens an unclosed bracket
       const isArrDecl = /^(?:var|let|const)\s+\w+/.test(line);
       if (isArrDecl) {
-        let depth = netBrackets(line);
+        // an object literal's value starts with `{` (an arrow's body `=> {` is not one)
+        const braces = /^(?:var|let|const)\s+\w+\s*(?::\s*[\w<>\[\], |]+)?=\s*\{/.test(line);
+        let depth = netBrackets(line, braces);
         if (depth > 0) {
-          // Collect subsequent lines until brackets balance
-          let joined = line;
+          // Collect subsequent lines until brackets balance. Each line is trimmed, not the joined
+          // text's whitespace collapsed: that changed a string literal's runs of spaces.
+          let joined = line.trim();
           i++;
           while (i < this.startBodyLines.length && depth > 0) {
             const next = this.startBodyLines[i];
-            joined += " " + next;
-            depth += netBrackets(next);
+            joined += " " + next.trim();
+            depth += netBrackets(next, braces);
             i++;
           }
-          result.push(joined.replace(/\s+/g, " ").trim());
+          result.push(joined);
           continue;
         }
       }
@@ -5689,6 +5704,7 @@ class WasicTranspiler {
         type,
         offset,
         size,
+        tsType: originalTypeName,
         ...(isReadonly ? { readonly: true } : {}),
         ...(fm[4] ? { nullable: true } : {}),
       };
@@ -6165,6 +6181,7 @@ class WasicTranspiler {
       }
       const classBodyEnd = ci - 1;
       const classBody = src.slice(classBodyStart, classBodyEnd);
+      this.classBodySrc.set(className, classBody);
 
       // Parse instance fields: scan line by line at depth 0
       const fields: StructField[] = [];
@@ -6258,6 +6275,7 @@ class WasicTranspiler {
                 type,
                 offset: fieldOffset,
                 size,
+                tsType: fm[2],
                 ...(isReadonly ? { readonly: true } : {}),
                 ...(fm[3] ? { nullable: true } : {}),
                 ...(isArr
@@ -6768,21 +6786,359 @@ class WasicTranspiler {
   }
 
   /** Find all class names that are (or transitively extend) baseClass in this module. */
-  /** A whole struct / class instance as a console argument, `console.log(p)`, printed its ADDRESS
-   *  (`260` for Deno's `{ x: 1, y: 2.5 }`; sw127, found with ld45, 2026-10-22). Refused until an
-   *  object writer exists (ld45); a field (`p.x`) prints as before. */
-  private refuseWholeObjectArgs(argsStr: string, locals: Map<string, WatType>): void {
-    for (const raw of this.splitArgs(argsStr)) {
-      const a = raw.trim();
-      if (!/^\w+$/.test(a) || this.arrayVars.has(a) || this.stringVars.has(a)) continue;
-      if (locals.get(a) === "string") continue;
-      const what = this.classVars.has(a) ? "class instance" : this.structVars.has(a) ? "struct" : null;
-      if (what) {
-        this.diagnostics.push(
-          `console argument: printing a whole ${what} is not supported yet; print its fields (${a})`,
-        );
+  // ── console.log's object writer (ld45, 2026-10-24) ──
+  // A whole struct, class instance or struct array as a console argument printed its ADDRESS
+  // (sw127) until it was refused; now it prints as Deno does. The layout is src/inspect_wat.ts;
+  // here are the per-type writers, `(p, ind, lvl) -> (ptr, len)`: p the value, ind its indent,
+  // lvl its depth. What the writer cannot print exactly is refused with the reason.
+
+  /** The kind `$__arr_elem_str` writes a scalar of declared type `ts` with, or undefined. */
+  private static inspScalarKind(ts: string): number | undefined {
+    switch (ts.trim().toLowerCase()) {
+      case "i32":
+      case "int":
+        return 0;
+      case "f64":
+      case "number":
+      case "u32":
+        return 1;
+      case "f32":
+        return 7;
+      case "bool":
+      case "boolean":
+        return 8;
+      case "i64":
+      case "bigint":
+        return 9;
+      case "string":
+        return 10;
+    }
+    return undefined;
+  }
+
+  /** A numeric enum's value is its i32 member value, printed as a number, as Deno prints it. */
+  private isNumericEnumType(ts: string): boolean {
+    if (this.stringEnumNames.has(ts)) return false;
+    for (const k of this.enumValues.keys()) if (k.startsWith(`${ts}.`)) return true;
+    return false;
+  }
+
+  /** The keys of every object literal in the source, in order: a `{ … }` whose entries are all
+   *  `k: v` or a shorthand `k`. Deno prints an object's keys in the order its literal wrote them. */
+  private objectLiteralKeyOrders(): string[][] {
+    if (this.literalKeyOrders) return this.literalKeyOrders;
+    const masked = maskCode(this.src);
+    const out: string[][] = [];
+    for (let i = 0; i < masked.length; i++) {
+      if (masked[i] !== "{") continue;
+      let depth = 0, j = i;
+      for (; j < masked.length; j++) {
+        if ("([{".includes(masked[j])) depth++;
+        else if (")]}".includes(masked[j]) && --depth === 0) break;
+      }
+      const body = masked.slice(i + 1, j);
+      if (body.includes(";")) continue;
+      const parts: string[] = [];
+      let d = 0, start = 0;
+      for (let k = 0; k < body.length; k++) {
+        if ("([{".includes(body[k])) d++;
+        else if (")]}".includes(body[k])) d--;
+        else if (body[k] === "," && d === 0) {
+          parts.push(body.slice(start, k));
+          start = k + 1;
+        }
+      }
+      parts.push(body.slice(start));
+      const keys = parts.map((p) => p.trim()).filter((p) => p !== "")
+        .map((p) => p.match(/^(\w+)\s*(?::|$)/)?.[1]);
+      if (keys.length > 1 && keys.every((k) => k !== undefined)) out.push(keys as string[]);
+    }
+    this.literalKeyOrders = out;
+    return out;
+  }
+
+  /** Whether a class's code assigns field `f` (an initialiser, or `this.f =` in its body or an
+   *  ancestor's); a field it never assigns is `undefined` in Deno, not 0. */
+  private classAssignsField(cls: string, f: string): boolean {
+    const assign = new RegExp(`\\bthis\\.${f}\\s*=(?!=)`);
+    for (let c: string | undefined = cls; c; c = this.classInheritance.get(c)) {
+      if (this.instanceFieldInits.get(c)?.some(([n]) => n === f)) return true;
+      if (assign.test(this.classBodySrc.get(c) ?? "")) return true;
+    }
+    return false;
+  }
+
+  /** Why a value of declared type `ts` cannot be printed whole, or null. `stack`: the types
+   *  being printed around it (a type inside itself is refused). */
+  private inspectRefusal(ts: string, stack: string[]): string | null {
+    ts = ts.trim();
+    if (WasicTranspiler.inspScalarKind(ts) !== undefined || this.isNumericEnumType(ts)) return null;
+    if (ts.endsWith("[]")) {
+      const el = ts.slice(0, -2).trim();
+      if (el.endsWith("]")) return `a nested array (${ts})`;
+      if (el.toLowerCase() === "f32") return `an f32 array (${ts})`;
+      return this.inspectRefusal(el, stack);
+    }
+    if (this.stringEnumNames.has(ts)) return `a string enum (${ts})`;
+    if (this.discUnionDefs.has(ts)) return `a discriminated union (${ts})`;
+    if (ts.startsWith("[") || ts.startsWith("__Tuple_")) return `a tuple (${ts})`;
+    const def = this.structDefs.get(ts);
+    if (!def) return `a value of type ${ts}`;
+    if (stack.includes(ts)) return `a type inside itself (${ts})`;
+    const isClass = this.classDefs.has(ts);
+    const shapes = isClass && this.classHeaderSize > 0 ? this.findSubclasses(ts) : [ts];
+    for (const s of shapes) {
+      for (const f of this.structDefs.get(s)?.fields ?? []) {
+        const at = `${s}.${f.name}`;
+        if (f.funcType) return `a function field (${at})`;
+        if (f.nullable) return `a nullable field (${at})`;
+        if (f.tupleTypeName) return `a tuple field (${at})`;
+        if (!f.tsType) return `a field of unknown type (${at})`;
+        if (isClass && !this.classAssignsField(s, f.name)) return `a field it never assigns (${at})`;
+        const inner = this.inspectRefusal(f.tsType, [...stack, ts]);
+        if (inner) return inner;
       }
     }
+    if (!isClass) {
+      const names = def.fields.map((f) => f.name);
+      const set = new Set(names);
+      const reordered = this.objectLiteralKeyOrders().some((keys) =>
+        keys.length === names.length && keys.every((k) => set.has(k)) && keys.some((k, i) => k !== names[i])
+      );
+      if (reordered) return `an object literal whose keys are not in ${ts}'s declared order`;
+    }
+    return null;
+  }
+
+  /** A data text's offset (the writers' keys, braces and abbreviations). */
+  private inspText(s: string): number {
+    return this.allocStringDecoded(s)[0];
+  }
+
+  /** The WAT of a field's text: the value of declared type `ts` at address `addr`. */
+  private inspValueWat(ts: string, addr: string, ind: string, lvl: string): string {
+    ts = ts.trim();
+    const k = WasicTranspiler.inspScalarKind(ts) ?? (this.isNumericEnumType(ts) ? 0 : undefined);
+    if (k !== undefined) return `(call $__insp_scalar ${addr} (i32.const ${k}) ${ind})`;
+    if (ts.endsWith("[]")) {
+      const el = ts.slice(0, -2).trim();
+      const ek = WasicTranspiler.inspScalarKind(el) ?? (this.isNumericEnumType(el) ? 0 : undefined);
+      if (ek !== undefined) return `(call $__insp_arr_scalar (i32.load ${addr}) (i32.const ${ek}) ${ind} ${lvl})`;
+    }
+    return `(call ${this.inspWriterFor(ts)} (i32.load ${addr}) ${ind} ${lvl})`;
+  }
+
+  /** One struct's or class's own writer: `{ k: v, … }` (a class's `Name { … }`). */
+  private inspObjWriterWat(name: string, ts: string): string {
+    const def = this.structDefs.get(ts)!;
+    const isClass = this.classDefs.has(ts);
+    const b0 = isClass ? `${ts} {` : "{";
+    const abbrev = isClass ? `[${ts}]` : "[Object]";
+    const utf8 = (s: string) => new TextEncoder().encode(s).length;
+    const head = `
+  (func ${name} (param $p i32) (param $ind i32) (param $lvl i32) (result i32 i32)
+    (local $t i32)
+    (if (i32.eqz (local.get $p)) (then (return (call $__insp_null))))`;
+    const brace = `(i32.const ${this.inspText(b0)}) (i32.const ${utf8(b0)})`;
+    if (def.fields.length === 0) {
+      return `${head}
+    (call $__insp_obj (i32.const 0) (i32.const 0) ${brace} (local.get $ind) (i32.const 0))
+  )`;
+    }
+    const ind = `(i32.add (local.get $ind) (i32.const 2))`;
+    const lvl = `(i32.add (local.get $lvl) (i32.const 1))`;
+    const puts = def.fields.map((f, i) => {
+      const key = `${f.name}: `;
+      const value = this.inspValueWat(f.tsType!, `(i32.add (local.get $p) (i32.const ${f.offset}))`, ind, lvl);
+      return `    (call $__insp_put (local.get $t) (i32.const ${i})
+      (call $__insp_kv (i32.const ${this.inspText(key)}) (i32.const ${utf8(key)}) ${value}))`;
+    });
+    return `${head}
+    (if (i32.gt_s (local.get $lvl) (i32.const 4))
+      (then (return (call $__insp_lit (i32.const ${this.inspText(abbrev)}) (i32.const ${utf8(abbrev)})))))
+    (global.set $__insp_cur (local.get $lvl))
+    (local.set $t (call $__malloc (i32.const ${def.fields.length * 8})))
+${puts.join("\n")}
+    (call $__insp_obj (local.get $t) (i32.const ${def.fields.length}) ${brace} (local.get $ind)
+      (i32.sub (global.get $__insp_cur) (local.get $lvl)))
+  )`;
+  }
+
+  /** The writer of a struct, class or struct array of declared type `ts` (inspectRefusal passed),
+   *  generated once; a class with subclasses dispatches on the instance's tag. */
+  private inspWriterFor(ts: string): string {
+    ts = ts.trim();
+    if (ts.endsWith("[]")) {
+      const el = ts.slice(0, -2).trim();
+      const name = `$__insp_arr_${el}`;
+      if (this.inspectWriters.has(name)) return name;
+      this.inspectWriters.set(name, "");
+      const ew = this.inspWriterFor(el);
+      this.inspectWriters.set(
+        name,
+        `
+  (func ${name} (param $arr i32) (param $ind i32) (param $lvl i32) (result i32 i32)
+    (local $len i32) (local $n i32) (local $t i32) (local $i i32)
+    (if (i32.eqz (local.get $arr)) (then (return (call $__insp_null))))
+    (local.set $len (i32.load (local.get $arr)))
+    (if (i32.eqz (local.get $len))
+      (then (return (call $__insp_list (i32.const 0) (i32.const 0) (i32.const 0) (local.get $ind) (i32.const 0) (i32.const 0)))))
+    (if (i32.gt_s (local.get $lvl) (i32.const 4))
+      (then (return (call $__insp_lit (i32.const ${this.inspText("[Array]")}) (i32.const 7)))))
+    (global.set $__insp_cur (local.get $lvl))
+    (local.set $n (select (i32.const 100) (local.get $len) (i32.gt_u (local.get $len) (i32.const 100))))
+    (local.set $t (call $__malloc (i32.add (i32.shl (local.get $n) (i32.const 3)) (i32.const 8))))
+    (block $done
+      (loop $each
+        (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+        (call $__insp_put (local.get $t) (local.get $i)
+          (call ${ew} (i32.load offset=8 (i32.add (local.get $arr) (i32.shl (local.get $i) (i32.const 2))))
+            (i32.add (local.get $ind) (i32.const 2)) (i32.add (local.get $lvl) (i32.const 1))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $each)))
+    (call $__insp_list (local.get $t) (local.get $n) (i32.sub (local.get $len) (local.get $n)) (local.get $ind)
+      (i32.sub (global.get $__insp_cur) (local.get $lvl)) (i32.const 0))
+  )`,
+      );
+      return name;
+    }
+    const name = `$__insp_${ts}`;
+    if (this.inspectWriters.has(name)) return name;
+    this.inspectWriters.set(name, "");
+    const subs = this.classDefs.has(ts) && this.classHeaderSize > 0
+      ? this.findSubclasses(ts).filter((s) => s !== ts)
+      : [];
+    if (subs.length === 0) {
+      this.inspectWriters.set(name, this.inspObjWriterWat(name, ts));
+      return name;
+    }
+    // the instance's class, by its tag: each class's own writer
+    const own = (c: string): string => {
+      const w = `$__insp_o_${c}`;
+      if (!this.inspectWriters.has(w)) {
+        this.inspectWriters.set(w, "");
+        this.inspectWriters.set(w, this.inspObjWriterWat(w, c));
+      }
+      return w;
+    };
+    const args = `(local.get $p) (local.get $ind) (local.get $lvl)`;
+    const arms = subs.map((s) =>
+      `    (if (i32.eq (i32.load (local.get $p)) (i32.const ${this.classTags.get(s)}))
+      (then (return (call ${own(s)} ${args}))))`
+    );
+    this.inspectWriters.set(
+      name,
+      `
+  (func ${name} (param $p i32) (param $ind i32) (param $lvl i32) (result i32 i32)
+    (if (i32.eqz (local.get $p)) (then (return (call $__insp_null))))
+${arms.join("\n")}
+    (call ${own(ts)} ${args})
+  )`,
+    );
+    return name;
+  }
+
+  /** What a console argument is when it is a whole struct, class instance or struct array (a
+   *  name, or a call returning one): its declared type, its pointer's WAT, and what to call it in
+   *  a refusal. undefined = none of these. */
+  private inspectTarget(
+    t: string,
+    locals: Map<string, WatType>,
+  ): { ts: string; wat: string; what: string } | undefined {
+    let ts: string | undefined;
+    let wat = "";
+    let what = "struct";
+    if (/^\w+$/.test(t)) {
+      const arr = this.arrayVars.get(t);
+      if (arr) {
+        if (!arr.structTypeName || arr.is2D) return undefined;
+        ts = `${arr.structTypeName}[]`;
+        wat = this.arrGetWat(t);
+        what = "struct array";
+      } else if (!this.stringVars.has(t) && locals.get(t) !== "string") {
+        const cv = this.classVars.get(t);
+        const sv = this.structVars.get(t);
+        const ptr = cv?.ptr ?? sv?.ptr;
+        if (cv) [ts, what] = [cv.className, "class instance"];
+        else if (sv) ts = sv.def.name;
+        if (ts) {
+          wat = ptr !== undefined && ptr >= 0
+            ? `(i32.const ${ptr})`
+            : !locals.has(t) && this.moduleGlobals.has(t)
+            ? `(global.get $${t})`
+            : `(local.get $${t})`;
+        }
+      }
+    } else {
+      // a call returning a struct or a struct array (Phase 13b printed only the first: its
+      // strings as pointers, its booleans as 1)
+      const call = !t.includes(").") ? t.match(/^(\w+)\s*\(([\s\S]*)\)$/) : null;
+      const retTs = call ? this.functions.find((f) => f.name === call[1])?.resultTsName?.trim() : undefined;
+      if (retTs && this.structDefs.has(retTs.replace(/\[\]$/, "").trim())) {
+        ts = retTs;
+        wat = this.emitExpr(t, locals, "i32");
+        what = retTs.endsWith("[]") ? "struct array" : "struct";
+      }
+    }
+    return ts ? { ts, wat, what } : undefined;
+  }
+
+  /** A whole struct, class instance or struct array as a console argument, or an array literal
+   *  of struct / class variables (`[a, b]`, which printed its address): its text through the
+   *  object writer, or a refusal. undefined = none of these. */
+  private inspectConsoleArg(
+    tok: string,
+    locals: Map<string, WatType>,
+  ): { ptrWat: string; lenWat: string } | undefined {
+    const t = tok.trim();
+    const refused = (msg: string) => {
+      if (this.emitDiagSuppressDepth === 0) this.diagnostics.push(`console argument: ${msg}`);
+      return { ptrWat: "(i32.const 0)", lenWat: "(i32.const 0)" };
+    };
+    // the writer call of one target, at indent ind and depth lvl, or a refusal's message
+    const writerCall = (x: { ts: string; wat: string; what: string }, src: string, ind: number, lvl: number) => {
+      const why = this.inspectRefusal(x.ts, []);
+      if (why) {
+        return { msg: `printing a whole ${x.what} holding ${why} is not supported yet; print its fields (${src})` };
+      }
+      return { call: `(call ${this.inspWriterFor(x.ts)} ${x.wat} (i32.const ${ind}) (i32.const ${lvl}))` };
+    };
+    let text: string;
+    if (t.startsWith("[") && findMatchingBracketAware(t, 0) === t.length - 1) {
+      const elems = this.splitArgs(t.slice(1, -1)).map((e) => e.trim()).filter((e) => e !== "");
+      const targets = elems.map((e) => /^\w+$/.test(e) && !this.arrayVars.has(e) ? this.inspectTarget(e, locals) : undefined);
+      if (!targets.some((x) => x)) return undefined;
+      if (!targets.every((x) => x)) {
+        return refused(`printing an array literal mixing objects and other values is not supported yet (${t})`);
+      }
+      // each element at indent 2, depth 1, into a table laid out as an array at depth 0
+      const puts: string[] = [];
+      for (let i = 0; i < elems.length; i++) {
+        const c = writerCall(targets[i]!, elems[i], 2, 1);
+        if (c.msg) return refused(c.msg);
+        puts.push(`(call $__insp_put (local.get $__arr_tmp) (i32.const ${i}) ${c.call})`);
+      }
+      text = `(local.set $__arr_tmp (call $__malloc (i32.const ${elems.length * 8}))) ` +
+        `(global.set $__insp_cur (i32.const 0)) ${puts.join(" ")} ` +
+        `(call $__insp_list (local.get $__arr_tmp) (i32.const ${elems.length}) (i32.const 0) (i32.const 0) ` +
+        `(global.get $__insp_cur) (i32.const 0))`;
+    } else {
+      const x = this.inspectTarget(t, locals);
+      if (!x) return undefined;
+      const c = writerCall(x, t, 0, 0);
+      if (c.msg) return refused(c.msg);
+      text = c.call!;
+    }
+    // the helpers' own texts, allocated before the data section is laid out
+    this.inspText("null");
+    this.inspText("[Array]");
+    this.needsArrPrintHelper = true;
+    this.needsNumericHelpers = true;
+    this.needsStrGatherHelper = true;
+    return {
+      ptrWat: `(block (result i32) ${text} (local.set $__str_op_len))`,
+      lenWat: `(local.get $__str_op_len)`,
+    };
   }
 
   /** A `for (const p of ps)` item over a class or struct array is that element: its pointer is in
@@ -16809,7 +17165,6 @@ ${prefixed}
     const logMatch = line.match(/^console\.log\s*\((.+)\)\s*;?$/);
     if (logMatch) {
       this.hasConsoleLog = true;
-      this.refuseWholeObjectArgs(logMatch[1], locals);
       // Phase 6d: console.log of a 2D i32 array variable → call $__print_2d_i32_arr helper
       const log2DArg = logMatch[1].trim();
       const log2DInfo = this.arrayVars.get(log2DArg);
@@ -16870,52 +17225,8 @@ ${prefixed}
         if (taSG) this.needsStrGatherHelper = true;
         return taStmts.join("\n      ");
       }
-      // Phase 13b: console.log(structReturningFn(...)) → print { field: val, ... }
+      // A call returning a struct (Phase 13b printed it here) goes to the object writer (ld45).
       const logSingleArg = logMatch[1].trim();
-      // Guard: skip if this is a chained method call like funcCall().method() — those return
-      // a scalar, not a struct, and should fall through to the general emitExpr path.
-      const structFnCallMatch = !logSingleArg.includes(").")
-        ? logSingleArg.match(/^(\w+)\s*\((.*)\)$/)
-        : null;
-      if (structFnCallMatch) {
-        const callee = this.functions.find((f) => f.name === structFnCallMatch[1]);
-        if (callee?.resultTsName && this.structDefs.has(callee.resultTsName)) {
-          const structDef = this.structDefs.get(callee.resultTsName)!;
-          const callWat = this.emitExpr(logSingleArg, locals, "i32");
-          const ptrStmt = `    (local.set $__struct_tmp ${callWat})`;
-          const segments: LogSegment[] = [{ kind: "literal", text: "{ " }];
-          for (let fi = 0; fi < structDef.fields.length; fi++) {
-            const field = structDef.fields[fi];
-            if (fi > 0) segments.push({ kind: "literal", text: ", " });
-            segments.push({ kind: "literal", text: `${field.name}: ` });
-            const loadOp = memLoadOp(field.type);
-            const kind = field.type === "f64"
-              ? "f64expr" as const
-              : field.type === "i64"
-              ? "i64expr" as const
-              : "i32expr" as const;
-            segments.push({
-              kind,
-              wat: `(${loadOp} offset=${field.offset} (local.get $__struct_tmp))`,
-            });
-          }
-          segments.push({ kind: "literal", text: " }\n" });
-          this.needsNumericHelpers = true;
-          const { statements, needsStrGather, needsArrPrintHelper, needsJoinHelper } =
-            emitConsoleLog(
-              segments,
-              (text) => this.allocString(text),
-              "    ",
-              1,
-              this.iovBase,
-              this.scratchBase,
-            );
-          if (needsStrGather) this.needsStrGatherHelper = true;
-          if (needsArrPrintHelper) this.needsArrPrintHelper = true;
-          if (needsJoinHelper) this.needsJoinHelper = true;
-          return [ptrStmt, ...statements].join("\n      ");
-        }
-      }
       // find() result variable: print "undefined" when sentinel (-1 for i32, NaN for f64),
       // matching TypeScript's Array.find() semantics for the not-found case.
       if (this.findResultVars.has(logSingleArg)) {
@@ -17519,6 +17830,7 @@ ${prefixed}
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
+      setObjectInspectResolver((tok, locs) => this.inspectConsoleArg(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -17558,6 +17870,7 @@ ${prefixed}
       setNullPrintResolver(undefined);
       setU64Resolver(undefined);
       setEnumStrVarResolver(undefined);
+      setObjectInspectResolver(undefined);
       const { statements, needsHelpers, needsStrGather, needsArrPrintHelper, needsJoinHelper } =
         emitConsoleLog(segments, allocator, "    ", 1, this.iovBase, this.scratchBase);
       if (needsHelpers) this.needsNumericHelpers = true;
@@ -17571,7 +17884,6 @@ ${prefixed}
     const errMatch = line.match(/^console\.(error|warn)\s*\((.+)\)\s*;?$/);
     if (errMatch) {
       this.hasConsoleLog = true;
-      this.refuseWholeObjectArgs(errMatch[2], locals);
       const allocator: DataAllocator = (text) => this.allocString(text);
       const lookup: FuncLookup = (name) => this.functions.find((f) => f.name === name);
       const enumLookup = (key: string) => this.enumValues.get(key);
@@ -18031,6 +18343,7 @@ ${prefixed}
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
+      setObjectInspectResolver((tok, locs) => this.inspectConsoleArg(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -18070,6 +18383,7 @@ ${prefixed}
       setNullPrintResolver(undefined);
       setU64Resolver(undefined);
       setEnumStrVarResolver(undefined);
+      setObjectInspectResolver(undefined);
       const {
         statements,
         needsHelpers,
@@ -19805,6 +20119,12 @@ ${prefixed}
     if (this.hasConsoleLog) parts.push(getFdWriteAllWat());
     if (this.needsNumericHelpers) parts.push(getHelperWat());
     if (this.needsArrPrintHelper) parts.push(getArrPrintHelperWat());
+    if (this.inspectWriters.size > 0) {
+      parts.push(
+        getInspectHelperWat(this.inspText("null"), this.inspText("[Array]")) +
+          [...this.inspectWriters.values()].join(""),
+      );
+    }
     if (this.needsJoinHelper) parts.push(getJoinHelperWat());
     if (this.f64RadixTexts) parts.push(this.f64RadixHelperWat());
     if (this.neededEnumStrHelpers.size > 0) parts.push(this.emitEnumStrHelpers());
@@ -23828,7 +24148,16 @@ ${sum}
         const varName = arrCallPre[1];
         const elemType = mapType(arrCallPre[2]) as WatType;
         const isStringArr = elemType === "string";
-        this.arrayVars.set(varName, { elemType, ptr: -2, length: 0, dynamic: true, isStringArr });
+        // a struct element type is remembered: `pts[0].x` was refused and `console.log(pts)`
+        // printed the element pointers (sw134, found with ld45, 2026-10-24)
+        this.arrayVars.set(varName, {
+          elemType,
+          ptr: -2,
+          length: 0,
+          dynamic: true,
+          isStringArr,
+          ...(this.structDefs.has(arrCallPre[2]) ? { structTypeName: arrCallPre[2] } : {}),
+        });
         declaredLocals.push([varName, "i32"]);
         locals.set(varName, "i32");
         continue;
@@ -24345,9 +24674,10 @@ ${sum}
       // pre-scan knows only `(` / `,` before `[`, a line starting `return [`, and a push that
       // starts its line (ld09, sw30, ld44, 2026-10-15).
       // (and $__destr_src, a destructured call's result, ld76; $__chain_arr, a chained receiver, ld78)
-      // (and $__str_arg_*, a built string argument, ld106)
+      // (and $__str_arg_*, a built string argument, ld106; $__rt_struct_ptr, a struct literal
+      // pushed onto an array declared empty, ld113)
       ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len", "__str_arg_ptr", "__str_arg_len", "__destr_src",
-        "__splice_s", "__splice_rm", "__chain_arr"].filter((t) =>
+        "__splice_s", "__splice_rm", "__chain_arr", "__rt_struct_ptr"].filter((t) =>
         new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)
       ).map((t) => `    (local $${t} i32)`),
     ].filter((d) => d !== "").join("\n");
@@ -25930,6 +26260,7 @@ ${sum}
             length: 0,
             dynamic: true,
             isStringArr: isStringArr2c,
+            ...(this.structDefs.has(arrCallPre2[2]) ? { structTypeName: arrCallPre2[2] } : {}), // sw134
           });
           startLocals.set(varName2c, "i32");
           startDeclaredLocals.push([varName2c, "i32"]);
@@ -26284,8 +26615,8 @@ ${sum}
         if (!declMap.has(n.slice(1))) declMap.set(n.slice(1), "i32"); // ld108 aliases, ld111 pairs
       }
       // an array literal built inline, `f([1, 2])`, a string push in a one-line loop (sw30, ld44;
-      // see emitFunction)
-      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__str_arg_ptr", "__str_arg_len", "__destr_src", "__splice_s", "__splice_rm", "__chain_arr"]) {
+      // see emitFunction); a struct literal pushed onto an array declared empty (ld113)
+      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__str_arg_ptr", "__str_arg_len", "__destr_src", "__splice_s", "__splice_rm", "__chain_arr", "__rt_struct_ptr"]) {
         if (new RegExp(`\\$${t}\\b`).test(bodyWat) && !declMap.has(t)) declMap.set(t, "i32");
       }
       // console.log's argument temporaries (sw68)
