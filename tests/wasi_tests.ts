@@ -27,6 +27,10 @@ import { blue, bold, cyan, dim, green, magenta, red, yellow } from "jsr:@std/fmt
 // ─────────────────────────────────────────────────────────────────────────────
 
 const WASMTK_BIN = "wasmtk";
+// A step that runs longer than this is killed and FAILS, whatever the test expects (2026-10-24: a
+// module that looped, sw137's main_arraymethods, hung the suite for an hour with no output). The
+// slowest real steps (a dynrt compile and merge) take well under a minute.
+const STEP_TIMEOUT_S = Number(Deno.env.get("WASI_STEP_TIMEOUT_S") ?? 300);
 const targetDir = Deno.args[0] ?? join(import.meta.dirname ?? Deno.cwd(), "wasi", "wasm_wasi");
 // Optional second arg: regex filter applied to file basenames (e.g. "^01_" for phase 1)
 const fileFilter = Deno.args[1] ? new RegExp(Deno.args[1]) : null;
@@ -39,6 +43,7 @@ interface StepResult {
   success: boolean;
   code: number;
   stdout?: string; // captured stdout when `capture` is requested (for output comparison)
+  timedOut?: boolean; // killed at STEP_TIMEOUT_S: a failure even where a failure is expected
 }
 
 /**
@@ -63,11 +68,31 @@ async function runStep(
   console.log(blue(`  [${label}]`), dim(`${cmd} ${args.join(" ")}`));
 
   try {
-    const output = await new Deno.Command(cmd, {
+    const child = new Deno.Command(cmd, {
       args,
       stdout: capture ? "piped" : "inherit",
       stderr: "inherit",
-    }).output();
+    }).spawn();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // the whole process TREE: on Windows `wasmtk` is a .cmd shim, and killing it alone leaves
+      // the deno process it started running
+      if (Deno.build.os === "windows") {
+        new Deno.Command("taskkill", { args: ["/pid", String(child.pid), "/T", "/F"], stdout: "null", stderr: "null" })
+          .outputSync();
+      } else {
+        try {
+          child.kill("SIGKILL");
+        } catch { /* already gone */ }
+      }
+    }, STEP_TIMEOUT_S * 1000);
+    const output = await child.output();
+    clearTimeout(timer);
+    if (timedOut) {
+      console.log(red(`  ✗ ${label} TIMED OUT after ${STEP_TIMEOUT_S}s (killed; WASI_STEP_TIMEOUT_S sets the limit)`));
+      return { success: false, code: -2, timedOut: true };
+    }
     const { code } = output;
     // "Success" is the EXPECTED exit code: 0 by default, N under `// @expect-exit: N`. That keeps a
     // program that dies on purpose (an uncaught throw → exit 1, at parity with wasmtime since
@@ -316,7 +341,9 @@ async function startTestSuite() {
     const expectFail = await readExpectedFailures(tsPath);
     const expectExit = await readExpectExit(tsPath);
     // A step "passes" if it succeeded when not expected to fail, or failed when expected to fail.
-    const stepOk = (r: StepResult, step: string) => expectFail.has(step) ? !r.success : r.success;
+    // A step that TIMED OUT never passes: a hang is not the failure a test expects.
+    const stepOk = (r: StepResult, step: string) =>
+      !r.timedOut && (expectFail.has(step) ? !r.success : r.success);
 
     // ── Step 0: modc-prereq (Phase 18 — compile library before app) ──
     const prereqRel = await readModcPrereq(tsPath);
@@ -355,7 +382,7 @@ async function startTestSuite() {
 
     // ── Step 3: Run compiled WASM ─────────────────────────────────
     let runWasm: StepResult;
-    const compileExpectedFail = expectFail.has("compile") && !compile.success;
+    const compileExpectedFail = expectFail.has("compile") && !compile.success && !compile.timedOut;
     if (!compile.success) {
       if (!compileExpectedFail) {
         console.log(dim("  (skipping run-wasm — compile failed)"));

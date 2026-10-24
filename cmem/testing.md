@@ -129,8 +129,11 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 > cross-check **1368** on baseline (+9 new pairs recorded: `7j` from ld45, and the `30_I32*` tests;
 > wasmer and wazero reject `30_I32OverflowThrows`, which uses exception handling), 0 regressed — as
 > first built, 157 wazero pairs went `match → reject` (a tag in every program), cured by the owner's
-> trap-without-try ruling · wast 64,506 / 0 / 16 · every other suite green. ⚠️ The wasi suite has no
-> per-test TIMEOUT: a looping module (sw137's `main_arraymethods`) hung a run for an hour, silently.
+> trap-without-try ruling · wast 64,506 / 0 / 16 · every other suite green. The wasi suite had no
+> per-test TIMEOUT (a looping module, sw137's `main_arraymethods`, hung a run for an hour, silently):
+> since 2026-10-24 every step is killed at `WASI_STEP_TIMEOUT_S` (default 300 s, the whole process
+> tree) and fails, an expected failure included. Verified on a looping probe at 10 s: both runs
+> killed, the file FAILED, no process left behind.
 
 > **2026-10-24, ld45 (the object writer), ld113, sw134–sw136, gate GREEN.** wasi **503/503**
 > (+`7j_ConsoleObjectWriter`, failing with `main`'s compiler; `7i_ConsoleWholeStructRefused` now the
