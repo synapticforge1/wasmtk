@@ -23,6 +23,13 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 in 0 s. The trap still bites; a gate script must switch to `deno test` when a file contains
 `Deno.test(`.)
 
+⚠️ **Probing the compiler: `wasmtk run x.ts` does NOT compile.** It runs the `.ts` under Deno
+(`src/utils.ts` `runWasi`: it is the corpus's reference run). A scratch probe that compares
+`deno run x.ts` with `wasmtk run x.ts` compares Deno with Deno and always agrees (2026-10-23: three
+"open" rows looked fixed that way, and four silent bugs were hidden behind them). Compile it:
+`wasmtk wasic x.ts -o x.wasm`, then `wasmtk run x.wasm`. The `.wat` text is written beside the
+`.wasm` (`-o x.wat` writes the BINARY under that name).
+
 **Typed-declaration rule (2026-09-28): every wasi test states its declarations' types.** A new test
 with `let x = 1` now fails to COMPILE, which reads as a test failure for the wrong reason. Type
 integer literals `: i32` to keep the old i32 behaviour; `tests/typed_decl_tests.ts` is the rule's
@@ -113,6 +120,13 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
 ## Current pass counts (2026-10-23, binaryang **1.16.1**; latest release v2.0.3)
+
+> **2026-10-23, ld103–ld105, sw129–sw132, ld110, gate GREEN.** wasi **500/500**
+> (+`29_FieldArraysAndCallResults`, +`29_FieldInitializersAndImplicitConstructors`,
+> +`28_ArrayNamedMethodsAndStringUnshift`, each failing with `main`'s compiler) · golden-WAT **557**,
+> no existing entry moved (no corpus program had an instance-field initialiser or a derived class
+> without a constructor) · wast 64,506 / 0 / 16 · cross-check **1353** on baseline (+12, the three
+> new modules, all `match`) · go 7 / 7 / 12 · api-surface unchanged.
 
 > **2026-10-23, later: binaryang 1.15.0 → 1.16.1 pinned, gate GREEN, NOTHING moved** — as
 > predicted from the changelog (1.16.0: `--target portable` and two lowerings, all opt-in, "without

@@ -810,6 +810,24 @@ string-array element, and `Math.*`/`Number.*` handling all have such twins.
 
 ## Class / feature codegen
 
+- **Construction runs as JavaScript's does (2026-10-23, sw131 / sw132; do not revert).** A class's
+  OWN instance-field initialisers (`n: i32 = 7`, collected in `instanceFieldInits` by the class
+  field parser) run in its constructor FIRST — after the `super(…)` line in a derived class, so the
+  base's fields and constructor come first and the class's own constructor body can override them.
+  A class with initialisers and no constructor gets a synthesised one; a DERIVED class with no
+  constructor gets one taking the nearest ancestor's parameters and calling `super(…)` with them
+  (JavaScript's implicit constructor). The pass runs after all classes are parsed, in declaration
+  order, so a base's (possibly synthesised) constructor exists first. Before it, every initialiser
+  was dropped (fields started at 0) and `new Derived(4)` never ran the base constructor — silently.
+  A field line containing `(` is still skipped by the field parser (`= new X()`, `= Math.max(…)`),
+  a pre-existing limit: such a field is unknown, which is loud.
+- **An array FIELD (`items: T[]`, in a class or an interface) carries `arrayElemType`** (ld103):
+  reads and push / pop / shift / unshift go through `arrayFieldRef`, and a push stores the
+  possibly-reallocated pointer back into the field. A class field without it is a bare i32 and
+  every array operation on it is refused.
+- **A statement `x.push(…)` on a class or struct variable is a METHOD call, never an array push**
+  (sw129): the dynamic-array statement form's i32-local fallback excludes class and struct
+  variables, whose pointers are i32 locals too.
 - **`instanceof` (Phase 51)** lives in `emitExpr` AFTER the binary-op loop (so `a instanceof X && …`
   splits on `&&` first). When `classHeaderSize > 0` it emits a runtime tag check
   (`tag(obj) ∈ {target + findSubclasses(target)}`, OR-folded, tag read at offset 0); when

@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 1 | 143 | 0 | 27 |
-| LOUD | 4 | 108 | 0 | 19 |
+| SILENT-WRONG | 1 | 147 | 0 | 27 |
+| LOUD | 5 | 112 | 0 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -21,6 +21,58 @@ Batch 2 (the same day) closed ld10, ld14, ld37, found and fixed sw74 and ld44, a
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
+
+**ld103–ld105 FIXED 2026-10-23; sw129–sw132 (silent) and ld110 found and fixed; ld106–ld109
+found, OPEN** (open: silent 1, sw119; loud 5, ld45 and ld106–ld109). ⚠️ First, a measuring trap
+that hid all of this for a while: **`wasmtk run x.ts` runs the `.ts` under DENO and never
+compiles it** (it is the corpus's reference run, `src/utils.ts` `runWasi`), so a probe compared that
+way compares Deno with Deno. Probe the compiler with `wasmtk wasic x.ts -o x.wasm` then
+`wasmtk run x.wasm`. An earlier note in this session's work that ld103–ld105 "did not reproduce"
+came from exactly that, and was wrong.
+- **ld103** an ARRAY field through `this` or a class instance (`this.items.push(x)`, `.length`,
+  `[i]`; `b.items…`): the class field parser recorded `items: T[]` as a plain i32 (no
+  `arrayElemType`), and the read handlers knew only struct variables; `push` was refused through a
+  struct too. Now `arrayFieldRef` (this / class instance / struct; local, global, static) serves
+  the `.length` and `[i]` reads, a new push / pop / shift / unshift statement form stores the
+  (possibly reallocated) pointer back into the field, `inferExprType` knows the element type, and
+  the console types `b.vals[0]` through wasic (by its lead it was an i32: an f64 was refused).
+- **ld104** a field of a call's result, `c.bump().n`, chained, from a function (`make().w`), in
+  console.log: `callResultField` (the result's class from `classOfExpr`, which now also resolves a
+  plain function returning a class, so `make().bump()` works too; a struct-returning function).
+  Two console paths took the METHOD's result type for the token: a boolean field printed `1`, an
+  f64 one built an invalid module; `dotCallLookup` (both copies) and the expression fallback now
+  report the field's type, and the fallback resolver reports `bool` as bool (widening reads it as
+  an i32, so its other callers are unchanged).
+- **ld105** `.length` of an array method's new array (`xs.filter(f).length`, `map`, `slice`, …),
+  as a declaration AND in console.log (the record said a declaration worked: it did not): the new
+  array's header word, on a known array receiver only (`s.slice(1).length` of a string is not taken).
+- **sw129 (silent)** a class method named `push` called as a statement, `s.push(7)`, was compiled
+  as an ARRAY push onto the object's memory: the statement form's Phase 12 fallback took any i32
+  local for an array pointer, and an instance pointer is one. Printed `0 0` for `9 2`. Now a class
+  or struct variable never takes that fallback. (`pop` / `shift` / `unshift` / `splice` methods
+  were correct: only `push` had the fallback.)
+- **sw130 (silent)** `unshift` on a string array APPENDED (`a,b,c` printed `b,c,a`): both string
+  paths called `$__dynarr_push_string`. New helper `$__dynarr_unshift_string`.
+- **sw131 (silent)** a class's instance-field INITIALISERS were dropped: `n: i32 = 7`, `w: f64 =
+  0.5`, `s: string = "hi"` all started at 0 / "" / false, with or without a constructor, at module
+  level and in functions. No corpus test had one (every initialiser in the corpus was `static`).
+  Now they run in the constructor, first (after `super(…)` in a derived class); a class with
+  initialisers and no constructor gets one. A probe's `items: i32[] = []` + `push` had "worked" by
+  pushing onto address 0.
+- **sw132 (silent)** a DERIVED class without a constructor never ran its base's (`new D(4).x` was
+  0, not 40): it now gets one that passes its arguments to the nearest ancestor's (JavaScript's
+  implicit constructor).
+- **ld110** `super(name)` with a STRING argument passed one word (an invalid module): it is its
+  (ptr, len) pair now, as in the `new` and method-call sites (ld101).
+- Found, OPEN (loud, each refused with a message): **ld106** a template literal as a method's
+  string argument, `ns.add(\`${who}!\`)` ("Unsupported string expression"); **ld107** an inline arrow
+  inside a template's `${…}` is never lifted (`\`${xs.filter((x) => x > 2).length}\``): templates are
+  opaque to the arrow lifter; **ld108** an array FIELD's other methods, `b.list.join("|")`
+  (push / pop / shift / unshift / `.length` / `[i]` are supported); **ld109** a diagnostic's
+  location can point INTO A COMMENT that quotes the failing code (the D6 locator matched the
+  first occurrence of the text).
+Tests `29_FieldArraysAndCallResults`, `29_FieldInitializersAndImplicitConstructors`,
+`28_ArrayNamedMethodsAndStringUnshift`, each proved to fail with `main`'s compiler.
 
 **ld100 FIXED 2026-10-22, ld101 and ld102 found and fixed; ld103–ld105 found, OPEN:** generic
 classes; a class's string fields and string arguments; a string method in console.log; open loud 4
@@ -438,10 +490,11 @@ and a string constructor / method argument, `new Item("hi", 7)`, was refused (8-
 fields; `this.name = …` through emitStringFieldStore; `this.name` reads; string arguments in the
 two `new` handlers and the four method-call sites); **ld102** a string-returning method in
 console.log, `console.log(n.label())`, was an invalid module (emitStringPtrLen calls it and reads
-the return globals; console routes an instance's method call there); found, OPEN: **ld103**
-`this.items.push(x)` on a class's array field is "Unsupported statement"; **ld104** a field of a
-call's result, `c.bump().n`, is "Unsupported expression"; **ld105** `xs.filter(…).length` inside
-console.log is refused (as a declaration it works); ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
+the return globals; console routes an instance's method call there); found 2026-10-22, ~~**ld103**~~ FIXED 2026-10-23
+`this.items.push(x)` on a class's array field is "Unsupported statement"; ~~**ld104**~~ FIXED
+2026-10-23 a field of a call's result, `c.bump().n`, is "Unsupported expression"; ~~**ld105**~~
+FIXED 2026-10-23 `xs.filter(…).length` inside console.log is refused (and as a declaration too)
+(see the 2026-10-23 entry at the top); ~~ld75~~ FIXED 2026-10-20 callbacks: a generic function's callback (`funcTypeVars` re-seeded
 per function), `map((x, i) => …)` (signature mismatch; `<method>_<T>_ix` helpers for forEach, map,
 filter, find, findIndex, every, some; a third parameter is refused); ~~ld76~~ FIXED 2026-10-22 destructuring from a call, a tuple holding a string
 (`destructSourceDef` / `destructSource`: a struct variable or a struct- / tuple-returning call,

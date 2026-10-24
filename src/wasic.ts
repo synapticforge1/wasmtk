@@ -2230,6 +2230,9 @@ class WasicTranspiler {
 
   // Class definitions (Phase 9): className → ClassDef
   private classDefs: Map<string, ClassDef> = new Map();
+  /** A class's OWN instance-field initialisers (`n: i32 = 7`), in declaration order, run by its
+   *  constructor (sw131, 2026-10-23: they were parsed as types and the values dropped). */
+  private instanceFieldInits: Map<string, [string, string][]> = new Map();
   // Phase 47: derived class name → base class name (populated by parseClasses)
   private classInheritance: Map<string, string> = new Map();
   // Phase 47: className → integer tag (1, 2, ...) assigned when any class uses extends
@@ -6166,6 +6169,11 @@ class WasicTranspiler {
                   tupleTypeName: tdef.name,
                 });
                 fieldOffset += tdef.totalSize;
+                const tInit = line.slice(fmTup[0].length).match(/^\s*=\s*([\s\S]+?)\s*;?\s*$/)?.[1];
+                if (tInit !== undefined) { // sw131: `bounds: [i32, i32] = [0, 9]` ran nothing
+                  (this.instanceFieldInits.get(className) ??
+                    this.instanceFieldInits.set(className, []).get(className)!).push([fmTup[1], tInit]);
+                }
                 fieldDepth += opens - closes;
                 continue;
               }
@@ -6180,6 +6188,11 @@ class WasicTranspiler {
               const size = (type === "f64" || type === "i64" || type === "string") ? 8 : 4;
               const align = type === "string" ? 4 : size;
               if (fieldOffset % align !== 0) fieldOffset = Math.ceil(fieldOffset / align) * align;
+              // an array field `items: T[]` holds an array pointer: remember its element type, as an
+              // interface's field does, so `this.items.push(x)`, `.length` and `[i]` are known (ld103,
+              // 2026-10-23: a class's array field was a plain i32 and all three were refused)
+              const arrElem = fm[2].endsWith("[]") ? fm[2].slice(0, -2).trim() : null;
+              const isArr = arrElem !== null && !arrElem.endsWith("]");
               fields.push({
                 name: fm[1],
                 type,
@@ -6187,8 +6200,20 @@ class WasicTranspiler {
                 size,
                 ...(isReadonly ? { readonly: true } : {}),
                 ...(fm[3] ? { nullable: true } : {}),
+                ...(isArr
+                  ? {
+                    arrayIsString: arrElem === "string",
+                    arrayElemType: arrElem === "string" ? "i32" : (mapType(arrElem!) as WatType),
+                  }
+                  : {}),
               });
               fieldOffset += size;
+              // its initialiser, `= value`, run by the constructor (sw131)
+              const init = line.slice(fm[0].length).match(/^\s*=\s*([\s\S]+?)\s*;?\s*$/)?.[1];
+              if (init !== undefined) {
+                (this.instanceFieldInits.get(className) ??
+                  this.instanceFieldInits.set(className, []).get(className)!).push([fm[1], init]);
+              }
             }
           }
         }
@@ -6339,6 +6364,43 @@ class WasicTranspiler {
       }
     }
 
+    // Construction as JavaScript does it (2026-10-23). In declaration order, so a base's
+    // constructor (written or synthesised) exists before a derived class looks for it:
+    //   - a class's own field initialisers run in its constructor, first — after `super(…)` in a
+    //     derived class (sw131: `n: i32 = 7` was 0, with or without a constructor);
+    //   - a class with initialisers and no constructor gets one;
+    //   - a DERIVED class with no constructor gets one that calls the nearest ancestor's with the
+    //     same arguments (sw132: `new D(4)` never ran B's constructor, so `d.x` was 0, not 40).
+    for (const [cls, cd] of this.classDefs) {
+      const initLines = (this.instanceFieldInits.get(cls) ?? []).map(([f, v]) => `this.${f} = ${v};`);
+      const ctorName = `${cls}_constructor`;
+      const own = this.functions.find((f) => f.name === ctorName);
+      if (own) {
+        if (initLines.length === 0) continue;
+        const at = this.classInheritance.has(cls)
+          ? own.bodyLines.findIndex((l) => /^super\s*\(/.test(l.trim())) + 1
+          : 0;
+        own.bodyLines.splice(at, 0, ...initLines);
+        continue;
+      }
+      let anc = this.classInheritance.get(cls);
+      let ancCtor: FuncDef | undefined;
+      while (anc && !(ancCtor = this.functions.find((f) => f.name === `${anc}_constructor`))) {
+        anc = this.classInheritance.get(anc);
+      }
+      if (!ancCtor && initLines.length === 0) continue;
+      const params = (ancCtor?.params.slice(1) ?? []).map((p) => ({ ...p }));
+      this.functions.push({
+        name: ctorName,
+        params: [{ name: "__self", type: "i32" as WatType }, ...params],
+        result: null,
+        exported: false,
+        bodyLines: [...(ancCtor ? [`super(${params.map((p) => p.name).join(", ")});`] : []), ...initLines],
+        className: cls,
+      });
+      cd.methods.push({ name: "constructor", isStatic: false, isConstructor: true });
+    }
+
     // Phase 47: if any class uses extends, add a 4-byte tag header to every class in this module.
     if (this.classInheritance.size > 0) {
       this.classHeaderSize = 4;
@@ -6362,6 +6424,12 @@ class WasicTranspiler {
     const t = e.trim();
     if (t === "this") return this.currentMethodClass ?? undefined;
     if (/^\w+$/.test(t)) return this.classVars.get(t)?.className;
+    // a plain function whose declared return type is a class: `make()` (2026-10-23, with ld104)
+    const fc = t.match(/^(\w+)\s*\(([\s\S]*)\)$/);
+    if (fc && parenDepthNeverNegative(fc[2]!)) {
+      const r = this.functions.find((f) => f.name === fc[1])?.resultTsName;
+      return r && this.classDefs.has(r) ? r : undefined;
+    }
     const parsed = t.endsWith(")") ? this.splitLastMethodCall(t) : null;
     if (!parsed) return undefined;
     const cls = this.classOfExpr(parsed.receiver);
@@ -7027,6 +7095,64 @@ class WasicTranspiler {
       }
     }
     return null;
+  }
+
+  /** The class or struct a CALL returns: `classOfExpr` (a method chain or a function returning a
+   *  class), else a plain function returning a STRUCT (`mk(): P`). null for anything else. */
+  private callResultClass(call: string): string | null {
+    const e = call.trim();
+    if (!e.endsWith(")")) return null;
+    const cls = this.classOfExpr(e);
+    if (cls) return cls;
+    const fc = e.match(/^(\w+)\s*\(([\s\S]*)\)$/);
+    const r = fc && parenDepthNeverNegative(fc[2]!)
+      ? this.functions.find((f) => f.name === fc[1])?.resultTsName
+      : undefined;
+    return r && this.structDefs.has(r) ? r : null;
+  }
+
+  /** `<call>.<field>`: a field of a call's result (`c.bump().n`, ld104, 2026-10-23: refused): the
+   *  call, its result's class and the field, or null. */
+  private callResultField(
+    expr: string,
+    locals: Map<string, WatType>,
+  ): { call: string; field: StructField } | null {
+    const m = expr.trim().match(/^([\s\S]*\))\.(\w+)$/);
+    if (!m || !parenDepthNeverNegative(m[1]!)) return null;
+    const cls = this.callResultClass(m[1]!);
+    const def = cls ? (this.classDefs.get(cls)?.struct ?? this.structDefs.get(cls)) : undefined;
+    const field = def?.fields.find((f) => f.name === m[2]);
+    return field ? { call: m[1]!, field } : null;
+  }
+
+  /** An ARRAY-typed field of `this`, a class instance or a struct (local, global or static): the
+   *  address of its pointer slot and its element type. `recv.items.length`, `recv.items[i]` and
+   *  `recv.items.push(x)` were refused through `this` and through a class instance, and `push` was
+   *  refused through a struct as well (ld103, 2026-10-23). */
+  private arrayFieldRef(
+    recv: string,
+    field: string,
+    locals: Map<string, WatType>,
+  ): { slot: string; elem: WatType; isStr: boolean } | null {
+    let base: string;
+    let def: StructDef | undefined;
+    if (recv === "this") {
+      if (!this.currentMethodClass) return null;
+      def = this.classDefs.get(this.currentMethodClass)?.struct;
+      base = `(local.get $__self)`;
+    } else {
+      const r = this.resolveStructBase(recv, locals);
+      if (!r) return null;
+      def = r.def;
+      base = r.ptrWat;
+    }
+    const fld = def?.fields.find((f) => f.name === field);
+    if (!fld || fld.arrayElemType === undefined) return null;
+    return {
+      slot: `(i32.add ${base} (i32.const ${fld.offset}))`,
+      elem: fld.arrayIsString ? "string" : fld.arrayElemType,
+      isStr: !!fld.arrayIsString,
+    };
   }
 
   /** Phase 51.2: build `{ ...base, k: v }` at runtime. Copies every target field from `base`
@@ -9530,6 +9656,23 @@ class WasicTranspiler {
         if (a === b) return a;
       }
     }
+    // An array FIELD's element / length: `b.vals[0]` is the field's element type (an f64 went to
+    // the i32 printer: an invalid module), `b.items.length` an i32 (ld103, 2026-10-23)
+    {
+      const fe = e.match(/^(\w+)\.(\w+)(\[[^\]]+\]|\.length)$/);
+      const ref = fe ? this.arrayFieldRef(fe[1], fe[2], locals) : null;
+      if (fe && ref) return fe[3] === ".length" ? "i32" : ref.isStr ? "string" : ref.elem;
+    }
+    { // a field of a call's result (ld104): the field's own type
+      const crf = this.callResultField(e, locals);
+      if (crf) return crf.field.type;
+    }
+    { // `.length` of an array method's new array (ld105): an i32, whatever the elements are
+      const al = e.match(/^(\w+)\.(filter|map|slice|concat|reverse|sort|fill|flat|flatMap)\s*\(([\s\S]*)\)\.length$/);
+      if (al && parenDepthNeverNegative(al[3]!) && (this.arrayVars.has(al[1]!) || this.isModuleGlobalArr(al[1]!))) {
+        return "i32";
+      }
+    }
     // Struct array element field access: arr[i].field → field type
     const arrFieldDotM = e.match(/^(\w+)\[([^\]]+)\]\.(\w+)$/);
     if (arrFieldDotM) {
@@ -11054,33 +11197,47 @@ ${prefixed}
     // `structVar.field.length` and `structVar.field[i]` — where `structVar` may be a function PARAM
     // (previously "Unsupported expression"; only worked via an intermediate `const f = p.field` alias).
     // Load the field (an i32 array pointer) from the struct, then apply the array op.
+    // `.length` of an ARRAY method's new array, `xs.filter(f).length` (ld105, 2026-10-23: refused,
+    // as a declaration and in console.log): the new array's header word. Only on a known array
+    // receiver, so a string's `s.slice(1).length` is not taken; and not over an arrow still in
+    // the text (one inside a template's `${…}` is never lifted): that keeps its own refusal.
     {
+      const al = expr.match(/^(\w+)\.(filter|map|slice|concat|reverse|sort|fill|flat|flatMap)\s*\(([\s\S]*)\)\.length$/);
+      if (
+        al && parenDepthNeverNegative(al[3]!) && !al[3]!.includes("=>") &&
+        (this.arrayVars.has(al[1]!) || this.isModuleGlobalArr(al[1]!))
+      ) {
+        const len = `(i32.load ${this.emitExpr(expr.slice(0, -".length".length), locals, "i32")})`;
+        return watBaseType(defaultType as WatType) === "f64" ? `(f64.convert_i32_s ${len})` : len;
+      }
+    }
+    // A field of a call's result: `c.bump().n`, `a.add(1).add(1).total` (ld104, 2026-10-23).
+    {
+      const crf = this.callResultField(expr, locals);
+      if (crf && crf.field.type !== "string" && !crf.field.tupleTypeName) {
+        const ptr = this.emitExpr(crf.call, locals, "i32");
+        const load = `(${memLoadOp(crf.field.type)} (i32.add ${ptr} (i32.const ${crf.field.offset})))`;
+        const have = watBaseType(crf.field.type), want = watBaseType(defaultType as WatType);
+        if (want === "f64" && have === "i32") return `(f64.convert_i32_s ${load})`;
+        return load;
+      }
+    }
+    {
+      // Through `this` and a class instance too (ld103, 2026-10-23: only a struct variable was).
       const saM = expr.match(/^(\w+)\.(\w+)\.length$/);
-      if (saM) {
-        const sv = this.structVars.get(saM[1]);
-        const fld = sv?.def.fields.find((f) => f.name === saM[2]);
-        if (sv && fld && fld.arrayElemType !== undefined) {
-          const base = sv.ptr === -1 ? `(local.get $${saM[1]})` : `(i32.const ${sv.ptr})`;
-          const fieldPtr = `(i32.load (i32.add ${base} (i32.const ${fld.offset})))`;
-          const lenWat = `(i32.load ${fieldPtr})`; // length at offset 0 of the array header
-          // `.length` is i32; coerce to f64 when the context (e.g. a `number` loop var comparison) wants it.
-          return watBaseType(defaultType as WatType) === "f64"
-            ? `(f64.convert_i32_s ${lenWat})`
-            : lenWat;
-        }
+      const sa = saM ? this.arrayFieldRef(saM[1], saM[2], locals) : null;
+      if (sa) {
+        const lenWat = `(i32.load (i32.load ${sa.slot}))`; // length at offset 0 of the array header
+        // `.length` is i32; coerce to f64 when the context (e.g. a `number` loop var comparison) wants it.
+        return watBaseType(defaultType as WatType) === "f64" ? `(f64.convert_i32_s ${lenWat})` : lenWat;
       }
       const siM = expr.match(/^(\w+)\.(\w+)\[([^\]]+)\]$/);
-      if (siM) {
-        const sv = this.structVars.get(siM[1]);
-        const fld = sv?.def.fields.find((f) => f.name === siM[2]);
-        if (sv && fld && fld.arrayElemType !== undefined && !fld.arrayIsString) {
-          const base = sv.ptr === -1 ? `(local.get $${siM[1]})` : `(i32.const ${sv.ptr})`;
-          const fieldPtr = `(i32.load (i32.add ${base} (i32.const ${fld.offset})))`;
-          const idxWat = this.emitArrayIndex(siM[3], locals);
-          const shift = (fld.arrayElemType === "f64" || fld.arrayElemType === "i64") ? 3 : 2;
-          const loadOp = memLoadOp(fld.arrayElemType);
-          return `(${loadOp} (i32.add (i32.add ${fieldPtr} (i32.const 8)) (i32.shl ${idxWat} (i32.const ${shift}))))`;
-        }
+      const si = siM ? this.arrayFieldRef(siM[1], siM[2], locals) : null;
+      if (siM && si && !si.isStr) {
+        const idxWat = this.emitArrayIndex(siM[3], locals);
+        const shift = (si.elem === "f64" || si.elem === "i64") ? 3 : 2;
+        const loadOp = memLoadOp(si.elem);
+        return `(${loadOp} (i32.add (i32.add (i32.load ${si.slot}) (i32.const 8)) (i32.shl ${idxWat} (i32.const ${shift}))))`;
       }
     }
 
@@ -15875,6 +16032,46 @@ ${prefixed}
       }
     }
 
+    // An ARRAY FIELD's push / pop / shift / unshift, statement form: `this.items.push(x)`,
+    // `b.items.push(x)`, `bx.vals.push(x)` (ld103, 2026-10-23: "Unsupported statement"). The field
+    // holds the array pointer; a push may reallocate, so the new pointer is stored back.
+    {
+      const fa = line.match(/^(\w+)\.(\w+)\.(push|pop|shift|unshift)\s*\(([\s\S]*)\)\s*;?$/);
+      const ref = fa && parenDepthNeverNegative(fa[4]!) ? this.arrayFieldRef(fa[1]!, fa[2]!, locals) : null;
+      if (fa && ref) {
+        const method = fa[3]!, argsStr = fa[4]!.trim();
+        const arr = `(i32.load ${ref.slot})`;
+        if (method === "pop" || method === "shift") {
+          if (ref.isStr) {
+            this.diagnostics.push(
+              `'${line.trim()}': ${method}() of a string array FIELD is not supported yet; copy the ` +
+                `field into a local array first`,
+            );
+            return "";
+          }
+          // the non-trapping variant: an empty array's discarded pop / shift does nothing (ld48)
+          this.dynArrHelpers.add(`${method}n_${ref.elem}`);
+          this.needsNullableResultFlag = true;
+          return `(drop (call $__dynarr_${method}n_${ref.elem} ${arr}))`;
+        }
+        if (ref.isStr) {
+          this.dynArrHelpers.add("push_string"); // the string grow helper's trigger
+          this.dynArrHelpers.add(`${method}_string`);
+          const simple = this.quietEmit(() => this.emitStringPtrLen(argsStr, locals));
+          if (simple !== "(i32.const 0) (i32.const 0)" || argsStr === '""' || argsStr === "''") {
+            const [p, l] = splitTwoWatExprs(simple);
+            return `(i32.store ${ref.slot} (call $__dynarr_${method}_string ${arr} ${p} ${l}))`;
+          }
+          const init = this.emitStringAssign("__str_push", argsStr, locals);
+          return `${init}\n      (i32.store ${ref.slot} (call $__dynarr_${method}_string ${arr} ` +
+            `(local.get $__str_push_ptr) (local.get $__str_push_len)))`;
+        }
+        this.dynArrHelpers.add(`${method}_${ref.elem}`);
+        const valWat = this.emitExpr(argsStr, locals, ref.elem);
+        return `(i32.store ${ref.slot} (call $__dynarr_${method}_${ref.elem} ${arr} ${valWat}))`;
+      }
+    }
+
     // Dynamic array methods: arr.push(val), arr.pop(), arr.shift(), arr.unshift(val), arr.splice(i,n) — statement form
     const dynArrStmt = line.match(/^(\w+)\.(push|pop|shift|unshift|splice)\s*\((.*?)\)\s*;?$/);
     if (dynArrStmt) {
@@ -15967,11 +16164,14 @@ ${prefixed}
 
         // push/unshift on string arrays — need 3-param helper (arr, ptr, len)
         if ((method === "push" || method === "unshift") && isStrArr) {
-          this.dynArrHelpers.add("push_string");
+          // unshift has its own helper; both called push_string, so unshift APPENDED (sw130)
+          const strKey = `${method}_string`;
+          this.dynArrHelpers.add(strKey);
+          if (method === "unshift") this.dynArrHelpers.add("push_string"); // its grow helper's trigger
           const simpleResult = this.quietEmit(() => this.emitStringPtrLen(argsStr, locals));
           if (simpleResult !== "(i32.const 0) (i32.const 0)") {
             const [ptrWat, lenWat] = splitTwoWatExprs(simpleResult);
-            const callExpr = `(call $__dynarr_push_string ${getExpr} ${ptrWat} ${lenWat})`;
+            const callExpr = `(call $__dynarr_${strKey} ${getExpr} ${ptrWat} ${lenWat})`;
             return isGlobalArr
               ? `(global.set $${arrName} ${callExpr})`
               : `(local.set $${arrName} ${callExpr})`;
@@ -15979,7 +16179,7 @@ ${prefixed}
           // Complex arg (e.g. template literal) — use temp locals
           const initStr = this.emitStringAssign("__str_push", argsStr, locals);
           const callExpr =
-            `(call $__dynarr_push_string ${getExpr} (local.get $__str_push_ptr) (local.get $__str_push_len))`;
+            `(call $__dynarr_${strKey} ${getExpr} (local.get $__str_push_ptr) (local.get $__str_push_len))`;
           const setExpr = isGlobalArr
             ? `(global.set $${arrName} ${callExpr})`
             : `(local.set $${arrName} ${callExpr})`;
@@ -16021,8 +16221,14 @@ ${prefixed}
         }
         return `(drop (call ${helperName} ${getExpr}))`;
       }
-      // Phase 12: fallback — arr is an i32 local (dynamic array pointer captured from outer scope)
-      if (method === "push" && locals.get(arrName) === "i32") {
+      // Phase 12: fallback — arr is an i32 local (dynamic array pointer captured from outer scope).
+      // NOT a class or struct instance, whose pointer is an i32 local too: `s.push(7)` on a class
+      // with its own `push` method was compiled as an ARRAY push onto the object's memory, printing
+      // `0 0` for Deno's `9 2` with exit 0 (sw129, 2026-10-23). Those reach the method-call handler.
+      if (
+        method === "push" && locals.get(arrName) === "i32" && !this.classVars.has(arrName) &&
+        !this.structVars.has(arrName)
+      ) {
         this.dynArrHelpers.add("push_i32");
         const valWat = this.emitExpr(argsStr, locals, "i32");
         return `(local.set $${arrName} (call $__dynarr_push_i32 (local.get $${arrName}) ${valWat}))`;
@@ -16881,6 +17087,15 @@ ${prefixed}
         if (this.quietStringFailures > qsfMark) return undefined;
         if (result === "(unreachable)" || result.startsWith("(;?")) return undefined;
         // Determine return type from the expression
+        // A field of a call's result, `c.bump().on`: the FIELD's type, not the method's (whose
+        // result is the object): a boolean printed `1`, an f64 built an invalid module (ld104)
+        {
+          const crf = this.callResultField(token, locals);
+          if (crf && crf.field.type !== "string") {
+            const ft = crf.field.type;
+            return { type: ft as string, wat: this.emitExpr(token, locals, watBaseType(ft) as WatType) };
+          }
+        }
         // Phase 47: arr[idx].method(args) — resolve the element class's method return type
         // so console.log formats the result correctly (emitExpr already does vtable dispatch).
         const amc = token.match(/^(\w+)\[([^\]]*)\]\.(\w+)\s*\(/);
@@ -17059,7 +17274,9 @@ ${prefixed}
           const have = this.watResultType(wat, l);
           if (have === "f64" || have === "i64") return { wat, type: have };
         }
-        return { wat, type: bt };
+        // a boolean is reported as one (widening reads it as an i32), so a console argument the
+        // fallback types prints `false`, not `0` (ld104's `c.bump().on`, 2026-10-23)
+        return { wat, type: t === "bool" ? "bool" : bt };
       });
       setStringExprResolver((tok, locs) => {
         const w = this.quietEmit(() => this.emitStringPtrLen(tok, locs as Map<string, WatType>));
@@ -17382,6 +17599,15 @@ ${prefixed}
         // (sw08): reject it so the console path reports the argument instead of printing 0.
         if (this.quietStringFailures > qsfMark) return undefined;
         if (result === "(unreachable)" || result.startsWith("(;?")) return undefined;
+        // A field of a call's result, `c.bump().on`: the FIELD's type, not the method's (whose
+        // result is the object): a boolean printed `1`, an f64 built an invalid module (ld104)
+        {
+          const crf = this.callResultField(token, locals);
+          if (crf && crf.field.type !== "string") {
+            const ft = crf.field.type;
+            return { type: ft as string, wat: this.emitExpr(token, locals, watBaseType(ft) as WatType) };
+          }
+        }
         // Phase 47: arr[idx].method(args) — resolve the element class's method return type
         // so console.log formats the result correctly (emitExpr already does vtable dispatch).
         const amc = token.match(/^(\w+)\[([^\]]*)\]\.(\w+)\s*\(/);
@@ -17554,7 +17780,9 @@ ${prefixed}
           const have = this.watResultType(wat, l);
           if (have === "f64" || have === "i64") return { wat, type: have };
         }
-        return { wat, type: bt };
+        // a boolean is reported as one (widening reads it as an i32), so a console argument the
+        // fallback types prints `false`, not `0` (ld104's `c.bump().on`, 2026-10-23)
+        return { wat, type: t === "bool" ? "bool" : bt };
       });
       setStringExprResolver((tok, locs) => {
         const w = this.quietEmit(() => this.emitStringPtrLen(tok, locs as Map<string, WatType>));
@@ -18005,6 +18233,9 @@ ${prefixed}
           const superArgs = rawSuperArgs ? this.splitArgs(rawSuperArgs) : [];
           const emittedSuperArgs = superArgs.flatMap((a, i) => {
             const pt = parentCtorFn.params[i + 1]?.type ?? ("i32" as WatType);
+            // a string argument is its (ptr, len) pair, as in the `new` and method-call sites
+            // (ld101); one word was an invalid module, `super(name)` (found 2026-10-23, with sw132)
+            if (pt === "string") return [this.emitStringPtrLen(a, locals)];
             return [this.emitExpr(a, locals, pt)];
           });
           return `(call $${parentName}_constructor (local.get $__self) ${
@@ -20910,7 +21141,7 @@ ${sum}
     (local.get $val)
   )`,
         );
-      } else if (method === "unshift") {
+      } else if (method === "unshift" && key !== "unshift_string") {
         parts.push(
           `  ;; Dynamic array unshift_${elemType}: grow if full, insert val at front, shift elements right, return new arr ptr.
   (func ${name} (param $arr i32) (param $val ${valType}) (result i32)
@@ -21694,6 +21925,35 @@ ${sum}
     (i32.store (local.get $base) (local.get $ptr))
     (i32.store offset=4 (local.get $base) (local.get $len))
     (i32.store (local.get $arr) (i32.add (local.get $elemLen) (i32.const 1)))
+    (local.get $arr)
+  )`,
+        );
+      } else if (key === "unshift_string") {
+        // A string array's unshift: the (ptr, len) pairs move right one slot (8 bytes, copied
+        // through f64 bit-identically) and the new pair goes in slot 0. Both string unshift paths
+        // called push_string, so `ws.unshift("a")` APPENDED (sw130, 2026-10-23).
+        parts.push(
+          `  ;; Dynamic string array unshift_string: grow if full, move every pair right, store (ptr,len) first.
+  (func $__dynarr_unshift_string (param $arr i32) (param $ptr i32) (param $len i32) (result i32)
+    (local $n i32)
+    (local $cap i32)
+    (local $i i32)
+    (local.set $n (i32.load (local.get $arr)))
+    (local.set $cap (i32.load offset=4 (local.get $arr)))
+    (if (i32.ge_u (local.get $n) (local.get $cap))
+      (then
+        (local.set $arr (call $__dynarr_grow_string (local.get $arr) (select (i32.const 8) (i32.shl (local.get $cap) (i32.const 1)) (i32.eqz (local.get $cap)))))))
+    (local.set $i (local.get $n))
+    (block $brk
+      (loop $lp
+        (br_if $brk (i32.eqz (local.get $i)))
+        (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+        (f64.store (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (i32.add (local.get $i) (i32.const 1)) (i32.const 3)))
+          (f64.load (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3)))))
+        (br $lp)))
+    (i32.store offset=8 (local.get $arr) (local.get $ptr))
+    (i32.store offset=12 (local.get $arr) (local.get $len))
+    (i32.store (local.get $arr) (i32.add (local.get $n) (i32.const 1)))
     (local.get $arr)
   )`,
         );

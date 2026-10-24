@@ -2201,6 +2201,25 @@ function parseSingleArg(
       }
     }
   }
+  // An ARRAY FIELD's element, `b.vals[0]`, and a FIELD OF A CALL'S RESULT, `c.bump().w`, are typed
+  // by wasic, which knows the field: by the lead they were the pointer's i32, so an f64 was refused
+  // or built an invalid module, and a boolean would print `1` (ld103, ld104, 2026-10-23).
+  if (
+    _exprFallbackResolver &&
+    (/^\w+\.\w+\s*\[[^\[\]]+\]$/.test(token) || /^[\w.]+\s*\([\s\S]*\)\s*\.\s*\w+$/.test(token))
+  ) {
+    const r = _exprFallbackResolver(token, locals);
+    if (r) {
+      const kind = r.type === "f64" || r.type === "f32"
+        ? "f64expr" as const
+        : r.type === "i64"
+        ? "i64expr" as const
+        : r.type === "bool"
+        ? "boolexpr" as const
+        : "i32expr" as const;
+      return [{ kind, wat: r.wat }];
+    }
+  }
   // Infer i64 / i32 / f64 from the leading identifier's declared type. For a compound expression
   // led by an ARRAY variable (e.g. `arr[0] + arr[1]`), `locals.get(arr)` is the i32 POINTER type, not
   // the element type — so consult arrayLookup and route by the ELEMENT type (an f64[] element sum is
