@@ -268,6 +268,7 @@ export async function runWasmBundle(
   const funcParts: string[] = [];
   const globalParts: string[] = [];
   const dataParts: string[] = [];
+  const importParts: string[] = [];
   const exportDeclParts: string[] = [];
   const allWasiNames = new Set<string>();
   const allNotices: string[] = [];
@@ -292,6 +293,9 @@ export async function runWasmBundle(
 
     const result = mergeWasmWat(mod.wat, mod.prefix, dataOffset, overrides);
 
+    // A module's non-WASI imports (a host function): dropped until 2026-10-23, so its call sites
+    // named an undefined function (the 2026-06-24 wasmmerge fix's follow-up).
+    if (result.importWat) importParts.push(result.importWat);
     if (result.funcWat) funcParts.push(result.funcWat);
     if (result.globalWat) globalParts.push(result.globalWat);
     if (result.dataWat) dataParts.push(result.dataWat);
@@ -353,6 +357,7 @@ export async function runWasmBundle(
   // WAT spec: imports must precede all non-import definitions (memory, funcs, etc.)
   const watParts: string[] = ["(module"];
   if (wasiDecls.length > 0) watParts.push(wasiDecls.join("\n"));
+  if (importParts.length > 0) watParts.push("  " + importParts.join("\n  "));
   watParts.push(`  (memory ${pagesNeeded})`);
   if (sharedAllocatorParts.length > 0) watParts.push(sharedAllocatorParts.join("\n"));
   if (funcParts.length > 0) watParts.push("  " + funcParts.join("\n  "));
