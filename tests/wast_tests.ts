@@ -223,6 +223,7 @@ if (Deno.args[0] === "--run-one") {
       modulesFailed: r.modulesFailed,
       failures: r.failures,
       validatorRejectedValid: r.validatorRejectedValid,
+      validatorAcceptedInvalid: r.validatorAcceptedInvalid,
       lowered: r.lowered,
     }),
   );
@@ -352,6 +353,21 @@ try {
 const names = Object.keys(baseline).sort();
 let totalPass = 0, totalFail = 0, totalSkip = 0, badFiles = 0;
 let loweredModules = 0, loweredPasses = 0; // custom-page-sizes lowering, reported apart
+let totalAccepted = 0; // spec-invalid modules binaryang's validator accepted (all pinned)
+/**
+ * Spec-INVALID modules binaryang's validator ACCEPTS, per file, each with its cause (2026-10-23).
+ * Measured on 1.15.0 over the whole corpus under each file's features; the multi-memory and
+ * custom-descriptors feature-set differences are excluded in `src/wast.ts`, so what is listed here
+ * is a binaryang defect, reported. V8 rejects these modules, so they still PASS as `assert_invalid`;
+ * what they block is trusting binaryang's VALID verdict (the size-capped definitions).
+ */
+const KNOWN_ACCEPTED_INVALID: Record<string, { count: number; cause: string }> = {
+  "legacy/try_delegate.wast": {
+    count: 1,
+    cause: "binaryang 1.15.0 does not check a legacy `delegate`'s label depth (`delegate 1` " +
+      "directly in a function is accepted; the spec and V8: unknown label). Reported 2026-10-23.",
+  },
+};
 const drifted: string[] = [];
 
 for (const rel of names) {
@@ -363,6 +379,7 @@ for (const rel of names) {
     modulesFailed: number;
     failures: string[];
     validatorRejectedValid: string[];
+    validatorAcceptedInvalid: string[];
     lowered: { modules: number; passes: number };
   };
   try {
@@ -429,6 +446,18 @@ for (const rel of names) {
     drift.push(`binaryang's validator rejected ${r.validatorRejectedValid.length} VALID module(s)`);
     r.failures = [...r.validatorRejectedValid, ...r.failures];
   }
+  // The mirror measurement (2026-10-23): spec-INVALID modules binaryang's validator accepts. While
+  // any stand, binaryang cannot be trusted to call a module VALID, so the `(module definition …)`s
+  // V8 refuses for its own size caps stay engine skips. Each known one is pinned per file with its
+  // cause; a new one, or a pinned count that moves, is drift.
+  const acceptedWant = KNOWN_ACCEPTED_INVALID[rel]?.count ?? 0;
+  if (r.validatorAcceptedInvalid.length !== acceptedWant) {
+    drift.push(
+      `binaryang's validator accepted ${acceptedWant} → ${r.validatorAcceptedInvalid.length} INVALID module(s)`,
+    );
+    r.failures = [...r.validatorAcceptedInvalid, ...r.failures];
+  }
+  totalAccepted += r.validatorAcceptedInvalid.length;
 
   if (drift.length > 0) {
     // Any movement is a hard fail, in either direction: a regression must not pass, and an
@@ -470,6 +499,14 @@ if (loweredModules > 0) {
     dim(
       `  of which ${loweredPasses} passed on ${loweredModules} module(s) lowered for custom page ` +
         `sizes (V8 does not implement the proposal; binaryang's LowerCustomPageSizes)`,
+    ),
+  );
+}
+if (totalAccepted > 0) {
+  console.log(
+    dim(
+      `  ${totalAccepted} spec-invalid module(s) binaryang's validator accepts, all pinned ` +
+        `(KNOWN_ACCEPTED_INVALID); V8 rejects them, so they pass`,
     ),
   );
 }
