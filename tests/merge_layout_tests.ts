@@ -10,6 +10,8 @@
  *   ld81   `wasmbundle` made a 1-page bundle of a library whose cursor sat at 131072 (2026-10-22).
  *   ld84   the bundler handled neither `export class` nor `export { name }` (2026-10-22).
  *   ld85   two imports with one basename collided (`duplicate func $util_add`, 2026-10-22).
+ *   2026-06-24 follow-up (closed 2026-10-23): `wasmbundle` dropped a module's NON-WASI import
+ *          (`mergeWasmWat`'s `importWat`), so a library calling a host function did not bundle.
  *
  * Runs the INSTALLED wasmtk in a temp directory. Usage: deno run -A tests/merge_layout_tests.ts
  */
@@ -45,6 +47,10 @@ const FILES: Record<string, string> = {
   "stk.wat": `(module (memory 3) (global $sp (mut i32) (i32.const 131072))\n` +
     `  (func $put (param $v i32) (result i32) (i32.store (global.get $sp) (local.get $v)) (i32.load (global.get $sp)))\n` +
     `  (export "memory" (memory 0)) (export "put" (func $put)))\n`,
+  // a library that calls a HOST function (a non-WASI import), bundled with an ordinary one
+  "hostlib.wat": `(module (import "env" "twice" (func $twice (param i32) (result i32))) (memory 1)\n` +
+    `  (func $calc (param $x i32) (result i32) (i32.add (call $twice (local.get $x)) (i32.const 1)))\n` +
+    `  (export "calc" (func $calc)) (export "memory" (memory 0)))\n`,
   // ld85: two imports with one basename
   "a/util.ts": `type i32 = number;\nexport function add(a: i32, b: i32): i32 {\n  return a + b;\n}\n`,
   "b/util.ts": `type i32 = number;\nexport function add(a: i32, b: i32): i32 {\n  return a * 10 + b;\n}\n`,
@@ -83,7 +89,7 @@ try {
     if (f.includes("/")) await Deno.mkdir(join(dir, f.slice(0, f.lastIndexOf("/"))), { recursive: true });
     await Deno.writeTextFile(join(dir, f), body);
   }
-  for (const w of ["dlib", "elib", "plib2", "stk"]) await step(["convert", `${w}.wat`], dir);
+  for (const w of ["dlib", "elib", "plib2", "stk", "hostlib"]) await step(["convert", `${w}.wat`], dir);
 
   console.log("── merged and bundled modules keep their own data (sw109, sw110, ld86) ──");
   await step(["wasmbundle", "dlib.wasm", "elib.wasm", "-o", "de.wasm"], dir);
@@ -97,6 +103,28 @@ try {
   await expectOut("wasmbundle: a `(` inside a data string (ld86)", ["mod", "p2b.wasm", "get"], dir, "40");
   await step(["wasmbundle", "stk.wasm", "-o", "stkb.wasm"], dir);
   await expectOut("wasmbundle: a module's memory and its cursor at 131072 (ld81)", ["mod", "stkb.wasm", "put", "7"], dir, "7");
+  // A non-WASI import survives the bundle, before every function, so the index space holds: the
+  // host's `twice` is called, and the other library's function is still its own.
+  {
+    const name = "wasmbundle: a library's host import is kept and called";
+    const r = await wasmtk(["wasmbundle", "hostlib.wasm", "dlib.wasm", "-o", "hb.wasm"], dir);
+    let got = `exit ${r.code}: ${r.out.trim().split("\n").slice(-2).join(" | ")}`;
+    if (r.code === 0) {
+      const mod = new WebAssembly.Module(await Deno.readFile(join(dir, "hb.wasm")));
+      const imports = WebAssembly.Module.imports(mod).map((i) => `${i.module}.${i.name}`);
+      const inst = new WebAssembly.Instance(mod, { env: { twice: (x: number) => x * 2 } });
+      const ex = inst.exports as Record<string, (n: number) => number>;
+      got = `imports ${imports.join(",")} calc(5)=${ex.calc(5)} getb(40)=${ex.getb(40)}`;
+    }
+    const want = "imports env.twice calc(5)=11 getb(40)=79";
+    if (got === want) {
+      passed++;
+      console.log(`  ✓ ${name}`);
+    } else {
+      failed++;
+      console.log(`  ✗ ${name}: got "${got}", want "${want}"`);
+    }
+  }
 
   // sw112: the same top-level value name in two files is refused (it was silently ONE name)
   const r = await wasmtk(["wasic", "entry2.ts", "-o", "entry2.wasm"], dir);

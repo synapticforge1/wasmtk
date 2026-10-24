@@ -2383,7 +2383,7 @@ literal now compiles correctly.
 
 ## FIXED — wasmmerge placed a merged module's non-WASI import AFTER function definitions (#14 Phase 2, 2026-06-24)
 
-**Class:** LOUD · **Status:** PARTIAL — fixed 2026-06-24 in `wasmmerge`; `wasmbundle` still does not route `importWat` (documented follow-up; RE-VERIFIED STILL OPEN 2026-09-30: `src/wasmbundle.ts` never reads `importWat`) · **Scope:** other
+**Class:** LOUD · **Status:** FIXED — 2026-06-24 in `wasmmerge`; **`wasmbundle` 2026-10-23**: it now collects each module's `importWat` and writes it after the WASI imports, before memory and every function (it had failed to compile, `undefined func "$hostlib_twice"`, measured before the fix). Test: `merge_layout_tests` "a library's host import is kept and called" (the bundle imports `env.twice`, `calc(5)` = 11 with a host `twice`, and the other library's `getb(40)` = 79, so the index space holds) · **Scope:** other
 
 Surfaced building #14 Phase 2 (host→core callbacks): the dynrt lib gained ONE `env.__host_call` import
 (its first import). Adding it broke `18l` (explicit-path dynrt merge) with a runtime "memory access out
