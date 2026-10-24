@@ -47,7 +47,7 @@ pin."* The premature `-Oz` skip removal on 2026-08-25 is what that sentence is p
 `git config --global --add safe.directory <abs-path-to>/upstream/binaryang`. The symptom is a silent
 `unknown` where `upstream:link` should print the checkout revision.
 
-## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, and 1.13.0 → 1.15.0)
+## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, 1.13.0 → 1.15.0, and 1.15.0 → 1.16.1)
 
 (1.13.0, 2026-10-20, and 1.15.0, 2026-10-23: an optimizer release moves PIPELINE goldens that merge
 a `-Oz` library, 43 of them both times, only in the merged library's functions; check that no
