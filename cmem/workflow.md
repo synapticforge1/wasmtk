@@ -270,7 +270,11 @@ git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
 #    tag with the symbols that set it, and refuses a kind below it. `deno task api-surface --floor`
 #    previews it. A compatible change the diff calls CHANGED can be reviewed:
 #    `deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>` (committed).
-#    If api-surface.ts or bump.ts changed: `bun scripts/check_compat_gate.ts`.
+#    If api-surface.ts or bump.ts changed: `bun scripts/check_compat_gate.ts` (19 cases, 2026-10-23).
+#    Rule 4: a removal needs a release that DEPRECATED it first (a `@deprecated` doc tag on its own
+#    line); bump refuses an undeprecated removal at any kind. CI repeats the gate on the tag
+#    (publish.yml → `deno run -A scripts/api-surface.ts --verify-tag <tag>`), so a hand-pushed tag
+#    below the floor, or one whose deno.json is not the tag, fails before `deno publish`.
 #    Before a PATCH or MINOR bump (Rule 3, H6.5a): `bun scripts/check_prev_tests.ts`
 #    (~25–30 min; the last tag's tests/ against today's src/ in a fresh clone). Classify every red
 #    suite: regression (fix first) / intended surface change (raises the floor) / improvement.

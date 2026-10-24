@@ -15,6 +15,8 @@
  *      review; a review cannot excuse a removal
  *   C  against a tag on a KNOWN surface: no change → patch; an export removed → patch refused,
  *      major floor, the symbol named; an export added → minor floor
+ *   F  Rule 4: a removal without a deprecation release is refused at any kind; after a release
+ *      that deprecated it, allowed; CI's `--verify-tag` passes a major tag and refuses a minor one
  *
  * Usage (from the repo root):  bun scripts/check_compat_gate.ts
  */
@@ -44,7 +46,9 @@ const check = (name: string, ok: boolean, detail: string) => {
   if (!ok) bad++;
   console.log(
     `${ok ? "ok  " : "FAIL"} ${name}${
-      ok ? "" : `\n     ${detail.replace(/\n/g, "\n     ").slice(0, 900)}`
+      // the head and the END of the output: a refusal's reason is usually its last line
+      ok ? "" : `\n     ${(detail.length > 900 ? detail.slice(0, 300) + "\n…\n" + detail.slice(-600) : detail)
+        .replace(/\n/g, "\n     ")}`
     }`,
   );
 };
@@ -62,24 +66,24 @@ if (cl.code !== 0) throw new Error(`clone failed: ${cl.out}`);
 const v0 = await version();
 console.log(`clone at ${clone}, version ${v0}`);
 
-// A. Against the REAL last release (v2.0.3): the floor is MINOR once the committed reviews lower
-// runWast / runWastPath's CHANGED signatures (without them it is MAJOR; see D).
+// A. Against the REAL last release (v2.0.3): the floor is MAJOR (`./console_log`'s LogSegment and
+// ArrayLookup CHANGED; the owner, 2026-10-09: the next release is major). Until 2026-10-23 these
+// cases expected MINOR, and failed from 2026-10-09 on, unnoticed: the floor moved under them.
 let r = await bump("patch");
 check(
-  "A1 patch below a MINOR floor is refused, nothing written",
-  r.code !== 0 && await version() === v0 && /below the surface floor \(minor\)/.test(r.out),
+  "A1 patch below the MAJOR floor is refused, nothing written",
+  r.code !== 0 && await version() === v0 && /below the surface floor \(major\)/.test(r.out),
   r.out,
 );
 r = await bump("minor");
 check(
-  "A2 minor at the floor is allowed and written",
-  r.code === 0 && await version() === bumpOf(v0, "minor"),
+  "A2 minor below the MAJOR floor is refused, nothing written",
+  r.code !== 0 && await version() === v0 && /below the surface floor \(major\)/.test(r.out),
   r.out,
 );
-await reset();
 r = await bump("major");
 check(
-  "A3 major above the floor is allowed and written",
+  "A3 major at the floor is allowed and written",
   r.code === 0 && await version() === bumpOf(v0, "major"),
   r.out,
 );
@@ -147,11 +151,11 @@ await reset();
 // D. Reviewed changes (api-surface.review.json), against the real last release again.
 await run("git", ["tag", "-d", "v99.0.0"]);
 r = await surface("--floor");
+// (The whole floor is MAJOR for other symbols, see A; what is checked is each reviewed line.)
 check(
-  "D1 the committed reviews lower runWast / runWastPath: floor MINOR, each shown as REVIEWED",
-  /floor since v\d+\.\d+\.\d+.*MINOR/.test(r.out) &&
-    /runWast signature CHANGED — REVIEWED/.test(r.out) &&
-    /runWastPath signature CHANGED — REVIEWED/.test(r.out),
+  "D1 the committed reviews lower runWast / runWastPath to minor, each shown as REVIEWED",
+  /^\s*minor\s+\.\/wast runWast signature CHANGED — REVIEWED/m.test(r.out) &&
+    /^\s*minor\s+\.\/wast runWastPath signature CHANGED — REVIEWED/m.test(r.out),
   r.out,
 );
 // Change runWast's signature AGAIN (an added optional parameter), re-baseline: the review no longer
@@ -218,6 +222,67 @@ check(
 );
 await reset();
 await run("git", ["tag", "-d", "v99.0.0"]);
+
+// F. Rule 4 (deprecate before remove) and CI's `--verify-tag` (2026-10-23). Commits are made in
+// the clone only, under the noreply identity, and the clone is deleted.
+const commit = (msg: string) =>
+  run("git", [
+    "-c", "user.email=81428316+jrmarcum@users.noreply.github.com", "-c", "user.name=gate",
+    "commit", "--quiet", "-am", msg,
+  ]);
+await run("git", ["tag", "v99.0.0"]);
+await writeFile(wast, unexported);
+await surface("--record");
+r = await bump("major");
+check(
+  "F1 an export removed WITHOUT a deprecation release is refused, even for major",
+  r.code !== 0 && await version() === v0 && /never deprecated \(Rule 4\)/.test(r.out) &&
+    /Rule 4: \.\/wast isList is removed/.test(r.out),
+  r.out,
+);
+await reset();
+await run("git", ["tag", "-d", "v99.0.0"]);
+// Deprecate isList, re-baseline, commit, and tag THAT as the release; then remove it.
+const deprecated = src.replace("export const isList =", "/**\n * @deprecated gate test\n */\nexport const isList =");
+if (deprecated === src) throw new Error("test edit did nothing: `export const isList =` not found");
+await writeFile(wast, deprecated);
+await surface("--record");
+await commit("gate test: deprecate isList");
+await run("git", ["tag", "v99.0.0"]);
+await writeFile(wast, unexported);
+await surface("--record");
+r = await bump("major");
+check(
+  "F2 an export deprecated in the last release may be removed (major)",
+  r.code === 0 && await version() === bumpOf(v0, "major"),
+  r.out,
+);
+await run("git", ["reset", "--quiet", "--hard", "HEAD~1"]);
+await run("git", ["tag", "-d", "v99.0.0"]);
+// --verify-tag: a major made by `bump` passes; a minor written BY HAND (bump would refuse it: the
+// case CI exists for, a tag pushed without the local gate) is refused below the floor.
+for (const [k, pass] of [["major", true], ["minor", false]] as const) {
+  if (pass) await bump(k);
+  else {
+    const dj = await readFile(`${clone}/deno.json`, "utf8");
+    const set = dj.replace(/("version"\s*:\s*)"\d+\.\d+\.\d+"/, `$1"${bumpOf(v0, k)}"`);
+    if (set === dj) throw new Error("test edit did nothing: deno.json's version not found");
+    await writeFile(`${clone}/deno.json`, set);
+  }
+  await commit(`gate test: ${k}`);
+  const tag = `v${bumpOf(v0, k)}`;
+  await run("git", ["tag", tag]);
+  r = await surface("--verify-tag", tag);
+  check(
+    `F${pass ? 3 : 4} --verify-tag ${tag} ${pass ? "passes" : "is refused, below the floor"}`,
+    pass
+      ? r.code === 0 && /compatibility gate holds/.test(r.out)
+      : r.code !== 0 && /below the surface floor \(major\)/.test(r.out),
+    r.out,
+  );
+  await run("git", ["tag", "-d", tag]);
+  await run("git", ["reset", "--quiet", "--hard", "HEAD~1"]);
+}
 
 function bumpOf(v: string, k: string): string {
   const [a, b, c] = v.split(".").map(Number) as [number, number, number];
