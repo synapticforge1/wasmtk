@@ -643,23 +643,76 @@ function rewriteOutsideStringsAndComments(
  * comment), or -1. The arrow-lifting pass uses this so a `=>` inside a string literal — e.g. a dynrt
  * driver passing `"(x) => x+1"` as eval source — is NOT mistaken for a real arrow function.
  */
+/** The index of the backtick that CLOSES the template literal opening at `s[open]`, its `${…}`
+ *  holes (with their own strings, braces and nested templates) skipped; `s.length - 1` when it
+ *  does not close. */
+function skipTemplateLiteral(s: string, open: number): number {
+  for (let i = open + 1; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\") {
+      i++;
+      continue;
+    }
+    if (c === "`") return i;
+    if (c === "$" && s[i + 1] === "{") {
+      let depth = 0;
+      for (i += 2; i < s.length; i++) {
+        const h = s[i];
+        if (h === "`") i = skipTemplateLiteral(s, i);
+        else if (h === '"' || h === "'") {
+          for (i++; i < s.length && s[i] !== h; i++) if (s[i] === "\\") i++;
+        } else if (h === "{") depth++;
+        else if (h === "}") {
+          if (depth === 0) break;
+          depth--;
+        }
+      }
+    }
+  }
+  return s.length - 1;
+}
+
 function firstCodeArrowIdx(line: string): number {
+  // A template's `${…}` holes are CODE: an arrow there was never found, so it was never lifted
+  // (`${xs.filter((x) => x > 2).length}`, ld107, 2026-10-23). The stack holds each open context:
+  // "`" a template's text, a number a hole's brace depth; a string literal is `q`.
+  const stack: ("`" | number)[] = [];
   let q = "";
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
+    const top = stack[stack.length - 1];
     if (q) {
-      if (c === "\\") {
-        i++;
-        continue;
-      }
-      if (c === q) q = "";
+      if (c === "\\") i++;
+      else if (c === q) q = "";
       continue;
     }
-    if (c === '"' || c === "'" || c === "`") {
+    if (top === "`") {
+      if (c === "\\") i++;
+      else if (c === "`") stack.pop();
+      else if (c === "$" && line[i + 1] === "{") {
+        stack.push(0);
+        i++;
+      }
+      continue;
+    }
+    // code: the line itself, or a hole
+    if (c === '"' || c === "'") {
       q = c;
       continue;
     }
-    if (c === "/" && line[i + 1] === "/") return -1; // line comment — nothing past it counts
+    if (c === "`") {
+      stack.push("`");
+      continue;
+    }
+    if (typeof top === "number") {
+      if (c === "{") stack[stack.length - 1] = top + 1;
+      else if (c === "}") {
+        if (top === 0) stack.pop(); // the hole closes: back in the template's text
+        else stack[stack.length - 1] = top - 1;
+        continue;
+      }
+    }
+    if (c === "/" && line[i + 1] === "/" && stack.length === 0) return -1; // a line comment
     if (c === "=" && line[i + 1] === ">") return i;
   }
   return -1;
@@ -3284,9 +3337,16 @@ class WasicTranspiler {
     let depth = 0, start = 0;
     for (let i = 0; i < inner.length; i++) {
       const ch = inner[i];
-      // Skip over string / char / template literals so a `;`, `{`, or `}` inside
+      // A template literal, holes and nested templates included: skipped to its own closing
+      // backtick. Skipped to the NEXT backtick, `\`r${\`q${who}\`}\`` ended at the inner one and its
+      // hole's `}` split the statement (ld111, 2026-10-23).
+      if (ch === "`") {
+        i = skipTemplateLiteral(inner, i);
+        continue;
+      }
+      // Skip over string / char literals so a `;`, `{`, or `}` inside
       // them is never treated as a statement boundary.
-      if (ch === '"' || ch === "'" || ch === "`") {
+      if (ch === '"' || ch === "'") {
         const quote = ch;
         i++;
         while (i < inner.length && inner[i] !== quote) {
@@ -7125,6 +7185,37 @@ class WasicTranspiler {
     return field ? { call: m[1]!, field } : null;
   }
 
+  private faCounter = 0;
+  /** An array FIELD's other methods, `b.list.join("|")`, `this.items.indexOf(x)`, `…filter(f)…`
+   *  (ld108, 2026-10-23: refused): the field is loaded into a fresh alias, `$__fa_N`, registered as
+   *  a dynamic array, and the expression is rewritten onto it, so every array method the compiler
+   *  has works on a field too. `set` loads it; `slot` is where a statement stores it back (a
+   *  `splice` may move it). push / pop / shift / unshift have their own statement form. */
+  private arrayFieldAlias(
+    expr: string,
+    locals: Map<string, WatType>,
+  ): { set: string; rewritten: string; slot: string; alias: string } | null {
+    const m = expr.trim().match(/^(\w+)\.(\w+)\.(\w+)\s*\(/);
+    if (!m || ["push", "pop", "shift", "unshift"].includes(m[3]!)) return null;
+    const ref = this.arrayFieldRef(m[1]!, m[2]!, locals);
+    if (!ref) return null;
+    const alias = `__fa_${this.faCounter++}`;
+    this.arrayVars.set(alias, {
+      elemType: ref.elem,
+      ptr: -2,
+      length: 0,
+      dynamic: true,
+      isStringArr: ref.isStr,
+    });
+    locals.set(alias, "i32");
+    return {
+      set: `(local.set $${alias} (i32.load ${ref.slot}))`,
+      rewritten: alias + expr.trim().slice(m[1]!.length + 1 + m[2]!.length),
+      slot: ref.slot,
+      alias,
+    };
+  }
+
   /** An ARRAY-typed field of `this`, a class instance or a struct (local, global or static): the
    *  address of its pointer slot and its element type. `recv.items.length`, `recv.items[i]` and
    *  `recv.items.push(x)` were refused through `this` and through a class instance, and `push` was
@@ -8309,6 +8400,14 @@ class WasicTranspiler {
             emitTmplConcat(this.emitStringPtrLen(e, locals), "");
             continue;
           }
+          // A TEMPLATE in the hole, `${\`inner ${n}\`}` (ld111, 2026-10-23: "Unsupported
+          // expression"): built first into its own numbered pair, so it cannot overwrite the pair
+          // this template is being built into (which may itself be a temp).
+          if (e.startsWith("`") && e.endsWith("`")) {
+            const [nP, nL] = splitTwoWatExprs(this.emitStringArg(e, locals, `__str_nest_${this.strNestCounter++}`));
+            emitTmplConcat(nP, nL);
+            continue;
+          }
           const eType = this.inferExprType(e, locals);
           if (eType === "string") {
             if (/^\w+$/.test(e) && this.moduleStringConsts.has(e)) {
@@ -8376,7 +8475,7 @@ class WasicTranspiler {
                 const watArgs2 = argList2.flatMap((a, i) => {
                   const p = strFn2.params[i];
                   if (!p) return [this.emitExpr(a.trim(), locals, "i32")];
-                  if (p.type === "string") return [this.emitStringPtrLen(a.trim(), locals)];
+                  if (p.type === "string") return [this.emitStringArg(a, locals)];
                   return [this.emitExpr(a.trim(), locals, p.type)];
                 });
                 tmplStmts.push(
@@ -8497,7 +8596,7 @@ class WasicTranspiler {
           const argList = rawArgs ? this.splitArgs(rawArgs) : [];
           const emittedArgs = argList.flatMap((a, idx) => {
             const pt = (sig.params[idx] ?? "i32") as WatType;
-            if (pt === "string") return [this.emitStringPtrLen(a.trim(), locals)];
+            if (pt === "string") return [this.emitStringArg(a, locals)];
             return [this.emitExpr(a.trim(), locals, pt)];
           });
           let callWat: string;
@@ -8539,7 +8638,7 @@ class WasicTranspiler {
           const watArgs = argList.flatMap((a, i) => {
             const p = strFn.params[i];
             if (!p) return [this.emitExpr(a.trim(), locals, "i32")];
-            if (p.type === "string") return [this.emitStringPtrLen(a.trim(), locals)];
+            if (p.type === "string") return [this.emitStringArg(a, locals)];
             return [this.emitExpr(a.trim(), locals, p.type)];
           });
           const callWat = watArgs.length > 0
@@ -9198,7 +9297,7 @@ class WasicTranspiler {
             const watArgsCP = argListCP.flatMap((a, i) => {
               const p = fnCP.params[i];
               if (!p) return [this.emitExpr(a.trim(), locals, "i32")];
-              if (p.type === "string") return [this.emitStringPtrLen(a.trim(), locals)];
+              if (p.type === "string") return [this.emitStringArg(a, locals)];
               return [this.emitExpr(a.trim(), locals, p.type)];
             });
             stmts.push(
@@ -9478,11 +9577,15 @@ class WasicTranspiler {
         break;
       }
       if (start > i) parts.push({ kind: "text", value: inner.slice(i, start) });
-      // Find matching }
+      // Find the matching } — past a nested template or a string, whose braces do not count (ld111)
       let depth = 0, j = start + 2;
       while (j < inner.length) {
-        if (inner[j] === "{") depth++;
-        else if (inner[j] === "}") {
+        const h = inner[j];
+        if (h === "`") j = skipTemplateLiteral(inner, j);
+        else if (h === '"' || h === "'") {
+          for (j++; j < inner.length && inner[j] !== h; j++) if (inner[j] === "\\") j++;
+        } else if (h === "{") depth++;
+        else if (h === "}") {
           if (depth === 0) break;
           depth--;
         }
@@ -9666,6 +9769,32 @@ class WasicTranspiler {
     { // a field of a call's result (ld104): the field's own type
       const crf = this.callResultField(e, locals);
       if (crf) return crf.field.type;
+    }
+    { // an array field's other methods (ld108): the type of the same call on an array alias, so
+      // `b.items.includes(1)` is a boolean (by its lead it was an i32 and printed `1`)
+      const fm = e.match(/^(\w+)\.(\w+)\.(\w+)\s*\(/);
+      const ref = fm && !["push", "pop", "shift", "unshift"].includes(fm[3]!)
+        ? this.arrayFieldRef(fm[1]!, fm[2]!, locals)
+        : null;
+      if (fm && ref) {
+        const probe = "__fa_infer";
+        this.arrayVars.set(probe, { elemType: ref.elem, ptr: -2, length: 0, dynamic: true, isStringArr: ref.isStr });
+        const had = locals.has(probe);
+        locals.set(probe, "i32");
+        try {
+          return this.inferExprType(probe + e.slice(fm[1]!.length + 1 + fm[2]!.length), locals);
+        } finally {
+          this.arrayVars.delete(probe);
+          if (!had) locals.delete(probe);
+        }
+      }
+    }
+    { // an array's predicates are booleans: `xs.includes(1)`, `some`, `every` (2026-10-23, with
+      // ld108: through a field's alias `b.items.includes(1)` printed `1`)
+      const ap = e.match(/^(\w+)\.(includes|some|every)\s*\(([\s\S]*)\)$/);
+      if (ap && parenDepthNeverNegative(ap[3]!) && (this.arrayVars.has(ap[1]!) || this.isModuleGlobalArr(ap[1]!))) {
+        return "bool";
+      }
     }
     { // `.length` of an array method's new array (ld105): an i32, whatever the elements are
       const al = e.match(/^(\w+)\.(filter|map|slice|concat|reverse|sort|fill|flat|flatMap)\s*\(([\s\S]*)\)\.length$/);
@@ -9997,8 +10126,43 @@ ${prefixed}
     }
   }
 
+  /** A STRING argument as its (ptr, len) pair: what emitStringPtrLen reads directly, else a
+   *  template or concatenation built into the `$__str_arg` pair first (ld106, 2026-10-23:
+   *  `ns.add(\`${who}!\`)` / `ns.add(who + "?")` were "Unsupported string expression" at every
+   *  method, `new` and `super` site). The pointer is on the stack before the next argument is
+   *  built, so two such arguments in one call do not clash. */
+  private emitStringArg(a: string, locals: Map<string, WatType>, temp = "__str_arg"): string {
+    const t = a.trim();
+    const qsfMark = this.quietStringFailures;
+    const pl = this.quietEmit(() => this.emitStringPtrLen(t, locals));
+    if (
+      pl !== "(i32.const 0) (i32.const 0)" ||
+      ['""', "''", "``", "null", "undefined"].includes(t)
+    ) return pl;
+    // the quiet probe's failure is handled here, not a failure of the caller's result
+    this.quietStringFailures = qsfMark;
+    // not a string-building form: emitStringPtrLen's own diagnostic says what it is
+    if (!(t.startsWith("`") || this.isStringExpr(t, locals))) return this.emitStringPtrLen(t, locals);
+    return `(block (result i32) ${this.emitStringAssign(temp, t, locals)} ` +
+      `(local.get $${temp}_ptr)) (local.get $${temp}_len)`;
+  }
+  private strNestCounter = 0;
+
   private emitStringPtrLen(expr: string, locals: Map<string, WatType>): string {
     expr = expr.trim();
+    // An array field's string method, `b.list.join("|")` (ld108): through its alias. The alias is
+    // loaded in the pointer half, which runs before the length is read.
+    {
+      const fa = this.arrayFieldAlias(expr, locals);
+      if (fa) {
+        const pl = this.emitStringPtrLen(fa.rewritten, locals);
+        if (pl === "(i32.const 0) (i32.const 0)") return pl;
+        const [p, l] = splitTwoWatExprs(pl);
+        // one expression yielding the pair (a join helper's call): keep that shape, both values
+        if (!l?.trim()) return `(block (result i32 i32) ${fa.set} ${pl})`;
+        return `(block (result i32) ${fa.set} ${p}) ${l}`;
+      }
+    }
     // Number.prototype.toFixed(d), exact as JavaScript's ($__f64_to_fixed; ld38, 2026-10-22: it
     // was refused). The digits default to 0; outside 0..100 it traps (JavaScript: RangeError).
     {
@@ -10473,7 +10637,7 @@ ${prefixed}
         const watArgs = argList.flatMap((a, i) => {
           const p = strFn.params[i];
           if (!p) return [this.emitExpr(a.trim(), locals, "i32")];
-          if (p.type === "string") return [this.emitStringPtrLen(a.trim(), locals)];
+          if (p.type === "string") return [this.emitStringArg(a, locals)];
           return [this.emitExpr(a.trim(), locals, p.type)];
         });
         const callExpr = watArgs.length > 0
@@ -10493,7 +10657,7 @@ ${prefixed}
         const argList = mc.args.trim() ? this.splitArgs(mc.args.trim()) : [];
         const watArgs = argList.map((a, i) => {
           const p = strFn.params[i + 1];
-          return p?.type === "string" ? this.emitStringPtrLen(a.trim(), locals) : this.emitExpr(a.trim(), locals, p?.type ?? "i32");
+          return p?.type === "string" ? this.emitStringArg(a, locals) : this.emitExpr(a.trim(), locals, p?.type ?? "i32");
         });
         const recvWat = this.emitExpr(mc.receiver, locals, "i32");
         return `(call $${fnName} ${[recvWat, ...watArgs].join(" ")}) (global.get $__str_ret_ptr) (global.get $__str_ret_len)`;
@@ -11209,6 +11373,15 @@ ${prefixed}
       ) {
         const len = `(i32.load ${this.emitExpr(expr.slice(0, -".length".length), locals, "i32")})`;
         return watBaseType(defaultType as WatType) === "f64" ? `(f64.convert_i32_s ${len})` : len;
+      }
+    }
+    // An array field's other methods, `b.items.indexOf(3)`, `this.items.filter(f).length` (ld108)
+    {
+      const fa = this.arrayFieldAlias(expr, locals);
+      if (fa) {
+        const inner = this.emitExpr(fa.rewritten, locals, defaultType);
+        const t = this.watResultType(inner, locals) ?? watBaseType(defaultType as WatType);
+        return `(block (result ${t}) ${fa.set} ${inner})`;
       }
     }
     // A field of a call's result: `c.bump().n`, `a.add(1).add(1).total` (ld104, 2026-10-23).
@@ -12054,7 +12227,7 @@ ${prefixed}
           const args = argsStr ? this.splitArgs(argsStr) : [];
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? defaultType;
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
+            if (pt === "string") return [this.emitStringArg(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           return `(call $${funcName} (local.get $__self) ${emittedArgs.join(" ")})`.trim();
@@ -12599,7 +12772,7 @@ ${prefixed}
           const emittedArgs = args.flatMap((a, i) => {
             const pt = ctorFn.params[i + 1]?.type ?? ("i32" as WatType);
             // a string parameter takes the (ptr, len) pair: `new Item("hi", 7)` was refused (ld101)
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)];
+            if (pt === "string") return [this.emitStringArg(a, locals)];
             return [this.emitExpr(a, locals, pt)];
           });
           const ctorCall = `(call $${constructorName} (i32.const ${ptr}) ${emittedArgs.join(" ")})`
@@ -12696,7 +12869,7 @@ ${prefixed}
           const baseWat = cv.ptr < 0 ? `(local.get $${receiver})` : `(i32.const ${cv.ptr})`;
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? defaultType;
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
+            if (pt === "string") return [this.emitStringArg(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           return `(call $${funcName} ${baseWat} ${emittedArgs.join(" ")})`.trim();
@@ -12938,7 +13111,7 @@ ${prefixed}
           const typeName = this.getOrCreateFuncType(sig.params, sig.result);
           const emittedArgs = args.flatMap((a, idx) => {
             const pt = sig.params[idx] ?? defaultType;
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)];
+            if (pt === "string") return [this.emitStringArg(a, locals)];
             return [this.emitExpr(a, locals, pt)];
           });
           return `(call_indirect (type ${typeName}) ${
@@ -15580,7 +15753,7 @@ ${prefixed}
           const emittedArgs = args.flatMap((a, i) => {
             const pt = ctorFn.params[i + 1]?.type ?? ("i32" as WatType);
             // a string parameter takes the (ptr, len) pair: `new Item("hi", 7)` was refused (ld101)
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)];
+            if (pt === "string") return [this.emitStringArg(a, locals)];
             return [this.emitExpr(a, locals, pt)];
           });
           const ctorCall = `(call $${constructorName} (i32.const ${ptr}) ${emittedArgs.join(" ")})`
@@ -16032,6 +16205,16 @@ ${prefixed}
       }
     }
 
+    // An array FIELD's other methods as a statement, `this.items.sort()`, `b.items.splice(1, 1)`,
+    // `b.items.forEach(f)` (ld108): through the alias, then the pointer is stored back (a splice
+    // that inserts may move the array).
+    if (/^\w+\.\w+\.\w+\s*\([\s\S]*\)\s*;?$/.test(line)) {
+      const fa = this.arrayFieldAlias(line, locals);
+      if (fa) {
+        const body = this.emitStatement(fa.rewritten.replace(/;?\s*$/, ";"), locals, funcResult);
+        return `${fa.set}\n      ${body}\n      (i32.store ${fa.slot} (local.get $${fa.alias}))`;
+      }
+    }
     // An ARRAY FIELD's push / pop / shift / unshift, statement form: `this.items.push(x)`,
     // `b.items.push(x)`, `bx.vals.push(x)` (ld103, 2026-10-23: "Unsupported statement"). The field
     // holds the array pointer; a push may reallocate, so the new pointer is stored back.
@@ -17279,7 +17462,13 @@ ${prefixed}
         return { wat, type: t === "bool" ? "bool" : bt };
       });
       setStringExprResolver((tok, locs) => {
+        const qsfMark = this.quietStringFailures;
         const w = this.quietEmit(() => this.emitStringPtrLen(tok, locs as Map<string, WatType>));
+        // A result that stands on an unsupported string INSIDE it (an argument emitted as "") is
+        // not a result: rejected, so console.log reports the argument instead of printing "" for
+        // it (2026-10-23, `p.join(\`[${k}]\`, …)` printed "ab"; the dotCallLookup rule, sw08). A
+        // whole token that failed (the (0, 0) pair) goes on to the template / concat build below.
+        if (this.quietStringFailures > qsfMark && w !== "(i32.const 0) (i32.const 0)") return undefined;
         if (w === "(i32.const 0) (i32.const 0)") {
           // H12 sw02: emitStringPtrLen does not build a template or a concat; emitStringAssign
           // does. Build it into the $__str_op pair (declared for console ternaries).
@@ -17785,7 +17974,13 @@ ${prefixed}
         return { wat, type: t === "bool" ? "bool" : bt };
       });
       setStringExprResolver((tok, locs) => {
+        const qsfMark = this.quietStringFailures;
         const w = this.quietEmit(() => this.emitStringPtrLen(tok, locs as Map<string, WatType>));
+        // A result that stands on an unsupported string INSIDE it (an argument emitted as "") is
+        // not a result: rejected, so console.log reports the argument instead of printing "" for
+        // it (2026-10-23, `p.join(\`[${k}]\`, …)` printed "ab"; the dotCallLookup rule, sw08). A
+        // whole token that failed (the (0, 0) pair) goes on to the template / concat build below.
+        if (this.quietStringFailures > qsfMark && w !== "(i32.const 0) (i32.const 0)") return undefined;
         if (w === "(i32.const 0) (i32.const 0)") {
           // H12 sw02: emitStringPtrLen does not build a template or a concat; emitStringAssign
           // does. Build it into the $__str_op pair (declared for console ternaries).
@@ -18012,7 +18207,7 @@ ${prefixed}
         if (fn) {
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? ("i32" as WatType);
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
+            if (pt === "string") return [this.emitStringArg(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           // the instance's version of an overridden or abstract method (ld74, ld79)
@@ -18044,7 +18239,7 @@ ${prefixed}
           const baseWat = cv.ptr < 0 ? `(local.get $${receiver})` : `(i32.const ${cv.ptr})`;
           const emittedArgs = args.flatMap((a, i) => {
             const pt = fn.params[i + 1]?.type ?? ("i32" as WatType);
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)]; // a string argument (ld101)
+            if (pt === "string") return [this.emitStringArg(a, locals)]; // a string argument (ld101)
             return [this.emitExpr(a, locals, pt)];
           });
           const call = `(call $${funcName} ${baseWat} ${emittedArgs.join(" ")})`.trim();
@@ -18235,7 +18430,7 @@ ${prefixed}
             const pt = parentCtorFn.params[i + 1]?.type ?? ("i32" as WatType);
             // a string argument is its (ptr, len) pair, as in the `new` and method-call sites
             // (ld101); one word was an invalid module, `super(name)` (found 2026-10-23, with sw132)
-            if (pt === "string") return [this.emitStringPtrLen(a, locals)];
+            if (pt === "string") return [this.emitStringArg(a, locals)];
             return [this.emitExpr(a, locals, pt)];
           });
           return `(call $${parentName}_constructor (local.get $__self) ${
@@ -18278,7 +18473,7 @@ ${prefixed}
             const typeName = this.getOrCreateFuncType(sig.params, sig.result);
             const emittedArgs = args.flatMap((a, idx) => {
               const pt = sig.params[idx] ?? "i32" as WatType;
-              if (pt === "string") return [this.emitStringPtrLen(a, locals)];
+              if (pt === "string") return [this.emitStringArg(a, locals)];
               return [this.emitExpr(a, locals, pt)];
             });
             const callWat = `(call_indirect (type ${typeName}) ${
@@ -18295,7 +18490,7 @@ ${prefixed}
         this.checkStructArgLayouts(callee, fn, args);
         const emittedArgsList = args.flatMap((a, i) => {
           const pt = fn.params[i]?.type ?? "f64" as WatType;
-          if (pt === "string") return [this.emitStringPtrLen(a, locals)];
+          if (pt === "string") return [this.emitStringArg(a, locals)];
           return [this.emitExpr(a, locals, this.literalArgType(fn.params[i], a, pt))]; // sw128
         });
         // Fill in default values for omitted trailing params
@@ -24139,12 +24334,19 @@ ${sum}
       /\$__str_op_(?:ptr|len)\b/.test(body) && !seenLocals.has("__str_op_ptr")
         ? `    (local $__str_op_ptr i32)\n    (local $__str_op_len i32)`
         : "",
+      // an array FIELD's alias for its other methods, `b.list.join(…)` (ld108): numbered
+      ...[...new Set(body.match(/\$__fa_\d+\b/g) ?? [])].filter((n) => !seenLocals.has(n.slice(1)))
+        .map((n) => `    (local ${n} i32)`),
+      // a nested template's own pair, `${\`inner ${n}\`}` (ld111): numbered
+      ...[...new Set(body.match(/\$__str_nest_\d+_(?:ptr|len)\b/g) ?? [])]
+        .filter((n) => !seenLocals.has(n.slice(1))).map((n) => `    (local ${n} i32)`),
       // An array literal built inline (`f([1, 2])`) uses $__arr_tmp(2), a tuple returned from a
       // ternary's branch $__obj_ret, and a string push in a one-line loop $__str_push_*; the
       // pre-scan knows only `(` / `,` before `[`, a line starting `return [`, and a push that
       // starts its line (ld09, sw30, ld44, 2026-10-15).
       // (and $__destr_src, a destructured call's result, ld76; $__chain_arr, a chained receiver, ld78)
-      ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len", "__destr_src",
+      // (and $__str_arg_*, a built string argument, ld106)
+      ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len", "__str_arg_ptr", "__str_arg_len", "__destr_src",
         "__splice_s", "__splice_rm", "__chain_arr"].filter((t) =>
         new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)
       ).map((t) => `    (local $${t} i32)`),
@@ -26077,9 +26279,13 @@ ${sum}
         declMap.set("__str_op_ptr", "i32");
         declMap.set("__str_op_len", "i32");
       }
+      // an array FIELD's alias for its other methods (ld108)
+      for (const n of new Set(bodyWat.match(/\$__fa_\d+\b|\$__str_nest_\d+_(?:ptr|len)\b/g) ?? [])) {
+        if (!declMap.has(n.slice(1))) declMap.set(n.slice(1), "i32"); // ld108 aliases, ld111 pairs
+      }
       // an array literal built inline, `f([1, 2])`, a string push in a one-line loop (sw30, ld44;
       // see emitFunction)
-      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__destr_src", "__splice_s", "__splice_rm", "__chain_arr"]) {
+      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__str_arg_ptr", "__str_arg_len", "__destr_src", "__splice_s", "__splice_rm", "__chain_arr"]) {
         if (new RegExp(`\\$${t}\\b`).test(bodyWat) && !declMap.has(t)) declMap.set(t, "i32");
       }
       // console.log's argument temporaries (sw68)

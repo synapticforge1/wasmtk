@@ -121,6 +121,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-23, binaryang **1.16.1**; latest release v2.0.3)
 
+> **2026-10-23, ld106–ld109, ld111, ld112, sw133, gate GREEN.** wasi **502/502**
+> (+`29_StringArgumentsAndFieldMethods`, +`28_TemplateHoles`, each failing with `main`'s compiler)
+> · golden-WAT **559**, no existing entry moved (the template-scanning change reached no corpus
+> program's output) · typed_decl **46** (+"located past a comment", ld109, inverted) · wast 64,506 /
+> 0 / 16 · cross-check **1359** on baseline (+6, all `match`) · go 7 / 7 / 12 · api-surface unchanged.
+
 > **2026-10-23, ld103–ld105, sw129–sw132, ld110, gate GREEN.** wasi **500/500**
 > (+`29_FieldArraysAndCallResults`, +`29_FieldInitializersAndImplicitConstructors`,
 > +`28_ArrayNamedMethodsAndStringUnshift`, each failing with `main`'s compiler) · golden-WAT **557**,

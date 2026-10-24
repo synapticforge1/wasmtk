@@ -41,6 +41,10 @@ act on. Nothing here is written outside this repo; the workspace pulls it on its
   tags and two branches were deleted and `deno.json` was back at 2.0.3 on the working branch.
   Lesson: a multi-step probe that changes directory must stop when the `cd` or the clone fails
   (`set -e`, or `&&` all the way), and must never `tag v*` outside a clone it has verified.
+  Later the same day: (c) the same chaining slip once more (a `cd` into a worktree that failed to
+  check out, then a read-only compile ran in the repo: no change), after which the worktree probe
+  became a `set -euo pipefail` script; (d) one HEREDOC, feeding a bisect's input lines to a shell
+  loop (scratch only, nothing written to the repo) — the rule covers any content, input lists too.
 - **W4. rsxtk DOES publish** (measured 2026-10-23, crates.io API: crate `rsxtk`, 34 versions,
   default 0.4.4, created 2026-01-06). The workspace says it "publishes nowhere": `projects.md:20,37`,
   `working-rules.md:202`, letter H19 item (11). So rsxtk's `Cargo.toml` contact email falls inside
@@ -116,7 +120,9 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > then 1.16.1 pinned. **ld103–ld105 FIXED**, and with them **four silent bugs found and fixed**
 > (sw129 a `push` method compiled as an array push; sw130 a string `unshift` appended; sw131
 > class field initialisers dropped; sw132 a derived class without a constructor skipped its
-> base's) plus ld110; ld106–ld109 found, open, loud (compiler-bugs.md, the 2026-10-23 entry).
+> base's) plus ld110; then **ld106–ld109 FIXED** (owner: "fix the items left open"), with ld111,
+> ld112 and sw133 (silent) found and fixed: open now silent 1 (sw119), loud 1 (ld45)
+> (compiler-bugs.md, the 2026-10-23 entries).
 > **Next: ld45 (the object writer, designed: per-type writers into the console buffer, Deno's
 > 80-column / depth / grouping rules, the class name from the tag, a literal whose key order
 > differs from its interface refused), then sw119** (owner 2026-10-23: the `--i32-check` flag is

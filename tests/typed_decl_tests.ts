@@ -67,6 +67,12 @@ const REFUSED: [string, string, string | string[]][] = [
     ["Declaration needs a type: 'const s = \"hi\";'", at("untyped string", 3)],
   ],
   [
+    // ld109 (2026-10-23): a comment quoting the failing code came first and took the location
+    "located past a comment",
+    `// let a = 100000; is refused below\n/* and here: let a = 100000; */\nlet a = 100000;\nconsole.log(a);`,
+    ["Declaration needs a type: 'let a = 100000;'", at("located past a comment", 5)],
+  ],
+  [
     "untyped new",
     `const m = new Map<string, i32>();\nconsole.log(m.size);`,
     ["Declaration needs a type", at("untyped new", 3)],
