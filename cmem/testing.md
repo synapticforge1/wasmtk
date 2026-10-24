@@ -112,7 +112,14 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-23, binaryang **1.15.0**; latest release v2.0.3)
+## Current pass counts (2026-10-23, binaryang **1.16.1**; latest release v2.0.3)
+
+> **2026-10-23, later: binaryang 1.15.0 → 1.16.1 pinned, gate GREEN, NOTHING moved** — as
+> predicted from the changelog (1.16.0: `--target portable` and two lowerings, all opt-in, "without
+> the new flags no output changes"; 1.16.1: a re-release, no package change). wasi 497/497 ·
+> golden-WAT 554, **0 diverged** · wast 64,506 / 0 / 16, ALL CLEAN, 1 pinned spec-invalid
+> acceptance (the legacy `delegate` defect, not fixed) · cross-check 1341 on baseline · go 7 / 7 /
+> 12 · `-Oz` guard passes · all 28 suites exit 0.
 
 > **2026-10-23, the engine cross-check baseline re-recorded:** +189 pairs (63 modules: the five
 > `36_*` and every test added since 2026-09-30; 185 `match`, 4 wazero `reject`, exception
