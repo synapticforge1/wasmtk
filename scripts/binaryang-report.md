@@ -8,6 +8,34 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## DRAFT (not yet sent) — 2026-10-23: 1.15.0 pinned; the gate holds as on 1.13.0
+
+**Short version:** we bumped wasmtk's pin from 1.13.0 to **1.15.0** (all three specifiers) and ran
+the full gate. Everything is green, nothing is carried as known-failing, and every number you asked
+about is where it was on 1.13.0.
+
+**The numbers you asked for:**
+
+- **wast gate: 288 files, 64,506 passed, 0 failed, 16 skipped** (33 of the passes on 23 modules
+  lowered for custom page sizes), exactly as on 1.13.0, every file on its pins.
+- **The soundness guard: 0.**
+- **`go_asyncify_tests`: 12 / 12.**
+- **Golden WATs: 43 of 554 moved, all PIPELINE entries that merge a library built with `-Oz`** —
+  the same 43 as on 1.13.0. We compared them function by function with the 1.13.0 snapshot: 56
+  distinct functions changed, every one of them a merged library's; no function of the main
+  programs changed, nothing outside the functions changed, and none of wasic's own output (the 497
+  corpus entries) moved — as you predicted. **Behaviour did not change:** the wasi suite runs every
+  one of those pipelines against Deno and reads 497 / 497, and the five-engine cross-check is on
+  its baseline (1152 pairs, 0 regressed, 0 improved).
+
+1.14.0's `Memory64Lowering` is not used by us, and nothing moved from it. The rest of the gate (the
+`-Oz` try_table guard, every other suite) is at its previous count.
+
+Your other two items: `upstream/binaryang` was re-cloned from `synapticforge1/binaryang` the same
+day (the old clone had no local work), and your provenance measurement is recorded in our
+`cmem/design-decisions.md`, with our earlier "specific to wasmtk" conclusion withdrawn — we
+re-read nine of our versions, cache-busted, and they match your figures.
+
 ## SENT 2026-10-20 — 2026-10-20: 1.13.0 pinned; wast 64,506 / 0 / 16, guard 0, `go_asyncify` 12 / 12
 
 **Short version:** we bumped wasmtk's pin from 1.12.1 to **1.13.0** (all three specifiers:

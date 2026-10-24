@@ -1,7 +1,7 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@jrmarcum/binaryang@1.13.0": "1.13.0",
+    "jsr:@jrmarcum/binaryang@1.15.0": "1.15.0",
     "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/cli@1": "1.0.32",
     "jsr:@std/fmt@*": "1.0.1",
@@ -21,8 +21,8 @@
     "npm:wasm2js@0.2": "0.2.0"
   },
   "jsr": {
-    "@jrmarcum/binaryang@1.13.0": {
-      "integrity": "8ff6f6396b7d37814f62ff6fef5423111741caa34621ff11fc40883328796d67"
+    "@jrmarcum/binaryang@1.15.0": {
+      "integrity": "b7055451625e3a3174379d12846a5a289dbe4437e3f2204b3b215d7fcf160fc2"
     },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
@@ -88,7 +88,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@jrmarcum/binaryang@1.13.0",
+      "jsr:@jrmarcum/binaryang@1.15.0",
       "jsr:@std/cli@1",
       "jsr:@std/path@^1.1.2",
       "npm:wasm2js@0.2"
