@@ -31,6 +31,26 @@ about is where it was on 1.13.0.
 1.14.0's `Memory64Lowering` is not used by us, and nothing moved from it. The rest of the gate (the
 `-Oz` try_table guard, every other suite) is at its previous count.
 
+**One defect found on 1.15.0 (new to us, possibly older): a legacy `delegate`'s label depth is not
+checked.** We now measure the mirror of the soundness guard: spec-INVALID modules your validator
+ACCEPTS, over every decodable `assert_invalid` module in the corpus, under each file's own
+features. Two feature-set differences explain 11 of 12, as your definitions data already says
+(multi-memory: 5 in `proposals/threads/`; `customDescriptors` relaxing `br_on_cast`: 6 in the core
+`br_on_cast.wast` / `br_on_cast_fail.wast`, which we now validate with it off). The twelfth is
+`legacy/try_delegate.wast`'s `(assert_invalid (module (func (try (do) (delegate 1)))) "unknown
+label")`. Probed directly with `wasmValidate(bytes, { features: allFeatures() })`:
+
+| module | binaryang 1.15.0 | V8 |
+| --- | --- | --- |
+| `(module (func (try (do) (delegate 0))))` | valid | valid |
+| `(module (func (try (do) (delegate 1))))` | **valid** | invalid branch depth: 1 |
+| `(module (func (block (try (do) (delegate 2)))))` | **valid** | invalid branch depth: 2 |
+
+It costs us nothing today (V8 rejects these, so they pass), but it is what stops us asking your
+validator "is this module VALID?" for the 7 `(module definition …)`s V8 refuses for its own size
+caps: we pin it until it reads 0. The check, if you want it: `tests/wast_tests.ts`
+`KNOWN_ACCEPTED_INVALID` and `WastResult.validatorAcceptedInvalid` in `src/wast.ts`.
+
 Your other two items: `upstream/binaryang` was re-cloned from `synapticforge1/binaryang` the same
 day (the old clone had no local work), and your provenance measurement is recorded in our
 `cmem/design-decisions.md`, with our earlier "specific to wasmtk" conclusion withdrawn — we

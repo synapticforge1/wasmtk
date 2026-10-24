@@ -462,10 +462,22 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
     nullable PARAMETERS (no flag), `p.x ??= v`.
 - ⏳ **wast: 7 `(module definition …)`s V8 refuses for its own size caps** (`memory64` 1, `table`
   1, `table64` 1, `memory_max_i64` 4). A definition asserts only validity, so binaryang's
-  `wasmValidate` ACCEPTING it can be the verdict; its soundness condition is the mirror of the
-  existing guard: evidence that binaryang accepts no INVALID module (e.g. over every corpus
-  `assert_invalid` module that decodes). The plain `memory64.wast` module
-  `(module (memory i64 0 0x1_0000_0000_0000))` must instantiate: it stays an engine skip.
+  `wasmValidate` ACCEPTING it could be the verdict, if binaryang accepts no INVALID module.
+  **2026-10-23: that condition is now MEASURED, and it does not hold — BLOCKED on binaryang.** The
+  guard (`WastResult.validatorAcceptedInvalid`, the mirror of `validatorRejectedValid`) runs on
+  every `assert_invalid` module that decodes, under the FILE's features. Over the corpus on 1.15.0:
+  5 threads modules are valid only because multi-memory is on (excluded, as binaryang's data
+  records), 6 `br_on_cast` modules only because `customDescriptors` was on outside its directory
+  (now on only in it, as binaryang's data says), and **1 is a binaryang defect: a legacy
+  `delegate`'s label depth is not checked** (`legacy/try_delegate.wast`; probed: `delegate 1` and
+  `delegate 2` out of range both VALID to binaryang, invalid to V8). Pinned in
+  `tests/wast_tests.ts` `KNOWN_ACCEPTED_INVALID`; inverted both ways (pin removed: that file red;
+  customDescriptors everywhere: the two br_on_cast files red, 3 each). Reported in the DRAFT to
+  binaryang. When their fix lands and the pin reads 0, the definition verdict is a few lines in
+  the `kind === "definition"` catch (judge only an engine SIZE-CAP refusal, not an unimplemented
+  proposal — two custom-descriptors definitions would otherwise be judged too), then re-record the
+  4 files' `unbuilt`. The plain `memory64.wast` module `(module (memory i64 0 0x1_0000_0000_0000))`
+  must instantiate: it stays an engine skip.
 - ⏳ **The five `36_*` modules are not in `tests/engine_baseline.json`** (15 pairs, all `match`),
   since the Phase 36 restore (2026-09-28). A deliberate `--update-baseline`.
 - ⏳ **`wasmbundle` does not route `importWat`** (compiler-bugs.md, the 2026-06-24 wasmmerge entry,
