@@ -420,7 +420,14 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
   - **Owner's decisions of 2026-10-19, end of day (NOT BUILT):** "i32 overflow check should be
     on by default. we will retire the u32 and u64 types now. yes bindgen check at the boundary
     and return of any issues is desired."
-    1. **Rule 4 (sw119) is the default**, not an opt-in: `+ - *` of i32s give JavaScript's
+    1. **Rule 4 (sw119) is the default**, not an opt-in (**BUILT 2026-10-24**; the `--i32-check`
+       flag REMOVED, owner 2026-10-23; compiler-bugs.md, the 2026-10-24 sw119 entry, has the
+       shape: exact where printed / compared / kept in a number, ToInt32 wraps JavaScript's value,
+       a store into an i32 slot is checked, `++` / `--` test the limit). **How a store that does
+       not fit fails (owner, 2026-10-24): a program with no exception handling of its own prints
+       "RangeError: …" to stderr and traps (its module needs no exception handling: wazero at its
+       defaults refuses one with a tag); a program with a try / throw, and a library, throw the
+       catchable RangeError.** `+ - *` of i32s give JavaScript's
        result and a store that does not fit an `i32` slot throws (measured: 1 of 461 corpus
        programs, `45_random-numbers`, relies on wrapping and moves to wasMath; +2.8% size; an
        arithmetic-heavy loop ~2.3× slower).
@@ -709,6 +716,19 @@ written.`, which the CLI prints as its `❌` line. Invariants:
 
 ## Merge (wasmmerge) invariants
 
+- **One exception per merged module (sw119 / ld114, 2026-10-24).** A wasic library exports its
+  `__exn_tag` and `__exn_kind`; the merge maps every `throw N` / `catch N` / `(catch N L)` of that
+  tag to the program's `$__exn_tag`, every use of the kind global to the program's `$__exn_kind`,
+  declares both when the program had neither (`usesExnTag`; wasmbundle likewise), and REFUSES any
+  other tag. A library's exception is then one the program catches, of its kind.
+- **`relocateDataPtrs` is a heuristic: an in-range `i32.const` is a pointer unless its consumer
+  proves otherwise.** Proven arithmetic: the operand of `* / % & | ^ << >> rotl rotr`, the
+  operand of an int-to-float conversion (sw138), and the RIGHT operand of `i32.sub` (sw137: the
+  number printer's `e - 1075`). Everything else (add, compare, store, call argument) relocates, so
+  an arithmetic constant inside the library's data range in such a position is still corrupted:
+  **never add data to a library that had none for a runtime purpose** (sw138: the checked store's
+  message is built when thrown in library mode, `i32FitThrowWat`). The exact cure, a base global
+  for every data reference, is not built.
 - **`detectBumpAllocator`** identifies `$__malloc` semantically: `(param i32)(result i32)`, touches
   exactly one global with `global.get`/`global.set` each occurring **exactly once**, has
   `local.get 0` + `i32.add`, and NO calls/loads/stores. The once-each rule is what keeps a

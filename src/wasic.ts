@@ -156,6 +156,7 @@ import {
   setConsoleDiagnosticSink,
   setEnumStrVarResolver,
   setObjectInspectResolver,
+  setI32SlotResolver,
   setExprFallbackResolver,
   setFuncTableLookup,
   setInstanceofResolver,
@@ -1299,6 +1300,13 @@ const WASIC_BINARY_OPS = [
   "%",
 ];
 
+/** sw119 (the owner's rule 4 of 2026-10-19, on by default 2026-10-24): `+ - *` of i32s give
+ *  JavaScript's result, and a value that does not fit an i32 slot throws a RangeError naming the
+ *  operator. The wasMath operation each one names for deliberate wrapping: */
+const I32_FIT_NAMES: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "++": "inc", "--": "dec" };
+/** The wasMath operation that wraps instead, named in the error. */
+const I32_WRAP_NAMES: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "++": "add", "--": "sub" };
+
 /** sw44 (2026-10-06): the Error family a `throw` can carry, by kind number. 0 is "not an Error"
  *  (a thrown string, number or boolean). `$__exn_kind` holds the kind of the exception in flight;
  *  a catch variable keeps its own copy in `$<var>__kind`. */
@@ -2411,6 +2419,121 @@ class WasicTranspiler {
   // f64 `x.toString(radix)` (sw93): the helper's NaN / Infinity texts, allocated at first use
   private f64RadixTexts: { nan: [number, number]; inf: [number, number]; ninf: [number, number] } | null =
     null;
+
+  // sw119: the `$__i32_fit_<op>` helpers used, each with its message
+  private i32FitUsed = new Map<string, string>();
+  // sw119: set while an operand of a checked op is emitted (the next checked op returns its f64);
+  // the hit count tells the caller that it did
+  private i32ChainPending = false;
+  private i32ChainHits = 0;
+
+  private useI32Fit(op: string): void {
+    if (this.i32FitUsed.has(op)) return;
+    const msg = `the result of '${op}' does not fit an i32 (wasMath's i32.${I32_WRAP_NAMES[op]} wraps it)`;
+    if (this.mode === "library") {
+      // a LIBRARY throws (a program it is merged into may catch it); its message is built when
+      // thrown (i32FitThrowWat)
+      this.needsExceptionTag = true;
+    } else {
+      // a PROGRAM's messages are data: the thrown one, and the one a trap writes to stderr (owner,
+      // 2026-10-24: a program with no exception handling of its own traps; fd_write prints it)
+      this.allocString(msg);
+      this.allocStringDecoded(`RangeError: ${msg}\n`);
+      this.hasConsoleLog = true;
+    }
+    this.i32FitUsed.set(op, msg);
+  }
+
+  /** How a `$__i32_fit_*` helper fails. Needs a `$m` local.
+   *  - A PROGRAM with exception handling of its own (a try / throw) throws the RangeError, which
+   *    it may catch. One WITHOUT any (owner, 2026-10-24) writes "RangeError: …" to stderr and
+   *    traps: the same message and a non-zero exit, and no exception handling in the module
+   *    (wazero at its defaults refuses a module with a tag; nothing there could catch it).
+   *  - A LIBRARY always throws, its message built in fresh memory when thrown: a data segment of
+   *    its own would give a data-less library (Date) a data range, and wasmmerge relocates the
+   *    in-range constants it cannot tell from pointers, a divisor 365 among them (sw138). */
+  private i32FitThrowWat(msg: string): string {
+    const kind = `(global.set $__exn_kind (i32.const ${EXN_KINDS.indexOf("RangeError")}))`;
+    const bytes = new TextEncoder().encode(msg);
+    if (this.mode !== "library" && !this.needsExceptionTag) {
+      const [p, l] = this.allocStringDecoded(`RangeError: ${msg}\n`);
+      return `(local.set $m (call $__malloc (i32.const 12)))` +
+        `\n        (i32.store (local.get $m) (i32.const ${p}))` +
+        `\n        (i32.store offset=4 (local.get $m) (i32.const ${l}))` +
+        `\n        (call $__fd_write_all (i32.const 2) (local.get $m) (i32.const 1) (i32.add (local.get $m) (i32.const 8)))` +
+        `\n        (unreachable)`;
+    }
+    if (this.mode !== "library") {
+      const [p, l] = this.allocString(msg);
+      return `${kind}\n        (throw $__exn_tag (i32.const ${p}) (i32.const ${l}))`;
+    }
+    const stores: string[] = [];
+    for (let at = 0; at < bytes.length; at += 8) {
+      let word = 0n;
+      for (let k = 7; k >= 0; k--) word = (word << 8n) | BigInt(bytes[at + k] ?? 0);
+      stores.push(`(i64.store offset=${at} (local.get $m) (i64.const ${BigInt.asIntN(64, word)}))`);
+    }
+    return `${kind}\n        (local.set $m (call $__malloc (i32.const ${Math.ceil(bytes.length / 8) * 8})))` +
+      `\n        ${stores.join("\n        ")}\n        (throw $__exn_tag (local.get $m) (i32.const ${bytes.length}))`;
+  }
+
+  /** `v ++` / `v --` of an i32 (sw119): the new value, or a RangeError at the type's limit. */
+  private i32Step(op: "++" | "--", getWat: string): string {
+    this.useI32Fit(op);
+    return `(call $__i32_${I32_FIT_NAMES[op]} ${getWat})`;
+  }
+
+  /** console_log's i32-slot resolver (sw119): `tok` emitted for an i32 slot, through the checked
+   *  store; speculative like the expression fallback (its diagnostics are rolled back). */
+  private i32SlotForConsole(tok: string, locals: Map<string, WatType>): string | undefined {
+    const mark = this.diagnostics.length;
+    let wat = "";
+    try {
+      wat = this.quietEmit(() => this.emitExpr(tok, locals, "i32"));
+    } catch {
+      wat = "";
+    }
+    if (this.diagnostics.length > mark || !wat.trim() || wat.includes("(;?") || wat.includes("(unreachable)")) {
+      this.diagnostics.length = mark;
+      return undefined;
+    }
+    // the checked store's helper is not in watResultType's tables; another type is a refusal
+    const have = this.watResultType(wat, locals);
+    return have === "f64" || have === "f32" || have === "i64" ? undefined : wat;
+  }
+
+  /** Whether `s`, its parentheses stripped, is a binary `+ - *` at its top level (sw119). */
+  private isArithChain(s: string): boolean {
+    let u = s.trim();
+    while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+      u = u.slice(1, -1).trim();
+    }
+    return ["+", "-", "*"].some((o) => this.findBinaryOp(u, o) > 0);
+  }
+
+  /** `$__i32_fit_<op>(v: f64) -> i32`: v, or a RangeError when it is outside the i32 range. */
+  private i32FitHelpersWat(): string {
+    return [...this.i32FitUsed].map(([op, msg]) =>
+      op === "++" || op === "--"
+        ? `
+  ;; sw119: an i32's '${op}', or a RangeError at the type's limit
+  (func $__i32_${I32_FIT_NAMES[op]} (param $v i32) (result i32)
+    (local $m i32)
+    (if (i32.eq (local.get $v) (i32.const ${op === "++" ? 2147483647 : -2147483648}))
+      (then
+        ${this.i32FitThrowWat(msg)}))
+    (i32.${op === "++" ? "add" : "sub"} (local.get $v) (i32.const 1))
+  )`
+        : `
+  ;; sw119: JavaScript's result of '${op}' stored into an i32 slot, or a RangeError
+  (func $__i32_fit_${I32_FIT_NAMES[op]} (param $v f64) (result i32)
+    (local $m i32)
+    (if (i32.or (f64.lt (local.get $v) (f64.const -2147483648)) (f64.gt (local.get $v) (f64.const 2147483647)))
+      (then
+        ${this.i32FitThrowWat(msg)}))
+    (i32.trunc_f64_s (local.get $v))
+  )`).join("\n");
+  }
 
   private useF64Radix(): void {
     if (this.f64RadixTexts) return;
@@ -11204,10 +11327,18 @@ ${prefixed}
   private emitToInt32(a: string, locals: Map<string, WatType>): string {
     const lit = a.trim();
     if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+    // an i32 `+ - *` (sw119): ToInt32 of JavaScript's exact value, as `(h * 31 + c) | 0` means;
+    // never the checked store, which would throw where JavaScript wraps
+    if (this.isArithChain(a) && watBaseType(this.inferExprType(a, locals)) === "i32") {
+      this.mathHelpers.add("i32_toint32");
+      return `(call $__i32_toint32 ${this.emitExpr(a, locals, "f64")})`;
+    }
     const w = this.emitExpr(a, locals, "i32");
     const have = this.watResultType(w, locals);
     if (have === "i64") return w;
-    const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
+    // an i32 `+ - *` came back CHECKED (sw119): ToInt32 wraps JavaScript's exact value instead,
+    // as `(h * 31 + c) | 0` means
+    const truncated = /^\((?:i32\.trunc_f(32|64)_s|call \$__i32_fit_)/.test(w.trimStart());
     if (have !== "f64" && have !== "f32" && !truncated) return w;
     this.mathHelpers.add("i32_toint32");
     return `(call $__i32_toint32 ${this.emitExpr(a, locals, "f64")})`;
@@ -11285,7 +11416,8 @@ ${prefixed}
       if (inc) {
         const { name, op, pre, t, isLocal } = inc;
         const get = isLocal ? `(local.get $${name})` : `(global.get $${name})`;
-        const nv = `(${t}.${op === "++" ? "add" : "sub"} ${get} (${t}.const 1))`;
+        // an i32's step is checked at the type's limit (sw119)
+        const nv = t === "i32" ? this.i32Step(op, get) : `(${t}.${op === "++" ? "add" : "sub"} ${get} (${t}.const 1))`;
         const set = isLocal ? `(local.set $${name} ${nv})` : `(global.set $${name} ${nv})`;
         if (pre) return isLocal ? `(local.tee $${name} ${nv})` : `(block (result ${t}) ${set} ${get})`;
         return `(block (result ${t}) ${get} ${set})`;
@@ -14153,6 +14285,54 @@ ${prefixed}
         // out of the i32 range used to TRAP in a `trunc_f64_s` (`4294967298.7 | 0` is 2).
         const operand = (s: string) =>
           alwaysI32 ? this.emitToInt32(s, locals) : this.emitExpr(s, locals, numType);
+        // The owner's rule 4 of 2026-10-19 (sw119; on by default, owner 2026-10-23): `+ - *` of
+        // i32s give JavaScript's result, computed in f64 (operands are emitted in f64, so a whole
+        // chain stays exact); an f64 context keeps it, and an i32 slot (declaration, field,
+        // argument, return) gets it through `$__i32_fit_<op>`, which throws a RangeError naming the
+        // operator when it does not fit.
+        // Each operand is emitted as ITSELF (an f64 request is ignored by several forms, struct and
+        // class fields, calls, and an i32 chain asked for f64 is typed by the request: an invalid
+        // module). An operand that is a checked op returns its exact f64 (one check, at the store);
+        // anything else is an i32, converted.
+        const opF64 = (s: string): string => {
+          // an integer literal is its f64 constant (smaller, and no i32.const for the merge to
+          // mistake for a data pointer, sw138)
+          if (/^-?\d+$/.test(s.trim())) return `(f64.const ${Number(s.trim())})`;
+          // only an operand that IS a `+ - *` chain: else the marker leaked into a call's own
+          // argument (`n * fact(n - 1)` passed an f64 to fact)
+          const hits = this.i32ChainHits;
+          this.i32ChainPending = this.isArithChain(s);
+          const w = this.emitExpr(s, locals, "i32");
+          this.i32ChainPending = false;
+          return this.i32ChainHits > hits && w.startsWith("(f64.") ? w : `(f64.convert_i32_s ${w})`;
+        };
+        // sw119: a COMPARISON of i32s where a side is a `+ - *` chain compares JavaScript's exact
+        // values: `big + 1 > 0` of an i32 max is true (wrapped it was false; checked it would throw)
+        const F64_CMP: Record<string, string> = {
+          "<": "lt", ">": "gt", "<=": "le", ">=": "ge", "==": "eq", "===": "eq", "!=": "ne", "!==": "ne",
+        };
+        if (
+          baseType === "i32" && !alwaysI32 && F64_CMP[op] && !this.i32ChainPending &&
+          (this.isArithChain(lhs) || this.isArithChain(rhs))
+        ) {
+          return `(f64.${F64_CMP[op]} ${opF64(lhs)} ${opF64(rhs)})`;
+        }
+        if (baseType === "i32" && !alwaysI32 && (op === "+" || op === "-" || op === "*")) {
+          // This op is the operand of an enclosing checked op: hand back the exact f64, unchecked
+          const asOperand = this.i32ChainPending;
+          this.i32ChainPending = false;
+          const fw = `(f64.${I32_FIT_NAMES[op]} ${opF64(lhs)} ${opF64(rhs)})`;
+          if (asOperand) {
+            this.i32ChainHits++;
+            return fw;
+          }
+          const ctx = watBaseType(defaultType as WatType);
+          if (ctx === "f64") return fw;
+          if (ctx === "f32") return `(f32.demote_f64 ${fw})`;
+          if (ctx === "i64") return `(i64.trunc_f64_s ${fw})`;
+          this.useI32Fit(op);
+          return `(call $__i32_fit_${I32_FIT_NAMES[op]} ${fw})`;
+        }
         const innerWat = `(${watOp} ${operand(lhs)} ${operand(rhs)})`;
         // Mixed-type promotion: if context needs f64/i64 but arithmetic ran in i32, convert.
         // Also applies to alwaysI32 ops (|, ^, &, >>>, etc.) when stored in a f64 variable.
@@ -16301,6 +16481,11 @@ ${prefixed}
       if (op === "/=" && opType === "i32") {
         this.diagnostics.push(intDivisionDiagnostic(`${varName} /= ${rhs}`));
       }
+      // sw119: `x += e` of an i32 is `x = x + (e)`, so it gives JavaScript's result and the store
+      // into x is checked like any other
+      if (opType === "i32" && !alwaysI32 && /^[+\-*]=$/.test(op)) {
+        return this.emitStatementCore(`${varName} = ${varName} ${op[0]} (${rhs});`, locals, funcResult);
+      }
       const getWatVar = isGlobal ? `(global.get $${varName})` : `(local.get $${varName})`;
       const rhsWat = this.emitExpr(rhs, locals, opType);
       // f64.rem does not exist in WebAssembly; emit formula for %=
@@ -17831,6 +18016,7 @@ ${prefixed}
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
       setObjectInspectResolver((tok, locs) => this.inspectConsoleArg(tok, locs as Map<string, WatType>));
+      setI32SlotResolver((tok, locs) => this.i32SlotForConsole(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -17871,6 +18057,7 @@ ${prefixed}
       setU64Resolver(undefined);
       setEnumStrVarResolver(undefined);
       setObjectInspectResolver(undefined);
+      setI32SlotResolver(undefined);
       const { statements, needsHelpers, needsStrGather, needsArrPrintHelper, needsJoinHelper } =
         emitConsoleLog(segments, allocator, "    ", 1, this.iovBase, this.scratchBase);
       if (needsHelpers) this.needsNumericHelpers = true;
@@ -18344,6 +18531,7 @@ ${prefixed}
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
       setObjectInspectResolver((tok, locs) => this.inspectConsoleArg(tok, locs as Map<string, WatType>));
+      setI32SlotResolver((tok, locs) => this.i32SlotForConsole(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
         const qqAt = this.findBinaryOp(tok, "??");
@@ -18384,6 +18572,7 @@ ${prefixed}
       setU64Resolver(undefined);
       setEnumStrVarResolver(undefined);
       setObjectInspectResolver(undefined);
+      setI32SlotResolver(undefined);
       const {
         statements,
         needsHelpers,
@@ -18431,6 +18620,7 @@ ${prefixed}
       // Phase 5h: boxed capture — update through heap pointer
       if (this.currentBoxedCaptures.has(v)) {
         const bt = this.boxType(v);
+        if (bt === "i32") return this.boxStore(v, this.i32Step("++", this.boxLoad(v))); // sw119
         return this.boxStore(v, `(${bt}.add ${this.boxLoad(v)} (${bt}.const 1))`);
       }
       // Mutable closure capture — update through $__closure_ptr
@@ -18445,14 +18635,21 @@ ${prefixed}
             : ccl.type === "i64"
             ? "i64.const 1"
             : "i32.const 1";
-          return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) (${addOp} (${loadOp} offset=${ccl.offset} (local.get $__closure_ptr)) (${one})))`;
+          const cur = `(${loadOp} offset=${ccl.offset} (local.get $__closure_ptr))`;
+          if (ccl.type === "i32") { // sw119
+            return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) ${this.i32Step("++", cur)})`;
+          }
+          return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) (${addOp} ${cur} (${one})))`;
         }
       }
+      // an i32's step is checked at the type's limit (sw119)
       if (this.moduleGlobals.has(v)) {
         const vt = watBaseType(this.moduleGlobals.get(v)!.type);
+        if (vt === "i32") return `(global.set $${v} ${this.i32Step("++", `(global.get $${v})`)})`;
         return `(global.set $${v} (${vt}.add (global.get $${v}) (${vt}.const 1)))`;
       }
       const vt = watBaseType(locals.get(v) ?? "i32");
+      if (vt === "i32") return `(local.set $${v} ${this.i32Step("++", `(local.get $${v})`)})`;
       return `(local.set $${v} (${vt}.add (local.get $${v}) (${vt}.const 1)))`;
     }
     if (/^(\w+)--;?$/.test(line) || /^--(\w+);?$/.test(line)) {
@@ -18460,6 +18657,7 @@ ${prefixed}
       // Phase 5h: boxed capture — update through heap pointer
       if (this.currentBoxedCaptures.has(v)) {
         const bt = this.boxType(v);
+        if (bt === "i32") return this.boxStore(v, this.i32Step("--", this.boxLoad(v))); // sw119
         return this.boxStore(v, `(${bt}.sub ${this.boxLoad(v)} (${bt}.const 1))`);
       }
       // Mutable closure capture — update through $__closure_ptr
@@ -18474,14 +18672,20 @@ ${prefixed}
             : ccl.type === "i64"
             ? "i64.const 1"
             : "i32.const 1";
-          return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) (${subOp} (${loadOp} offset=${ccl.offset} (local.get $__closure_ptr)) (${one})))`;
+          const cur = `(${loadOp} offset=${ccl.offset} (local.get $__closure_ptr))`;
+          if (ccl.type === "i32") { // sw119
+            return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) ${this.i32Step("--", cur)})`;
+          }
+          return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) (${subOp} ${cur} (${one})))`;
         }
       }
       if (this.moduleGlobals.has(v)) {
         const vt = watBaseType(this.moduleGlobals.get(v)!.type);
+        if (vt === "i32") return `(global.set $${v} ${this.i32Step("--", `(global.get $${v})`)})`;
         return `(global.set $${v} (${vt}.sub (global.get $${v}) (${vt}.const 1)))`;
       }
       const vt = watBaseType(locals.get(v) ?? "i32");
+      if (vt === "i32") return `(local.set $${v} ${this.i32Step("--", `(local.get $${v})`)})`;
       return `(local.set $${v} (${vt}.sub (local.get $${v}) (${vt}.const 1)))`;
     }
 
@@ -20127,6 +20331,7 @@ ${prefixed}
     }
     if (this.needsJoinHelper) parts.push(getJoinHelperWat());
     if (this.f64RadixTexts) parts.push(this.f64RadixHelperWat());
+    if (this.i32FitUsed.size > 0) parts.push(this.i32FitHelpersWat());
     if (this.neededEnumStrHelpers.size > 0) parts.push(this.emitEnumStrHelpers());
     if (this.mathHelpers.size > 0) parts.push(this.emitMathHelpers());
     if (this.needsNumParsers) parts.push(this.emitNumParserHelpers(this.needsStrToNumber));
@@ -26752,7 +26957,10 @@ ${sum}
       this.needsExceptionTag ? `  (tag $__exn_tag (export "__exn_tag") (param i32 i32))` : "",
       // What was thrown (sw44): 0 = a string / number / boolean, 1–7 = an Error-family object
       // (EXN_KINDS). Set before every throw; a catch copies it into its variable's `__kind` local.
-      this.needsExceptionTag ? `  (global $__exn_kind (mut i32) (i32.const 0))` : "",
+      // A LIBRARY exports it, so a program it is merged into reads one kind (wasmmerge, sw119).
+      this.needsExceptionTag
+        ? `  (global $__exn_kind${this.mode === "library" ? ` (export "__exn_kind")` : ""} (mut i32) (i32.const 0))`
+        : "",
       // `a && b` / `a || b` as an operand (sw49): the left value, held while its truthiness is tested.
       ...[...this.logicalScratch].map((t) => `  (global $__lor_${t} (mut ${t}) (${t}.const 0))`),
       funcTypesWat,
@@ -26861,6 +27069,14 @@ function mergeOneWasmImport(
 
   // Splice merged fragments before the closing `)` of the module
   const fragments: string[] = [];
+  // The library throws or catches wasic's exception: the program declares its tag and kind (sw119;
+  // a program with no try / throw of its own had neither)
+  if (result.usesExnTag && !/\(tag \$__exn_tag\b/.test(watBase)) {
+    fragments.push(
+      `  ;; exception of ${prefix}\n  (tag $__exn_tag (export "__exn_tag") (param i32 i32))\n` +
+        `  (global $__exn_kind (mut i32) (i32.const 0))`,
+    );
+  }
   if (result.globalWat) fragments.push(`  ;; globals from ${prefix}\n  ${result.globalWat}`);
   if (result.funcWat) fragments.push(`  ;; functions from ${prefix}\n  ${result.funcWat}`);
   if (result.dataWat) fragments.push(`  ;; data from ${prefix}\n  ${result.dataWat}`);

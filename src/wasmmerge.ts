@@ -129,6 +129,9 @@ export interface WatMergeResult {
    * already emits both; `wasmbundle` builds its master WAT from scratch and must
    * synthesise them when this flag is true for any merged module. */
   droppedAllocator: boolean;
+  /** The bodies throw or catch wasic's exception (`$__exn_tag`, the kind in `$__exn_kind`): the
+   *  host must declare both (sw119, 2026-10-24: a library's checked i32 store throws). */
+  usesExnTag: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +479,12 @@ export function mergeWasmWat(
   let droppedMallocIdx: number | null = null;
   let droppedHeapPtrGlobalIdx: number | null = null;
   let heapPtrExportIdx: number | null = null;
+  // wasic's exception tag and kind global, by their exports; the merged code throws and catches
+  // the HOST's `$__exn_tag` and reads its `$__exn_kind`, so a library's exception is one the
+  // program can catch, of its kind (sw119)
+  let exnTagIdx: number | null = null;
+  let exnKindGlobalIdx: number | null = null;
+  let usesExnTag = false;
 
   for (const form of forms) {
     const kind = formKind(form);
@@ -500,6 +509,11 @@ export function mergeWasmWat(
       // the optimizer has inlined `$__malloc` away (see below).
       const heapM = form.match(/\(export\s+"__heap_ptr"\s+\(global\s+(\d+)\)\)/);
       if (heapM) heapPtrExportIdx = parseInt(heapM[1]);
+      // ...and its exception: the tag and the kind of the exception in flight (sw119)
+      const tagM = form.match(/\(export\s+"__exn_tag"\s+\(tag\s+(\d+)\)\)/);
+      if (tagM) exnTagIdx = parseInt(tagM[1]);
+      const kindM = form.match(/\(export\s+"__exn_kind"\s+\(global\s+(\d+)\)\)/);
+      if (kindM) exnKindGlobalIdx = parseInt(kindM[1]);
     }
 
     if (kind === "func") {
@@ -715,11 +729,31 @@ export function mergeWasmWat(
       if (droppedHeapPtrGlobalIdx !== null && n === droppedHeapPtrGlobalIdx) {
         return `global.${kind} $__heap_ptr`;
       }
+      if (exnKindGlobalIdx !== null && n === exnKindGlobalIdx) return `global.${kind} $__exn_kind`;
       return `global.${kind} $${prefix}_global${n}`;
     };
     return text
       .replace(/\bglobal\.get\s+(\d+)\b/g, (_m, n) => renameOne("get", n))
       .replace(/\bglobal\.set\s+(\d+)\b/g, (_m, n) => renameOne("set", n));
+  }
+
+  /** A tag index in `throw N`, a legacy `catch N`, or a try_table `(catch N L)` / `(catch_ref N L)`
+   *  names the host's `$__exn_tag` when it is wasic's tag (sw119). Any other tag has no place in
+   *  the merged module: refused, as an unmapped reference would make it invalid. */
+  function renameTagRefs(text: string): string {
+    const one = (n: string): string => {
+      if (exnTagIdx === null || parseInt(n) !== exnTagIdx) {
+        throw new Error(
+          `wasmmerge: '${prefix}' throws or catches tag ${n}, which is not wasic's exported __exn_tag; ` +
+            `a merged module can carry only wasic's exception`,
+        );
+      }
+      usesExnTag = true;
+      return "$__exn_tag";
+    };
+    return text
+      .replace(/\b(throw|catch)\s+(\d+)\b/g, (_m, op: string, n: string) => `${op} ${one(n)}`)
+      .replace(/\((catch(?:_ref)?)\s+(\d+)(\s)/g, (_m, op: string, n: string, sp: string) => `(${op} ${one(n)}${sp}`);
   }
 
   // This module's own static-data address extent [dataLo, dataHi), derived from its
@@ -766,6 +800,13 @@ export function mergeWasmWat(
     "i32.shr_u",
     "i32.rotl",
     "i32.rotr",
+    // a pointer is never converted to a number: `365 * yoe` computed in f64 (sw119) read the 365
+    // as `(f64.convert_i32_s (i32.const 365))`, relocated once the Date library's data passed 365
+    // (sw138, found with sw119, 2026-10-24)
+    "f64.convert_i32_s",
+    "f64.convert_i32_u",
+    "f32.convert_i32_s",
+    "f32.convert_i32_u",
   ]);
   /**
    * Head token of the s-expression ENCLOSING `from`, or "" when not inside one.
@@ -850,9 +891,22 @@ export function mergeWasmWat(
       let q = p;
       while (q < text.length && !/[\s()]/.test(text[q]!)) q++;
       let consumer = text.slice(p, q);
+      // The RIGHT operand of a subtraction is an offset or a bias, never a pointer (a pointer is
+      // `ptr - k`'s left one): `e - 1075`, the f64 exponent bias in the number printer, was
+      // "relocated" once a library's data reached byte 1075, and every number it printed was wrong
+      // (sw137, found with sw119, 2026-10-24). FLAT: the constant directly before `i32.sub` is its
+      // right operand. FOLDED: the constant is the sub's LAST child.
+      let rhsOfSub = consumer === "i32.sub";
       // Empty means the next non-space character was a paren, i.e. FOLDED form — look outward.
-      if (consumer === "") consumer = enclosingHead(text, offset);
-      return ARITH_NEVER_PTR.has(consumer) ? match : `i32.const ${n + dataReloc}`;
+      if (consumer === "") {
+        consumer = enclosingHead(text, offset);
+        if (consumer === "i32.sub") {
+          let r = p + 1; // past the constant's own `)`
+          while (r < text.length && /\s/.test(text[r]!)) r++;
+          rhsOfSub = text[r] === ")";
+        }
+      }
+      return ARITH_NEVER_PTR.has(consumer) || rhsOfSub ? match : `i32.const ${n + dataReloc}`;
     });
   }
 
@@ -947,6 +1001,7 @@ export function mergeWasmWat(
       );
       body = renameCallSites(body);
       body = renameGlobalRefs(body);
+      body = renameTagRefs(body);
       body = relocateDataPtrs(body);
       // call_indirect inside a merged body would dangle: Phase 18 strips the imported module's
       // type section (the main module emits its own), so `(type N)` / table indices no longer
@@ -1008,8 +1063,9 @@ export function mergeWasmWat(
 
       // Drop the imported library's heap-ptr global — all get/set sites in the
       // merged function bodies are redirected to the main module's $__heap_ptr
-      // by renameGlobalRefs (above).
+      // by renameGlobalRefs (above). Its exception-kind global likewise (sw119).
       if (droppedHeapPtrGlobalIdx !== null && idx === droppedHeapPtrGlobalIdx) continue;
+      if (exnKindGlobalIdx !== null && idx === exnKindGlobalIdx) continue;
 
       const newName = `$${prefix}_global${idx}`;
       // Use a function callback to prevent $1 backreference substitution in newName.
@@ -1066,5 +1122,6 @@ export function mergeWasmWat(
     hasMutableGlobals,
     // the bodies reference $__heap_ptr (and $__malloc when it survived): the host must define them
     droppedAllocator: droppedHeapPtrGlobalIdx !== null,
+    usesExnTag,
   };
 }

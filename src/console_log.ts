@@ -431,6 +431,16 @@ export function setExprFallbackResolver(
   _exprFallbackResolver = fn;
 }
 
+/** sw119: an i32 `+ - *` where an i32 SLOT is wanted (a call's i32 argument, an index): wasic's
+ *  emitExpr gives JavaScript's result through its checked store, which throws a RangeError when the
+ *  value does not fit. Returns the WAT, or undefined. Set by wasic.ts around parseConsoleLogArgs. */
+let _i32SlotResolver: ((token: string, locals: Map<string, string>) => string | undefined) | undefined =
+  undefined;
+/** Inject the checked i32 store's resolver (sw119). Pass `undefined` to clear it. */
+export function setI32SlotResolver(fn: typeof _i32SlotResolver): void {
+  _i32SlotResolver = fn;
+}
+
 /** Widen `wat` from numeric type `from` to `to`, or null when that would lose information (a float
  *  into an integer, i64 into i32). A lossy request means the console path guessed the argument's
  *  type wrong, which must be reported, not truncated. */
@@ -2325,7 +2335,9 @@ function parseSingleArg(
     hasFloatElem(token, arrayLookup) ||
     // `**` of numbers is a float (Math.pow): `n ** 2` of an i32 n was asked for as i32 (ld67)
     findTopLevelOp(token, "**") > 0;
-  if ((leadType === "i32" || leadType === "bool") && !hasKnownFloat) {
+  // sw119: a `+ - *` of i32s prints JavaScript's result, `65536 * 65536` 4294967296 (it wrapped
+  // to 0): computed in f64, which prints an integral value as the i32 printer does
+  if ((leadType === "i32" || leadType === "bool") && !hasKnownFloat && !isArithChain(token)) {
     return [{
       kind: "i32expr",
       wat: exprToWat(
@@ -2465,6 +2477,16 @@ function intArgWat(w: string, arg: string, callee: string, ptype: string, locals
   return w;
 }
 
+/** Whether `s`, its parentheses stripped, is a binary `+ - *` at its top level (sw119: of i32s it
+ *  gives JavaScript's result, computed in f64; wasic's isArithChain is the twin). */
+function isArithChain(s: string): boolean {
+  let u = s.trim();
+  while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+    u = u.slice(1, -1).trim();
+  }
+  return ["+", "-", "*"].some((o) => findTopLevelOp(u, o) > 0);
+}
+
 function toInt32Wat(
   e: string,
   locals: Map<string, string>,
@@ -2476,6 +2498,15 @@ function toInt32Wat(
 ): string {
   const lit = e.trim();
   if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+  // an i32 `+ - *` (sw119): ToInt32 of JavaScript's exact value; asked for as an i32 it is the
+  // checked store, which throws where JavaScript wraps
+  if (isArithChain(e)) {
+    const f = exprToWat(e, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals);
+    if (watOuterType(f, locals, globals) === "f64") {
+      _mathHelperNeeded?.("i32_toint32");
+      return `(call $__i32_toint32 ${f})`;
+    }
+  }
   const w = exprToWat(e, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals);
   const have = watOuterType(w, locals, globals);
   if (have === "i64") return w;
@@ -3589,16 +3620,40 @@ function exprToWat(
     // results, an invalid module (ld23, 2026-10-15).
     const boolEquality = (op === "===" || op === "!==" || op === "==" || op === "!=") &&
       (isBoolOperand(lhs, locals, globals) || isBoolOperand(rhs, locals, globals));
+    const i32Typed = (effLhsType === "i32" || effLhsType === "bool") && !isKnownFloat(rhs, locals, globals) &&
+      !hasFloatField(rhs, structLookup) && !hasFloatElem(rhs, arrayLookup);
+    // sw119: a comparison of i32s where a side is a `+ - *` chain compares JavaScript's exact
+    // values (`big + 1 > 0` of an i32 max is true), as wasic's emitExpr does
+    const cmpOfChain = i32Typed && /^(<|>|<=|>=|==|!=|===|!==)$/.test(op) &&
+      (isArithChain(lhs) || isArithChain(rhs));
     const opType = alwaysI32 || boolEquality
       ? "i32"
       : effLhsType === "i64"
       ? "i64"
-      : (effLhsType === "i32" || effLhsType === "bool") && !isKnownFloat(rhs, locals, globals) &&
-          !hasFloatField(rhs, structLookup) && !hasFloatElem(rhs, arrayLookup)
+      : i32Typed && !cmpOfChain
       ? "i32"
       : (effLhsType === "i32" || effLhsType === "bool")
       ? "f64"
       : numType;
+    // sw119: `+ - *` of i32s give JavaScript's result. Printed or compared, that is the exact f64;
+    // where an i32 is wanted (an argument, an index) it is wasic's checked store, which throws a
+    // RangeError when the value does not fit.
+    if (opType === "i32" && !alwaysI32 && (op === "+" || op === "-" || op === "*")) {
+      if (expectedType === "f64" || expectedType === "f32") {
+        const f = (s: string) => {
+          const w = exprToWat(s, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals);
+          return watOuterType(w, locals, globals) === "i32" ? `(f64.convert_i32_s ${w})` : w;
+        };
+        const fw = `(f64.${op === "+" ? "add" : op === "-" ? "sub" : "mul"} ${f(lhs)} ${f(rhs)})`;
+        return expectedType === "f32" ? `(f32.demote_f64 ${fw})` : fw;
+      }
+      const checked = expectedType === "i32" ? _i32SlotResolver?.(expr, locals) : undefined;
+      if (checked) return checked;
+      // never the wrapping op: that is the silent result sw119 removed
+      _diagnosticSink?.(
+        `console argument: cannot emit '${expr.trim().slice(0, 60)}' with JavaScript's result (sw119)`,
+      );
+    }
     const watOp = (opType === "f64" || opType === "f32")
       ? f64op
       : opType === "i64"
