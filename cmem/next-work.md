@@ -129,9 +129,12 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > **2026-10-24: sw119 FIXED** (on by default, the `--i32-check` flag removed; console / template
 > operators, comparisons, `++` / `--` covered; `45_random-numbers` passes unchanged), with **sw137,
 > sw138 (silent) and ld114 found and fixed** in the merge (compiler-bugs.md, the 2026-10-24 sw119
-> entry): **open now silent 0, loud 0.** Found with it, NOT fixed: **the wasi suite has no
-> per-test timeout** — a module that loops (sw137's `main_arraymethods`) hangs the whole run with
-> no output; give `wasi_tests.ts` a timeout per run (a test-harness change, small).
+> entry): **open now silent 0, loud 0.** Found with it and FIXED the same day (owner: "add a per
+> test timeout"): the wasi suite had no per-test timeout — a module that loops (sw137's
+> `main_arraymethods`) hung the run for an hour with no output. Every `runStep` is killed at
+> `WASI_STEP_TIMEOUT_S` (default 300; the whole process tree, `taskkill /T` on Windows, where
+> `wasmtk` is a `.cmd` shim) and FAILS, even where a failure is expected. The superseded branch
+> `feat/i32-overflow-check` (643a33c6, local only) deleted (owner).
 > **Next: re-pin binaryang 1.16.1 → 2.1.0** (a MAJOR; owner 2026-10-24: "finish sw119 first").
 > binaryang's letter to wasmrt (2026-10-24) touches wasmtk in one place: before 2.1.0 every module
 > with a function table was INVALID under binaryang's DEFAULT features — check every wasmtk call of
