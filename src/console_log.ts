@@ -310,6 +310,18 @@ export function setEnumStrVarResolver(
   _enumStrVarResolver = fn;
 }
 
+/** A whole struct, class instance or struct array as a console.log ARGUMENT (ld45): wasic's
+ *  object writer gives its text as a ptr/len pair (or reports why it cannot). Only a whole
+ *  argument: inside a template or a concatenation an object is string conversion. Set by wasic.ts
+ *  around parseConsoleLogArgs. */
+let _objectInspectResolver:
+  | ((token: string, locals: Map<string, string>) => { ptrWat: string; lenWat: string } | undefined)
+  | undefined = undefined;
+/** Inject the object writer's resolver (ld45). Pass `undefined` to clear it. */
+export function setObjectInspectResolver(fn: typeof _objectInspectResolver): void {
+  _objectInspectResolver = fn;
+}
+
 /** Resolve a nullish-coalescing token (`a ?? b`) to a WAT expression plus its result type via
  *  wasic's emitExpr, which owns the Phase 24 nullable-variable tables (`$x__null` companions)
  *  this module has no view of. Set by wasic.ts around parseConsoleLogArgs. Returns undefined
@@ -3909,6 +3921,11 @@ export function parseConsoleLogArgs(
 
   for (let i = 0; i < args.length; i++) {
     if (i > 0) segments.push({ kind: "literal", text: " " }); // space between args
+    const obj = _objectInspectResolver?.(args[i].trim(), locals);
+    if (obj) {
+      segments.push({ kind: "strexpr", ptrWat: obj.ptrWat, lenWat: obj.lenWat });
+      continue;
+    }
     const argSegs = parseSingleArg(
       args[i],
       locals,

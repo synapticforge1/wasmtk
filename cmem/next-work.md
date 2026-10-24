@@ -123,11 +123,11 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > base's) plus ld110; then **ld106–ld109 FIXED** (owner: "fix the items left open"), with ld111,
 > ld112 and sw133 (silent) found and fixed: open now silent 1 (sw119), loud 1 (ld45)
 > (compiler-bugs.md, the 2026-10-23 entries).
-> **Next: ld45 (the object writer, designed: per-type writers into the console buffer, Deno's
-> 80-column / depth / grouping rules, the class name from the tag, a literal whose key order
-> differs from its interface refused), then sw119** (owner 2026-10-23: the `--i32-check` flag is
-> REMOVED, the check always on; still to do: console / template operators, `++` / `--`,
-> `45_random-numbers` to wasMath).
+> **2026-10-24: ld45 FIXED** (the object writer, `src/inspect_wat.ts` + wasic's per-type writers;
+> design-decisions.md "console.log's object writer"), with **ld113 and sw134–sw136 (silent) found
+> and fixed** (compiler-bugs.md, the 2026-10-24 entry): open now silent 1 (sw119), loud 0.
+> **Next: sw119** (owner 2026-10-23: the `--i32-check` flag is REMOVED, the check always on; still
+> to do: console / template operators, `++` / `--`, `45_random-numbers` to wasMath).
 
 > **PAUSED 2026-10-22 (owner: "update the project memory files and pause until later today").**
 > Branch `fix/loud-refusals` = main (main PUSHED 2026-10-23 after the H19 purge; the branch

@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 1 | 148 | 0 | 27 |
-| LOUD | 1 | 118 | 0 | 19 |
+| SILENT-WRONG | 1 | 151 | 0 | 27 |
+| LOUD | 0 | 120 | 0 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -21,6 +21,38 @@ Batch 2 (the same day) closed ld10, ld14, ld37, found and fixed sw74 and ld44, a
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
+
+**ld45 FIXED 2026-10-24 (the object writer); ld113 and sw134–sw136 (silent) found and fixed**
+(open: silent 1, sw119; loud 0).
+- **ld45** a whole struct, class instance or struct array as a console.log ARGUMENT (a name, a call
+  returning one, or an array literal of such names, `[a, b]`) prints as Deno prints it:
+  `src/inspect_wat.ts` lays it out (util.inspect's `reduceToSingleString`, `groupArrayElements`,
+  `formatPrimitive`'s split of a long string with newlines, depth 4 then `[Object]` / `[Name]` /
+  `[Array]`, Node's `currentDepth` as `$__insp_cur`); wasic generates one writer per type
+  (`inspWriterFor`, a class with subclasses dispatching on its tag). What it cannot print exactly is
+  refused with the reason (`inspectRefusal`): a nullable, function or tuple field, a string enum, a
+  discriminated union, a type inside itself, a class field its code never assigns (Deno prints
+  `undefined`), an object literal whose keys are not in the interface's declared order (Deno prints
+  the literal's order), an array literal mixing objects and other values, an f32 array field.
+  Inside a template or a concatenation an object is untouched (string conversion). The Phase 13b
+  printer of a call's struct result is gone (it printed a string field's pointer and a boolean as
+  1). Measured against Deno: the 1st and 2nd references (scratch), the edge set, the refusals.
+- **ld113 (found and fixed; the same on main)** a struct literal pushed onto an array DECLARED
+  EMPTY (`out.push({ x: i, y: 1 })`, in a function or at top level) used `$__rt_struct_ptr`, which
+  only an array literal with elements declared: an invalid module. Now declared by use (the
+  post-emit scans).
+- **sw134 (silent, found and fixed; the same on main, measured)** an array declared from a call,
+  `const pts: Pt[] = two()`, forgot its element struct: `pts[0].x` was refused and
+  `console.log(pts)` printed `[ 260, 268 ]`. Both `arrCallPre` scans record `structTypeName`.
+- **sw135 (silent, found and fixed; the same on main, measured)** a top-level object literal over
+  several lines, `const d: Doc = {` with a field per line, was registered EMPTY and its field lines
+  emitted as stub comments: `d.title, d.n` printed ` 0`. `joinMultilineArrayLiterals` joins an
+  object literal's lines too (a declaration whose value starts with `{`).
+- **sw136 (silent, found and fixed; the same on main, measured)** the same join collapsed every run
+  of whitespace in the joined text, a string literal's too: `["x  y"]` over two lines printed
+  `x y`. Each line is trimmed instead.
+Tests `7j_ConsoleObjectWriter` (fails with `main`'s compiler), `7i_ConsoleWholeStructRefused` (now
+the nullable-field refusal).
 
 **ld106–ld109 FIXED 2026-10-23 (the owner: "fix the items left open"); ld111, ld112 and sw133
 (silent) found and fixed** (open: silent 1, sw119; loud 1, ld45).
@@ -371,7 +403,7 @@ terminal fallback (console_log.ts ~2605) emits `(;? … ;) (T.const 0)` with no 
 | ~~ld43~~ | ✅ FIXED 2026-10-22: emitExprCore's `.length` of a string-valued receiver unwraps parentheses and builds a concatenation into the `$__str_op` pair (emitStringAssign); it also takes a string FIELD of an element (ld70) and stays out of a sum (`a.length + t.length`) and of a plain element read (`arr[j].length`, its direct load). `isStringExpr` now knows `L + R` with a string on either side (the last additive operator being that `+`, nothing looser at top level): `(s + s).length` was refused. Test `4m_ExpressionGaps`. Was (found with sw26, 2026-10-15): `.length` of a parenthesised string expression in console.log, `("pre" + s).length`, is refused | console_log |
 | ~~sw74~~ | ✅ FIXED 2026-10-15 (found with ld37; the same on main): a whole STRUCT array in console.log printed its element POINTERS, `[ 260, 264 ]` for `[ { x: 1 }, { x: 2 } ]`: the refusal list missed `structTypeName`, and the elements are i32. Refused now (ld45 is the printing) | console_log |
 | ~~ld44~~ | ✅ FIXED 2026-10-15 (found with ld37; the same on main): a string `push` with an expression in a ONE-LINE loop at top level, `for (…) grown.push("w" + i)`, used an undeclared `$__str_push_ptr` (the pre-scan wants the push at the start of its line); declared after emission now, as `$__arr_tmp`. Test `7h_ConsoleWholeArrays` | wasic temps |
-| ld45 | OPEN (2026-10-15): printing a whole struct array, `console.log(ps)` (Deno `[ { x: 1 }, { x: 2 } ]`), is refused; needs an object writer (util.inspect's `{ k: v }`, its own line-breaking). 2026-10-22: a single struct or class instance too (it printed its address: sw127, now refused, `refuseWholeObjectArgs`) | console array writer |
+| ~~ld45~~ | ✅ FIXED 2026-10-24 (the object writer, `src/inspect_wat.ts`; see the 2026-10-24 entry above). Was OPEN (2026-10-15): printing a whole struct array, `console.log(ps)` (Deno `[ { x: 1 }, { x: 2 } ]`), is refused; needs an object writer (util.inspect's `{ k: v }`, its own line-breaking). 2026-10-22: a single struct or class instance too (it printed its address: sw127, now refused, `refuseWholeObjectArgs`) | console array writer |
 | ~~sw127~~ | ✅ FIXED (refused) 2026-10-22 (found with ld45; the same on main): `console.log(p)` of a whole struct printed its ADDRESS, `260` for `{ x: 1, y: 2.5 }`. wasic's console handlers refuse a bare struct / class instance argument before console_log runs (no new console_log export); printing it is ld45. Test `7i_ConsoleWholeStructRefused` (expect-fail) | wasic console |
 | ld36 | FIXED 2026-10-13 with D3 (a documented gap, dynrt-design.md 3.1, never a row until D3 made it the only way to unbox): a cast operand in a comparison, `(x as f64) === 13`, compared as `i32.eq` over an f64, an invalid module. The binary-op loop now types an operand written `(x as T)` / `x as T` as T. `dynrt_any_bundle` checks 13 such comparisons | wasic binary-op operand typing |
 | ld35 | FIXED 2026-10-13 with D3 (found building it; the same on main): in a `console.log` argument, a call to a user function with an `i32` parameter passed an f64 argument RAW (`console.log(h(f))`), an invalid module ("call[0] expected type i32, found global.get of type f64"); outside the console it was truncated. Both paths now refuse it (D3: a float passed to an integer parameter; console `intArgWat`). typed_decl asserts it | console_log call arguments |
