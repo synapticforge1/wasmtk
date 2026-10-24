@@ -478,8 +478,10 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
   proposal — two custom-descriptors definitions would otherwise be judged too), then re-record the
   4 files' `unbuilt`. The plain `memory64.wast` module `(module (memory i64 0 0x1_0000_0000_0000))`
   must instantiate: it stays an engine skip.
-- ⏳ **The five `36_*` modules are not in `tests/engine_baseline.json`** (15 pairs, all `match`),
-  since the Phase 36 restore (2026-09-28). A deliberate `--update-baseline`.
+- ✅ **The five `36_*` modules are in `tests/engine_baseline.json` (2026-10-23)**, with every other
+  module added since the baseline was last recorded: 189 pairs over 63 modules (185 `match`, 4
+  wazero `reject` in exception-handling tests, the class 33 pinned wazero rejects already are);
+  the re-record only ADDED (0 removed, 0 changed). Cross-check: 1341 on baseline, 0 unpinned.
 - ⏳ **`wasmbundle` does not route `importWat`** (compiler-bugs.md, the 2026-06-24 wasmmerge entry,
   re-verified open 2026-09-30): a non-WASI import in a bundled module is dropped. No test covers it.
 
