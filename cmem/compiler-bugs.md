@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 1 | 147 | 0 | 27 |
-| LOUD | 5 | 112 | 0 | 19 |
+| SILENT-WRONG | 1 | 148 | 0 | 27 |
+| LOUD | 1 | 118 | 0 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -22,8 +22,41 @@ bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed,
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
 
+**ld106–ld109 FIXED 2026-10-23 (the owner: "fix the items left open"); ld111, ld112 and sw133
+(silent) found and fixed** (open: silent 1, sw119; loud 1, ld45).
+- **ld106** a template or concatenation as a METHOD's, `new`'s or `super`'s string argument: one
+  helper, `emitStringArg`, at all 16 sites (it was `emitStringPtrLen`, which builds neither): a
+  directly readable string as before, else built into the `$__str_arg` pair; the probe's failure
+  count is taken back once the build handles it.
+- **ld107** an arrow inside a template's `${…}`: `firstCodeArrowIdx` now scans holes as code (a
+  mode stack: template text, holes with brace depth, strings), so the arrow is lifted; `=>` in a
+  template's text, in a string in a hole, and after a `//` inside a template stay text.
+- **ld108** an array FIELD's other methods (join, indexOf, includes, reduce, sort, reverse,
+  splice, filter…): the field is loaded into a fresh alias `$__fa_N`, registered as a dynamic array,
+  and the expression rewritten onto it (expression, string and statement forms; a statement stores
+  the pointer back, a splice may move it). With it: an array's `includes` / `some` / `every` are
+  typed `bool` by inferExprType (through the alias a `true` printed `1`).
+- **ld109** a diagnostic located INSIDE A COMMENT that quoted the failing code: the locator now
+  prefers a match in code (`commentRanges`, string-aware), a comment match only as a fallback.
+  Test in `typed_decl_tests` ("located past a comment"), inverted.
+- **ld111 (found and fixed)** a template nested in a hole, `${\`inner ${n}\`}`, was "Unsupported
+  expression": built first into its own numbered pair `$__str_nest_N` (not the pair the outer
+  template is being built into). With it, `splitStmts` skipped a template to the NEXT backtick, so
+  a one-statement body `return \`r${\`q${who}\`}\`;` was cut at the inner one; `skipTemplateLiteral`
+  now skips to the template's own closing backtick (and `splitTemplateLiteral` past a nested one).
+- **ld112 (found and fixed)** in console.log, a string method whose argument held a `(` even in a
+  string (`p.join("(", x)`) fell to the i32 path: its void call stored as a value, an invalid
+  module (ld102's receiver regex `[^()]*`; now any `recv.method(…)`, the resolver decides).
+- **sw133 (silent, found and fixed; the same on main, measured)** a string method in console.log
+  with a TEMPLATE argument printed "" for it: `p.join(\`[${k}]\`)` printed `A` for `[4]A`. The
+  string resolver ran under quietEmit and used a result that stood on a quietly failed argument;
+  it now rejects one (the `quietStringFailures` rule dotCallLookup already had, sw08), so such a
+  case is loud, and with ld106 it is built.
+Tests `29_StringArgumentsAndFieldMethods`, `28_TemplateHoles` (each fails with `main`'s compiler),
+the typed_decl case.
+
 **ld103–ld105 FIXED 2026-10-23; sw129–sw132 (silent) and ld110 found and fixed; ld106–ld109
-found, OPEN** (open: silent 1, sw119; loud 5, ld45 and ld106–ld109). ⚠️ First, a measuring trap
+found, OPEN** (all four FIXED later the same day, above) (open: silent 1, sw119; loud 5, ld45 and ld106–ld109). ⚠️ First, a measuring trap
 that hid all of this for a while: **`wasmtk run x.ts` runs the `.ts` under DENO and never
 compiles it** (it is the corpus's reference run, `src/utils.ts` `runWasi`), so a probe compared that
 way compares Deno with Deno. Probe the compiler with `wasmtk wasic x.ts -o x.wasm` then

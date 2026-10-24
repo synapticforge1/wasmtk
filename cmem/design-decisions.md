@@ -825,6 +825,17 @@ string-array element, and `Math.*`/`Number.*` handling all have such twins.
   reads and push / pop / shift / unshift go through `arrayFieldRef`, and a push stores the
   possibly-reallocated pointer back into the field. A class field without it is a bare i32 and
   every array operation on it is refused.
+- **Template literals are scanned WITH their holes (2026-10-23, ld107 / ld111; do not revert to
+  "skip to the next backtick").** `skipTemplateLiteral` finds a template's own closing backtick
+  past `${…}` holes, their strings, braces and nested templates; `splitStmts` and
+  `splitTemplateLiteral` use it, and `firstCodeArrowIdx` treats a hole as code (so an arrow there
+  is lifted) and a template's text as text. Each of the three once skipped to the next backtick,
+  which cut a nested template and hid a hole's arrow.
+- **A string built from parts that failed quietly is not a result (2026-10-23, sw133).** Under
+  `quietEmit` an unsupported string becomes "" and counts in `quietStringFailures`; a resolver that
+  answers for the console must reject a non-empty result whose emission raised that count (it
+  printed "" for a template argument), and a helper that RECOVERS from its own quiet probe
+  (`emitStringArg`) takes the count back.
 - **A statement `x.push(…)` on a class or struct variable is a METHOD call, never an array push**
   (sw129): the dynamic-array statement form's i32-local fallback excludes class and struct
   variables, whose pointers are i32 locals too.
