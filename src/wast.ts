@@ -956,6 +956,17 @@ export interface WastResult {
    */
   validatorRejectedValid: string[];
   /**
+   * The mirror of `validatorRejectedValid`: `assert_invalid` modules that DECODE but that binaryang's
+   * validator ACCEPTS under the file's own features, as `<module start>` (2026-10-23). It measures
+   * whether binaryang could ever be trusted to say a module is VALID — the condition for letting it
+   * judge the `(module definition …)`s V8 refuses for its own size caps, which stay engine skips
+   * while this is not empty. The features are the file's: `customDescriptors` (which relaxes
+   * `br_on_cast`) only under `proposals/custom-descriptors/`; and a module valid only because
+   * multi-memory is on is not counted (`proposals/threads/` predates multi-memory and asserts five
+   * such modules invalid). The gate pins it per file (`tests/wast_tests.ts`).
+   */
+  validatorAcceptedInvalid: string[];
+  /**
    * With `lowerCustomPageSizes`: modules lowered because V8 refused their custom page size, and the
    * passes that depended on one (an action on a lowered instance, or a lowered module's own
    * assertion). They are V8 running binaryang's rewrite, not an engine implementing the proposal,
@@ -1047,6 +1058,7 @@ export async function runWast(
     failures: [],
     engineLimits: {},
     validatorRejectedValid: [],
+    validatorAcceptedInvalid: [],
     lowered: { modules: 0, passes: 0 },
   };
   const skip = (reason: string) => {
@@ -1105,6 +1117,29 @@ export async function runWast(
       return null; // undecodable here: not a validation verdict
     }
     return r.errors[0]?.message ?? "invalid";
+  };
+  // True when binaryang's validator ACCEPTS `bytes` under `features` and they decode: a positive
+  // validity verdict.
+  const binaryangValid = (bytes: Uint8Array, features: ReturnType<typeof allFeatures>): boolean => {
+    if (wasmValidate(bytes, { features }).result !== 0) return false;
+    try {
+      wabtMod.readWasm(bytes, { readDebugNames: false }).destroy();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // The guard on binaryang's positive verdicts (see `validatorAcceptedInvalid`): an `assert_invalid`
+  // module it accepts under this file's features is recorded, unless multi-memory alone makes it
+  // valid. `customDescriptors` relaxes br_on_cast's typing, so it is on only in its own directory.
+  const fileFeatures = {
+    ...allFeatures(),
+    customDescriptors: path.replaceAll("\\", "/").includes("proposals/custom-descriptors/"),
+  };
+  const checkInvalid = (bytes: Uint8Array, at: number) => {
+    if (!binaryangValid(bytes, fileFeatures)) return;
+    if (!binaryangValid(bytes, { ...fileFeatures, multiMemory: false })) return;
+    res.validatorAcceptedInvalid.push(src.slice(at, at + 70));
   };
 
   let cur: WebAssembly.Instance | null = null;
@@ -1699,6 +1734,7 @@ export async function runWast(
           let bytes: Uint8Array | null = null;
           try {
             bytes = assemble(mod);
+            if (kind === "assert_invalid") checkInvalid(bytes, cmd.start);
             // Lowering applies to linking (the question is the link), never to validation.
             if (kind === "assert_unlinkable") await withLowering(bytes, instantiate);
             else await WebAssembly.compile(bytes as BufferSource); // validation

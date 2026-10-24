@@ -1242,6 +1242,16 @@ silently break (all `src/wasic.ts`):
       `assert_invalid` passes up and skips down, and explain each moved file. **That release is
       1.13.0 (pinned 2026-10-20): nothing moved** (the fixed shapes are not reached through the
       second oracle in our corpus; the guard reads 0).
+    - **The MIRROR guard, `validatorAcceptedInvalid` (2026-10-23).** binaryang may only be asked
+      "is this VALID?" (e.g. for a definition V8 refuses for a size cap) while it accepts no module
+      the spec calls INVALID. Measured on every decodable `assert_invalid` module, under the
+      FILE's features, never `allFeatures()` everywhere: `customDescriptors` relaxes `br_on_cast`,
+      so it is on only under `proposals/custom-descriptors/`; a module valid only with multi-memory
+      on is a feature-set difference (`proposals/threads/` predates it). What remains is a binaryang
+      defect, pinned per file with its cause in `tests/wast_tests.ts` (`KNOWN_ACCEPTED_INVALID`;
+      1.15.0: one, a legacy `delegate`'s unchecked label depth). Not a verdict change: V8 rejects
+      those modules, so they pass as before; the guard only decides whether binaryang's VALID
+      verdict may be used (next-work.md, the size-capped definitions).
     - **Custom-page-sizes LOWERING in the wast runner (2026-09-30)**, `binaryenLowerCustomPageSizes`
       in `src/binaryen.ts`, driven by `WastOptions.lowerCustomPageSizes` in `src/wast.ts`. Four
       rules, each tested in `tests/wast_runner_tests.ts` and inversion-checked: (1) **gate-only**,
