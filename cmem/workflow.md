@@ -246,8 +246,9 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 #    again, "✅ ON BASELINE — N known failure(s) still standing" is the pass condition.
 #    The known failures print in red every run by design; the gate fails only if a count MOVES.
 
-# 5. engine_cross_check → expect 1152 pairs on baseline (2026-09-30), 0 regressed, 0 improved;
-#    111 pairs are not in the baseline (re-read 2026-10-19; it said 15, the five `36_*` modules, in 2026-09-30)
+# 5. engine_cross_check → expect 1341 pairs on baseline (2026-10-23), 0 regressed, 0 improved,
+#    0 not in the baseline (re-recorded 2026-10-23: +189 pairs, the `36_*` modules and every test
+#    added since 2026-09-30). A new corpus test adds unpinned pairs: re-record them deliberately.
 deno run --allow-read --allow-run --allow-env --allow-write tests/engine_cross_check_tests.ts
 #    Multi-engine (V8 vs wasmtime/wasmer/wazero). Absent engines skip, never fail.
 #    An IMPROVEMENT fails too, until the baseline is re-recorded deliberately.

@@ -114,6 +114,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-23, binaryang **1.15.0**; latest release v2.0.3)
 
+> **2026-10-23, the engine cross-check baseline re-recorded:** +189 pairs (63 modules: the five
+> `36_*` and every test added since 2026-09-30; 185 `match`, 4 wazero `reject`, exception
+> handling), nothing removed or changed → **1341 on baseline, 0 not in it**. And the wast runner
+> gained the mirror guard (`validatorAcceptedInvalid`): 1 spec-invalid module binaryang accepts,
+> pinned (`legacy/try_delegate.wast`, a binaryang defect); wast still 64,506 / 0 / 16.
+
 > **2026-10-23, binaryang 1.13.0 → 1.15.0 pinned, gate GREEN, nothing known-failing.** Predicted
 > from the changelog: 1.14.0's `Memory64Lowering` runs only when asked (nothing moves); 1.15.0's
 > `SSANoMerge` runs first at `-O3` / `-Os` / `-Oz`, so PIPELINE goldens merging a `-Oz` library
