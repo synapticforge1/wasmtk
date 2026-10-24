@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the compatibility gate reads the PREVIOUS v* tag's surface
 
       # DO NOT pin this to chase the missing JSR provenance — that was tried on 2026-07-30 and
       # RULED OUT. The provenance history splits exactly on a Deno release boundary (Deno <= 2.9.1
@@ -41,6 +43,13 @@ jobs:
           else
             echo "::warning::OIDC token NOT available (URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}, TOKEN present: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}). deno publish will skip provenance. Verify id-token:write is honored — check org/enterprise Settings → Actions → General OIDC policy."
           fi
+
+      # The local `deno task bump` ran the compatibility gate on the bump commit; this repeats it on
+      # the TAGGED tree (H6, Rule 3), so a tag pushed by hand cannot skip it: the snapshot matches,
+      # the version is the tag, one SemVer step at or above the floor since the previous tag, and
+      # no removal without a deprecation release (Rule 4). The logic is TypeScript; this only runs it.
+      - name: Compatibility gate on the tag
+        run: deno run -A scripts/api-surface.ts --verify-tag "${GITHUB_REF_NAME}"
 
       - name: Publish to JSR
         run: deno publish
@@ -91,5 +100,5 @@ jobs:
             echo "  attempt $i: no provenance yet, retrying in 15s"
             sleep 15
           done
-          echo "::error::${PKG}@${VERSION} was published WITHOUT provenance (no Sigstore/Rekor entry). Known-absent since v1.11.3 — cause still unidentified. RULED OUT so far: the Deno version (v2.0.0 published on a pinned 2.9.1 and was still unattested); usesNpm (true on BOTH sides of the 1.11.2/1.11.3 boundary); a stale/cached API read (re-checked 2026-08-27 with cache-busting — the absence is real); and a global JSR- or GitHub-side change, because binaryen-ts, wabt-ts and binaryang all published ATTESTED from this same scope on 2026-08-27. Whatever this is, it is specific to wasmtk. The OIDC step above passes, so it is not the token prerequisite. See cmem/design-decisions.md."
+          echo "::error::${PKG}@${VERSION} was published WITHOUT provenance (no Sigstore/Rekor entry). The last outage (v1.11.3 to v2.0.0, 2026-07-08 to 07-30) was SCOPE-WIDE, outside this repo: every @jrmarcum publish in that window lacked provenance (measured 2026-10-23, cmem/design-decisions.md). Check other packages' recent publishes before looking for a cause here; the OIDC step above only proves the token prerequisite."
           exit 1

@@ -33,7 +33,14 @@ act on. Nothing here is written outside this repo; the workspace pulls it on its
   probe reaches for the shell. And one `sed -n` READ of src/wasic.ts (no edit) where `Read` was
   the rule. Also learned: the installed `wasmtk` shim runs the CURRENT `src/` (a stash changed
   its behaviour without a reinstall), so an inversion check must stash, not merely skip the
-  reinstall.
+  reinstall. **2026-10-23, two more:** (a) two inline `git commit -m` on a local branch (folded
+  into `-F` commits before anything was pushed); (b) a chained shell probe ran PAST a failed
+  `git clone` (exFAT "dubious ownership": a clone FROM this drive needs `-c safe.directory=…`, as
+  `scripts/check_compat_gate.ts` does), so its `git checkout -B` / `commit` / `tag v3.0.0` /
+  `tag v2.1.0` ran in the REAL repo. Caught at once from the output; nothing was pushed; the two
+  tags and two branches were deleted and `deno.json` was back at 2.0.3 on the working branch.
+  Lesson: a multi-step probe that changes directory must stop when the `cd` or the clone fails
+  (`set -e`, or `&&` all the way), and must never `tag v*` outside a clone it has verified.
 - **W4. rsxtk DOES publish** (measured 2026-10-23, crates.io API: crate `rsxtk`, 34 versions,
   default 0.4.4, created 2026-01-06). The workspace says it "publishes nowhere": `projects.md:20,37`,
   `working-rules.md:202`, letter H19 item (11). So rsxtk's `Cargo.toml` contact email falls inside
@@ -418,7 +425,19 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
     (INDEX 21.4 → 9.4 KB, one line per file; this file 97.8 → 5.6 KB; the bump checklist moved to workflow.md; 14 references retargeted; the ★ stamp wording; H4 verified item by item, T7's one live count fixed).
     Bootstrap (INDEX + CLAUDE.md) is 14.5 KB against a ~10 KB guideline; the rest is the INDEX's
     policy section, which is the owner's to trim.
-  - Rule 4 (deprecate before remove) and a CI repeat of the gate on the tagged commit: not built.
+  - ✅ **Rule 4 (deprecate before remove) and CI's repeat of the gate on the tag: BUILT
+    2026-10-23.** `scripts/api-surface.ts`: a `@deprecated` doc tag (own line) is a
+    `(deprecated)` / `(deprecated):<member>` surface key; `Floor.undeprecatedRemovals` lists every
+    removal the last release did not deprecate (symbol, member, entrypoint; the CLI surface is
+    exempt, it has no doc comments); `bump` refuses one at ANY kind; `--verify-tag <tag>` runs in
+    `publish.yml` before `deno publish` (snapshot matches, version = tag, one SemVer step at or
+    above the floor since the previous tag, Rule 4; `fetch-depth: 0`). Tests:
+    `tests/api_surface_tests.ts` (24, inverted: deprecation ignored → the 4 allowed-removal cases
+    fail) and `scripts/check_compat_gate.ts` F1–F4 (19 / 19). **Found with them:** (1) the gate
+    recorded `./utils VERSION` by its literal type, so every bump made the snapshot stale and the
+    next floor major — CI would have refused every release; now recorded as `string`
+    (re-baselined in its own commit); (2) `check_compat_gate` A1, A2, D1 had failed since
+    2026-10-09 (they assumed a MINOR floor; it is MAJOR) — corrected.
 - ⏳ **Wasm types in TypeScript** (wasm-math-plan.md). **All decisions D1–D6 settled 2026-10-09**
   (owner): integer `/` is a compile error (built); D3, refuse an implicit f64 → i32 (BUILT
   2026-10-13); D6, a located compile-error report (BUILT 2026-10-13); both recorded in the note at

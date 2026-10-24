@@ -14,6 +14,16 @@
  *                                    record a REVIEWED change (see `Review`)
  *   deno task api-surface --floor    print the minimum release kind since the last `v*` tag, and
  *                                    the symbols that set it (what `deno task bump` enforces)
+ *   deno run -A scripts/api-surface.ts --verify-tag <v-tag>
+ *                                    CI on the tagged commit (publish.yml): the snapshot matches,
+ *                                    the version is the tag, one SemVer step from the previous tag,
+ *                                    at or above the floor, and Rule 4 holds
+ *
+ * Rule 4 (deprecate before remove, 2026-10-23): a symbol or member may be REMOVED only after a
+ * release in which it carried a `@deprecated` tag (on its own doc-comment line). Deprecations are in
+ * the surface as `(deprecated)` / `(deprecated):<member>` keys; adding one is minor, dropping one
+ * is not a break. An undeprecated removal is refused by `bump` and by `--verify-tag` at any kind.
+ * The CLI surface (`(cli)`) has no doc comments, so its removals are major only.
  *
  * Classification (Rule 2): anything REMOVED or CHANGED (an entrypoint, a symbol, a member, a
  * signature, a kind) sets the floor to `major`; something only ADDED sets it to `minor`; nothing
@@ -68,6 +78,14 @@ function stable(v: any): string {
   return JSON.stringify(v);
 }
 
+/** A `@deprecated` tag on its own line of a doc comment (Rule 4's marker). */
+const isDeprecated = (x: any): boolean =>
+  (x?.jsDoc?.tags ?? []).some((t: any) => t.kind === "deprecated");
+
+/** The member key that marks `member` (or, with `(deprecated)` alone, the symbol) deprecated. */
+export const DEPRECATED = "(deprecated)";
+const deprecatedKey = (member: string) => `${DEPRECATED}:${member}`;
+
 /** Split an aggregate's definition into named members; `(header)` holds what is not a member. */
 function membersOf(kind: string, def: any): Record<string, string> {
   const out: Record<string, string> = {};
@@ -78,7 +96,13 @@ function membersOf(kind: string, def: any): Record<string, string> {
       const key = `${cat}:${m.name ?? `#${i}`}`;
       (byName.get(key) ?? byName.set(key, []).get(key)!).push(m);
     }
-    for (const [k, ms] of byName) out[k] = stable(ms.length === 1 ? ms[0] : ms);
+    for (const [k, ms] of byName) {
+      out[k] = stable(ms.length === 1 ? ms[0] : ms);
+      // Doc comments are not surface (`stable` drops them), but a deprecation is: Rule 4 lets a
+      // member be removed only after a release that deprecated it. Its own key, so deprecating
+      // reads as an addition, never as a CHANGED member.
+      if (ms.some(isDeprecated)) out[deprecatedKey(k)] = "deprecated";
+    }
   };
   const header: Record<string, unknown> = {};
   if (kind === "interface") {
@@ -130,12 +154,18 @@ async function symbolsOf(cwd: string, file: string): Promise<Record<string, Surf
       const kind = decls.map((d: any) => d.kind).sort().join("+");
       const aggregate = decls.length === 1 &&
         ["interface", "class", "enum"].includes(decls[0].kind);
+      // `VERSION` (./utils) is the package's own version, written by every bump: its literal TYPE
+      // ("2.0.3") changed with each release, so the snapshot went stale the moment `bump` ran and
+      // the next floor read `VERSION signature CHANGED`, major (found 2026-10-23, by
+      // check_compat_gate F3, before any release had used the gate). Its contract is `string`.
+      const defs = sym.name === "VERSION"
+        ? decls.map((d: any) => ({ ...d.def, tsType: { kind: "keyword", repr: "string", value: "string" } }))
+        : decls.map((d: any) => d.def);
       out[sym.name] = {
         kind,
-        members: aggregate
-          ? membersOf(decls[0].kind, decls[0].def)
-          : { "(whole)": stable(decls.map((d: any) => d.def)) },
+        members: aggregate ? membersOf(decls[0].kind, decls[0].def) : { "(whole)": stable(defs) },
       };
+      if (decls.some(isDeprecated)) out[sym.name]!.members[DEPRECATED] = "deprecated";
     }
   }
   return out;
@@ -287,6 +317,12 @@ export interface Floor {
   kind: Kind;
   reasons: { kind: Kind; what: string }[];
   warnings: string[];
+  /**
+   * Rule 4 (H6; owner 2026-09-20: "removals are deprecated for one minor first"): every removal
+   * whose symbol or member the BEFORE surface did not mark `@deprecated`. A release with any is
+   * refused by `deno task bump` and by CI on the tag, whatever its kind.
+   */
+  undeprecatedRemovals: string[];
 }
 
 /**
@@ -341,12 +377,23 @@ export async function diffSurfaces(
 ): Promise<Floor> {
   const reasons: Floor["reasons"] = [];
   const warnings: string[] = [];
+  const undeprecatedRemovals: string[] = [];
   const used = new Set<Review>();
+  // Rule 4: was this symbol (or this member of it) deprecated in `before`?
+  const wasDeprecated = (s: SurfaceSymbol | undefined, member?: string) =>
+    s !== undefined &&
+    (s.members[DEPRECATED] !== undefined ||
+      (member !== undefined && s.members[deprecatedKey(member)] !== undefined));
   const eps = new Set([...Object.keys(before.entrypoints), ...Object.keys(after.entrypoints)]);
   for (const ep of [...eps].sort()) {
     const a = before.entrypoints[ep], b = after.entrypoints[ep];
     if (!b) {
       reasons.push({ kind: "major", what: `entrypoint ${ep} REMOVED` });
+      // An entrypoint goes only when every symbol it exported was deprecated first.
+      const live = Object.entries(a ?? {}).filter(([, s]) => !wasDeprecated(s)).map(([n]) => n);
+      if (ep !== "(cli)" && live.length > 0) {
+        undeprecatedRemovals.push(`entrypoint ${ep} (not deprecated: ${live.join(", ")})`);
+      }
       continue;
     }
     if (!a) {
@@ -357,8 +404,11 @@ export async function diffSurfaces(
     for (const n of [...names].sort()) {
       const sa = a[n], sb = b[n];
       const at = `${ep} ${n}`;
-      if (!sb) reasons.push({ kind: "major", what: `${at} REMOVED` });
-      else if (!sa) reasons.push({ kind: "minor", what: `${at} added (${sb.kind})` });
+      if (!sb) {
+        reasons.push({ kind: "major", what: `${at} REMOVED` });
+        // The CLI surface has no doc comments to carry a deprecation; its removals stay major only.
+        if (ep !== "(cli)" && !wasDeprecated(sa)) undeprecatedRemovals.push(at);
+      } else if (!sa) reasons.push({ kind: "minor", what: `${at} added (${sb.kind})` });
       else if (sa.kind !== sb.kind) {
         reasons.push({ kind: "major", what: `${at} changed kind ${sa.kind} → ${sb.kind}` });
       } else {
@@ -367,8 +417,26 @@ export async function diffSurfaces(
           const ma = sa.members[m], mb = sb.members[m];
           if (ma === mb) continue;
           const label = m === "(whole)" ? `${at} signature` : `${at} ${m}`;
-          if (mb === undefined) reasons.push({ kind: "major", what: `${label} REMOVED` });
-          else if (ma === undefined) {
+          // A deprecation marker: added is a minor note (the deprecation release); dropped is an
+          // un-deprecation, which breaks nothing. Neither is a removal of API.
+          if (m === DEPRECATED || m.startsWith(`${DEPRECATED}:`)) {
+            // a removed member takes its marker with it: that is the removal, reported below
+            const of = m.slice(DEPRECATED.length + 1);
+            if (mb === undefined && of && sb.members[of] === undefined) continue;
+            reasons.push({
+              kind: mb !== undefined ? "minor" : "patch",
+              what: `${at} ${m === DEPRECATED ? "" : m.slice(DEPRECATED.length + 1) + " "}${
+                mb !== undefined ? "deprecated" : "no longer deprecated"
+              }`,
+            });
+            continue;
+          }
+          if (mb === undefined) {
+            reasons.push({ kind: "major", what: `${label} REMOVED` });
+            if (ep !== "(cli)" && m !== "(header)" && !wasDeprecated(sa, m)) {
+              undeprecatedRemovals.push(label);
+            }
+          } else if (ma === undefined) {
             reasons.push({ kind: "minor", what: `${label} added` });
             if (m.startsWith("property:") && !/"optional":true/.test(mb)) {
               warnings.push(
@@ -408,7 +476,7 @@ export async function diffSurfaces(
     : reasons.some((r) => r.kind === "minor")
     ? "minor"
     : "patch";
-  return { kind, reasons, warnings };
+  return { kind, reasons, warnings, undeprecatedRemovals };
 }
 
 // deno-lint-ignore require-await
@@ -421,14 +489,15 @@ async function git(
 }
 
 /**
- * The surface at the last `v*` release tag: its committed `api-surface.json` when the tag has one,
- * else generated from a temporary, detached worktree of the tag (the bootstrap path: tags before
- * this tool carry no snapshot). The worktree is always removed.
+ * The surface at the last `v*` release tag reachable from `ref`: its committed `api-surface.json`
+ * when the tag has one, else generated from a temporary, detached worktree of the tag (the bootstrap
+ * path: tags before this tool carry no snapshot). The worktree is always removed. CI passes
+ * `<tag>^` to find the release BEFORE the one being published.
  */
-export async function surfaceAtLastTag(): Promise<
+export async function surfaceAtLastTag(ref = "HEAD"): Promise<
   { tag: string; surface: Surface; source: string }
 > {
-  const t = await git(["describe", "--tags", "--abbrev=0", "--match", "v*"]);
+  const t = await git(["describe", "--tags", "--abbrev=0", "--match", "v*", ref]);
   if (t.code !== 0 || !t.out) throw new Error(`no v* release tag found: ${t.err}`);
   const tag = t.out;
   const shown = await git(["show", `${tag}:api-surface.json`]);
@@ -455,6 +524,59 @@ export function printFloor(f: Floor, since: string): void {
   for (const r of f.reasons) console.log(`    ${r.kind.padEnd(5)}  ${r.what}`);
   if (f.reasons.length === 0) console.log("    (no surface change)");
   for (const w of f.warnings) console.log(`    ⚠️  ${w}`);
+  for (const u of f.undeprecatedRemovals) {
+    console.log(`    ❌ Rule 4: ${u} is removed without a release that deprecated it`);
+  }
+}
+
+/**
+ * The SemVer step from `prev` to `next` (`X.Y.Z`): the one component raised, every component to its
+ * right reset to 0, nothing skipped. Anything else is not a release step, and null.
+ */
+export function releaseStep(prev: string, next: string): Kind | null {
+  const p = prev.split(".").map(Number), n = next.split(".").map(Number);
+  if (p.length !== 3 || n.length !== 3 || [...p, ...n].some((x) => !Number.isInteger(x) || x < 0)) {
+    return null;
+  }
+  if (n[0] === p[0]! + 1 && n[1] === 0 && n[2] === 0) return "major";
+  if (n[0] === p[0] && n[1] === p[1]! + 1 && n[2] === 0) return "minor";
+  if (n[0] === p[0] && n[1] === p[1] && n[2] === p[2]! + 1) return "patch";
+  return null;
+}
+
+/**
+ * CI's repeat of the gate ON THE TAG (H6; Rule 3 of the compatibility gate): run by publish.yml
+ * before `deno publish`. The tree at `tag` must carry a matching `api-surface.json`, a deno.json
+ * version equal to the tag, one SemVer step from the previous `v*` tag, at least the surface floor,
+ * and no removal that skipped its deprecation release (Rule 4). Returns the problems (empty = pass).
+ */
+export async function verifyTag(root: string, tag: string): Promise<string[]> {
+  const problems: string[] = [];
+  const current = await generateSurface(root);
+  let committed = "";
+  try {
+    committed = (await readFile(`${root}/api-surface.json`, "utf8")).replace(/\r\n/g, "\n");
+  } catch {
+    problems.push("api-surface.json is missing from the tagged tree");
+  }
+  if (committed && committed !== serialize(current)) {
+    problems.push("api-surface.json does not match the tagged tree (a re-baseline was not committed)");
+  }
+  const version = JSON.parse(await readFile(`${root}/deno.json`, "utf8")).version;
+  if (`v${version}` !== tag) problems.push(`deno.json's version ${version} is not the tag ${tag}`);
+  const prev = await surfaceAtLastTag(`${tag}^`);
+  const step = releaseStep(prev.tag.replace(/^v/, ""), String(version));
+  const floor = await diffSurfaces(prev.surface, current, await loadReviews(root));
+  printFloor(floor, `${prev.tag} (${prev.source})`);
+  if (step === null) {
+    problems.push(`${prev.tag} → v${version} is not one SemVer step (patch, minor or major)`);
+  } else if (KIND_RANK[step] < KIND_RANK[floor.kind]) {
+    problems.push(`a ${step} release is below the surface floor (${floor.kind}) since ${prev.tag}`);
+  }
+  for (const u of floor.undeprecatedRemovals) {
+    problems.push(`Rule 4: ${u} is removed without a release that deprecated it`);
+  }
+  return problems;
 }
 
 if (import.meta.main) {
@@ -494,6 +616,18 @@ if (import.meta.main) {
   } else if (mode === "--floor") {
     const { tag, surface, source } = await surfaceAtLastTag();
     printFloor(await diffSurfaces(surface, current, await loadReviews(root)), `${tag} (${source})`);
+  } else if (mode === "--verify-tag") {
+    const tag = argv[1];
+    if (!tag) {
+      console.error("❌ usage: api-surface --verify-tag <v-tag>   (CI, on the tagged commit)");
+      process.exit(1);
+    }
+    const problems = await verifyTag(root, tag);
+    if (problems.length > 0) {
+      for (const p of problems) console.error(`❌ ${tag}: ${p}`);
+      process.exit(1);
+    }
+    console.log(`✅ ${tag}: the compatibility gate holds on the tagged tree`);
   } else if (mode === "--review") {
     // --review <entrypoint> <symbol> <member> <kind> <reason…>: record a person's judgment of ONE
     // changed member since the last release tag. The hashes are computed here, never typed.
@@ -539,7 +673,7 @@ if (import.meta.main) {
     console.log("   Commit it with its reason, like a re-baseline (Rule 5).");
   } else {
     console.error(
-      `❌ api-surface: unknown mode ${mode} — use --record | --check | --floor | --review`,
+      `❌ api-surface: unknown mode ${mode} — use --record | --check | --floor | --review | --verify-tag`,
     );
     process.exit(1);
   }
