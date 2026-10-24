@@ -93,7 +93,35 @@ function quoted(msg: string): string[] {
   return out.map((q) => unWasMath(q.replace(/…$/, "").trim())).filter((q) => q.length >= 2);
 }
 
-/** Finds `snippet` in the files, whitespace-tolerant, skipping occurrences already used. */
+/** The [start, end) offsets of `text`'s comments (`//…` and `/*…*\/`), skipping strings and
+ *  template literals (a `"//"` in a string is not a comment). */
+function commentRanges(text: string): [number, number][] {
+  const out: [number, number][] = [];
+  let q = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === "\\") i++;
+      else if (c === q) q = "";
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") q = c;
+    else if (c === "/" && text[i + 1] === "/") {
+      const end = text.indexOf("\n", i);
+      out.push([i, end === -1 ? text.length : end]);
+      i = end === -1 ? text.length : end;
+    } else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      out.push([i, end === -1 ? text.length : end + 2]);
+      i = end === -1 ? text.length : end + 1;
+    }
+  }
+  return out;
+}
+
+/** Finds `snippet` in the files, whitespace-tolerant, skipping occurrences already used. An
+ *  occurrence in CODE is preferred: a comment that quotes the failing code came first and took the
+ *  location (ld109, 2026-10-23); a comment match is kept only when the code has none. */
 function find(
   snippet: string,
   files: SourceFile[],
@@ -102,21 +130,39 @@ function find(
   const parts = snippet.split(/\s+/).filter(Boolean).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   if (!parts.length) return undefined;
   const re = new RegExp(parts.join("\\s*"), "g");
+  let fallback: { f: SourceFile; m: RegExpMatchArray; key: string } | undefined;
   for (const f of files) {
+    const comments = commentRanges(f.text);
+    const inComment = (at: number) => comments.some(([s, e]) => at >= s && at < e);
     for (const m of f.text.matchAll(re)) {
       const key = `${f.path}:${m.index}`;
       if (used.has(key)) continue;
+      if (inComment(m.index ?? 0)) {
+        fallback ??= { f, m, key };
+        continue;
+      }
       used.add(key);
-      const before = f.text.slice(0, m.index);
-      const line = before.split("\n").length;
-      const lineStart = before.lastIndexOf("\n") + 1;
-      const sourceLine = f.text.slice(lineStart).split("\n")[0].replace(/\r$/, "");
-      const col = (m.index ?? 0) - lineStart + 1;
-      const length = Math.max(1, Math.min(m[0].split("\n")[0].length, sourceLine.length - col + 1));
-      return { file: f.path, line, col, length, sourceLine };
+      return located(f, m);
     }
   }
+  if (fallback) {
+    used.add(fallback.key);
+    return located(fallback.f, fallback.m);
+  }
   return undefined;
+}
+
+function located(
+  f: SourceFile,
+  m: RegExpMatchArray,
+): { file: string; line: number; col: number; length: number; sourceLine: string } {
+  const before = f.text.slice(0, m.index);
+  const line = before.split("\n").length;
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const sourceLine = f.text.slice(lineStart).split("\n")[0].replace(/\r$/, "");
+  const col = (m.index ?? 0) - lineStart + 1;
+  const length = Math.max(1, Math.min(m[0].split("\n")[0].length, sourceLine.length - col + 1));
+  return { file: f.path, line, col, length, sourceLine };
 }
 
 /** Locates and splits every diagnostic, in the order given. */

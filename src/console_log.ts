@@ -1394,8 +1394,17 @@ function parseSingleArg(
   // return globals). Emitted here as an i32 call it was an invalid module (ld102, 2026-10-22). Only
   // for an instance receiver (not a string or an array, whose methods console builds itself); the
   // resolver answers only for a string-valued form.
+  // An array FIELD's string method, `b.names.join("|")` (ld108, 2026-10-23): wasic's string
+  // resolver (it loads the field into an alias); it answers only for a string-valued form.
+  if (_stringExprResolver && token.endsWith(")") && /^(?:this|\w+)\.\w+\.\w+\s*\(/.test(token)) {
+    const r = _stringExprResolver(token, locals);
+    if (r) return [{ kind: "strexpr" as const, ptrWat: r.ptrWat, lenWat: r.lenWat }];
+  }
   {
-    const recv = token.match(/^(this|\w+)(?:\.\w+\s*\([^()]*\))+$/)?.[1];
+    // Any argument text (`p.join("(", x)`, a template): `[^()]*` refused a parenthesis even inside a
+    // string, so the call fell to the i32 path below and its void call was stored as a value (an
+    // invalid module; found 2026-10-23 with ld106). The resolver decides what is a string.
+    const recv = token.endsWith(")") ? token.match(/^(this|\w+)\.\w+\s*\(/)?.[1] : undefined;
     if (
       recv && _stringExprResolver && locals.get(recv) !== "string" && !arrayLookup?.(recv) &&
       !globals?.get(recv)?.startsWith("string")
@@ -2206,7 +2215,9 @@ function parseSingleArg(
   // or built an invalid module, and a boolean would print `1` (ld103, ld104, 2026-10-23).
   if (
     _exprFallbackResolver &&
-    (/^\w+\.\w+\s*\[[^\[\]]+\]$/.test(token) || /^[\w.]+\s*\([\s\S]*\)\s*\.\s*\w+$/.test(token))
+    (/^\w+\.\w+\s*\[[^\[\]]+\]$/.test(token) || /^[\w.]+\s*\([\s\S]*\)\s*\.\s*\w+$/.test(token) ||
+      // an array FIELD's method, `b.items.includes(1)`: a boolean printed `1` (ld108)
+      /^(?:this|\w+)\.\w+\.\w+\s*\([\s\S]*\)$/.test(token))
   ) {
     const r = _exprFallbackResolver(token, locals);
     if (r) {
