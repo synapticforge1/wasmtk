@@ -121,6 +121,17 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 ## Current pass counts (2026-10-24, binaryang **1.16.1**; latest release v2.0.3)
 
+> **2026-10-24, sw119 (the i32 check, on by default), sw137, sw138, ld114, gate GREEN.** wasi
+> **507/507** (+`30_I32ArithmeticIsJavaScripts`, `30_I32OverflowThrows`,
+> `30_I32OverflowTrapsWithoutTry`, `18zz_LibraryRangeErrorCaught`; `18i` extended, failing with
+> `main`'s compiler) · golden-WAT **566**, re-recorded: 234 `.wat` (every i32 `+ - *` is now f64 with
+> a checked store), 1 `.wit` (the relocfix library's new exports), 6 new; no `.status` moved ·
+> cross-check **1368** on baseline (+9 new pairs recorded: `7j` from ld45, and the `30_I32*` tests;
+> wasmer and wazero reject `30_I32OverflowThrows`, which uses exception handling), 0 regressed — as
+> first built, 157 wazero pairs went `match → reject` (a tag in every program), cured by the owner's
+> trap-without-try ruling · wast 64,506 / 0 / 16 · every other suite green. ⚠️ The wasi suite has no
+> per-test TIMEOUT: a looping module (sw137's `main_arraymethods`) hung a run for an hour, silently.
+
 > **2026-10-24, ld45 (the object writer), ld113, sw134–sw136, gate GREEN.** wasi **503/503**
 > (+`7j_ConsoleObjectWriter`, failing with `main`'s compiler; `7i_ConsoleWholeStructRefused` now the
 > nullable-field refusal) · golden-WAT **560**, re-recorded: `7i` (the refusal text), `7j` (new),

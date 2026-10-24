@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 1 | 151 | 0 | 27 |
-| LOUD | 0 | 120 | 0 | 19 |
+| SILENT-WRONG | 0 | 154 | 0 | 27 |
+| LOUD | 0 | 121 | 0 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -21,6 +21,45 @@ Batch 2 (the same day) closed ld10, ld14, ld37, found and fixed sw74 and ld44, a
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
+
+**sw119 FIXED 2026-10-24 (the owner's rule 4, ON by default, the `--i32-check` flag removed);
+sw137, sw138 (silent) and ld114 found and fixed** (open: silent 0, loud 0).
+- **sw119** `+ - *` of i32s give JavaScript's result, computed in f64; a store into an i32 slot
+  (declaration, field, argument, return, `x op= e`) that does not fit throws a RangeError naming
+  the operator (`$__i32_fit_<op>`); `++` / `--` test the limit (`$__i32_inc` / `$__i32_dec`, no
+  f64). **How it fails (owner, 2026-10-24):** a program with exception handling of its own (a
+  try / throw) throws the catchable RangeError; one WITHOUT writes "RangeError: …" to stderr and
+  traps (no tag: as first built, 157 corpus programs wazero ran at its defaults were refused,
+  "tag section not supported as feature exception-handling is disabled"); a library always throws. Ported from branch `feat/i32-overflow-check` (643a33c, 2026-10-19) and finished: printed,
+  compared or kept in a number the value is exact, in BOTH emitters (console_log's `exprToWat`, its
+  i32 classification, `toInt32Wat`; a new resolver `setI32SlotResolver` for an i32 slot there);
+  a comparison with a chain on either side compares in f64 (`big + 1 > big` is true); ToInt32
+  (`(h * 31 + c) | 0`, `>>> 0`) wraps JavaScript's value, never the checked store (it would throw
+  where JavaScript wraps). `45_random-numbers` (mulberry32, all `number`) needed no move to wasMath:
+  it passes. Measured: a dynrt program +10% size, no measurable run-time change (process start
+  dominates).
+- **sw137 (silent, found with sw119; the same on main, measured)** wasmmerge "relocated" the f64
+  exponent bias of the number printer, `(i32.sub (local.get $e) (i32.const 1075))`, once a merged
+  library's data reached byte 1075: every number it printed was wrong (`"" + 7` was
+  `2.84e-114`; with sw119's message text dynrt's data passed it, and `main_arraymethods` HUNG — the
+  wasi suite has no per-test timeout). A constant that is the RIGHT operand of `i32.sub` is never a
+  pointer (flat: the constant before `i32.sub`; folded: the sub's last child). Test
+  `18i_RelocArithmeticConstant` extended (fails with `main`'s compiler).
+- **sw138 (silent, found with sw119)** a library that had NO data (Date) got a data range from the
+  checked store's message text, and the merge relocated the in-range constants it cannot tell from
+  pointers (`365` in `i32.div(…, 365)`, and in `(f64.convert_i32_s (i32.const 365))`). A library now
+  BUILDS that message when it throws (`i32FitThrowWat`: fresh memory, no data segment); a float
+  conversion's operand is never a pointer (ARITH_NEVER_PTR); an integer literal in a checked chain
+  is an `f64.const`.
+- **ld114 (loud, found with sw119)** a library that throws or catches, merged into a program: its
+  `throw 0` named the PROGRAM's tag 0, which exists only when the program has a `try` / `throw` of
+  its own (else "tag variable out of range", an invalid module), and its `$__exn_kind` was a private
+  copy (a caught error's kind wrong). wasmmerge maps the library's exported `__exn_tag` and
+  `__exn_kind` (a library now exports it) onto the program's, declares them when the program had
+  none (`usesExnTag`; wasmbundle too), and refuses any other tag.
+Tests `30_I32ArithmeticIsJavaScripts` (compared with Deno), `30_I32OverflowThrows` and
+`30_I32OverflowTrapsWithoutTry` (`@expect-fail: run-wasm`), `18zz_LibraryRangeErrorCaught`, `18i`
+extended.
 
 **ld45 FIXED 2026-10-24 (the object writer); ld113 and sw134–sw136 (silent) found and fixed**
 (open: silent 1, sw119; loud 0).
@@ -667,7 +706,8 @@ exit 1 naming the values; `-o` refused where nothing is written, `run` of a Go /
 source still builds to it; a command without its target exits 1, `--help` and a bare `wasmtk`
 exit 0). Both in `tests/tool_rows_tests.ts` (30).
 
-**sw119, i32 overflow** (`65536 * 65536` → 0, Deno 4294967296): first "not counted" as the
+**sw119, i32 overflow — ✅ FIXED 2026-10-24, on by default (see the 2026-10-24 entry at the top).**
+(`65536 * 65536` → 0, Deno 4294967296): first "not counted" as the
 declared-type contract; **owner 2026-10-19: the operator gives JavaScript's result, and storing a
 value that does not fit an `i32` slot throws** (design-decisions.md § "Owner's rulings of
 2026-10-19", rule 4). Silent today. **MEASURED 2026-10-19, built behind a switch on branch

@@ -125,9 +125,20 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > (compiler-bugs.md, the 2026-10-23 entries).
 > **2026-10-24: ld45 FIXED** (the object writer, `src/inspect_wat.ts` + wasic's per-type writers;
 > design-decisions.md "console.log's object writer"), with **ld113 and sw134–sw136 (silent) found
-> and fixed** (compiler-bugs.md, the 2026-10-24 entry): open now silent 1 (sw119), loud 0.
-> **Next: sw119** (owner 2026-10-23: the `--i32-check` flag is REMOVED, the check always on; still
-> to do: console / template operators, `++` / `--`, `45_random-numbers` to wasMath).
+> and fixed** (compiler-bugs.md, the 2026-10-24 entry): open then silent 1 (sw119), loud 0.
+> **2026-10-24: sw119 FIXED** (on by default, the `--i32-check` flag removed; console / template
+> operators, comparisons, `++` / `--` covered; `45_random-numbers` passes unchanged), with **sw137,
+> sw138 (silent) and ld114 found and fixed** in the merge (compiler-bugs.md, the 2026-10-24 sw119
+> entry): **open now silent 0, loud 0.** Found with it, NOT fixed: **the wasi suite has no
+> per-test timeout** — a module that loops (sw137's `main_arraymethods`) hangs the whole run with
+> no output; give `wasi_tests.ts` a timeout per run (a test-harness change, small).
+> **Next: re-pin binaryang 1.16.1 → 2.1.0** (a MAJOR; owner 2026-10-24: "finish sw119 first").
+> binaryang's letter to wasmrt (2026-10-24) touches wasmtk in one place: before 2.1.0 every module
+> with a function table was INVALID under binaryang's DEFAULT features — check every wasmtk call of
+> the validator for an explicit feature set. Feature spellings (`sat-float-to-int` →
+> `saturating-float-to-int`, `cliAliases` gone): wasmtk uses none (grep, 2026-10-24). Reference:
+> binaryang `docs/opcode-guide.md` (the portable opcode set; `throw` / `try_table` portable, legacy
+> `try` lowered by `TranslateToExnref`).
 
 > **PAUSED 2026-10-22 (owner: "update the project memory files and pause until later today").**
 > Branch `fix/loud-refusals` = main (main PUSHED 2026-10-23 after the H19 purge; the branch

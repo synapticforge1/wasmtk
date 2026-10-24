@@ -1,10 +1,11 @@
 type i32 = number;
+type f64 = number;
 
 const extra: i32 = 7;
 
 /** @export */
 export function modByInRange(x: i32): i32 {
-  // 271 lands INSIDE this library's static-data range [260, ~301) created by the banner string.
+  // 271 lands INSIDE this library's static-data range [260, ~1200) created by the strings below.
   // The old relocateDataPtrs shifted every in-range i32.const, corrupting this modulo divisor;
   // the fix excludes i32.rem_u/mul/etc. operands (a data pointer is never a modulo divisor).
   return (x % 271) + extra;
@@ -13,4 +14,21 @@ export function modByInRange(x: i32): i32 {
 /** @export */
 export function banner(): void {
   console.log("Reloc capability library banner string v1");
+}
+
+/** @export */
+export function numTextLength(h: f64): i32 {
+  // sw137 (2026-10-24): the number printer subtracts the f64 exponent bias, `e - 1075`; once this
+  // library's data reaches byte 1075 (the padding below) the merge "relocated" the bias as if it
+  // were a pointer, and `${0.5}` came out as a long wrong number. A parameter, so the text is
+  // built at run time.
+  const s: string = `${h}`;
+  return s.length;
+}
+
+/** @export */
+export function paddingLength(): i32 {
+  // 860 bytes of static data: the library's data then runs past byte 1075 (see halfTextLength)
+  const pad: string = "padding-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-0123456789-end";
+  return pad.length;
 }

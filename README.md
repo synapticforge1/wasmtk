@@ -17,7 +17,8 @@ declared**, and the two can print different values:
 
 | your code (`a`, `b` declared `i32`) | `deno run` | compiled wasm |
 | --- | --- | --- |
-| `2147483647 + 1` | `2147483648` | `-2147483648` (i32 wraps) |
+| `console.log(2147483647 + 1)` | `2147483648` | `2147483648` (the same: `+ - *` give JavaScript's result) |
+| `const s: i32 = 2147483647 + 1` | `2147483648` | **stops with a `RangeError`**: the result does not fit an `i32`; wrap with `i32.add` |
 | `7 / 2` | `3.5` | **compile error**: say `i32.div(7, 2)` (3) or `f64.div(7, 2)` (3.5) |
 | `const q: i32 = Math.floor(3.7)` | `3` (a float) | **compile error**: say `f64.toI32(Math.floor(3.7))` |
 | `const f: f32 = 0.1` | `0.1` | `0.10000000149011612` |
@@ -1257,6 +1258,7 @@ replacement.
 
 | Version | What changed | How to migrate |
 | --- | --- | --- |
+| _next release_ | **`+ - *` of `i32` values give JavaScript's result, and storing one that does not fit an `i32` throws a `RangeError`** (2026-10-24). Printed, compared or kept in a `number`, `65536 * 65536` is `4294967296` (it wrapped to 0); `x \| 0` and `x >>> 0` still wrap as in JavaScript; a store into an `i32` variable, field, parameter or return, `x += …`, and `++` / `--` past the limit fail with "RangeError: the result of '*' does not fit an i32": a catchable `RangeError` in a program that has a `try` / `throw` of its own (and in a library), else the message on stderr and a stop (no exception handling needed). The `--i32-check` switch that tried this is gone: it is always on. | Code that relies on i32 wrapping (a hash, a random-number generator) says so: `i32.add`, `i32.sub`, `i32.mul` from wasMath, or `(… ) \| 0` around the expression. |
 | _next release_ | **A plain `/` between two integers is a compile error** (2026-10-09). TypeScript divides as floats; wasm truncates; the program must say which. Applies to every integer `/`, `/=` and `(a / b) \| 0`. | Use wasMath: `i32.div(a, b)` for the truncated quotient, `f64.div(a, b)` for the fraction (`import { f64, i32 } from "…/wasmath.ts"`). The error names the expression and its line. |
 | _next release_ | **A float stored into an integer is a compile error, and so is `x as i32` on a float** (D3, 2026-10-13): a declaration, assignment, return, argument or field store of an f64 into an `i32` / `i64` slot, and a float literal there (`const n: i32 = 1.5`). Array indices and positions (`arr[i]`, `s.indexOf(x, pos)`) still convert; a string index does not (the row below). | Say the conversion with wasMath: `f64.toI32(x)` truncates and stops on NaN or out of range, `f64.toI32Sat(x)` clamps, `f64.toI32Wrap(x)` (or `x \| 0`) wraps. |
 | _next release_ | **A float index into a string is a compile error** (2026-10-15): `s[pos]` with `pos: number` / `f64`, including a `for (let i: number = 0; …)` counter, is refused (`error[float-index]`). In TypeScript `s[1.5]` is `undefined`; compiled, the index was truncated (`s[1]`). An index out of range now gives `undefined`, as in TypeScript (it gave `""`). Array indices, `charAt` and `indexOf` positions are not affected. | Index with an integer: declare the index `i32` (`for (let i: i32 = 0; …)`), or convert it with wasMath, `s[f64.toI32(pos)]`. |

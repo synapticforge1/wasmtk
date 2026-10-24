@@ -869,6 +869,16 @@
     "wasmer": "match",
     "wazero": "match"
   },
+  "30_I32ArithmeticIsJavaScripts": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "30_I32OverflowThrows": {
+    "wasmtime": "match",
+    "wasmer": "reject",
+    "wazero": "reject"
+  },
   "30_InterfaceInheritance": {
     "wasmtime": "match",
     "wasmer": "match",
@@ -2050,6 +2060,11 @@
     "wazero": "match"
   },
   "7i_ConsoleUnaryBoolStringFields": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "7j_ConsoleObjectWriter": {
     "wasmtime": "match",
     "wasmer": "match",
     "wazero": "match"
