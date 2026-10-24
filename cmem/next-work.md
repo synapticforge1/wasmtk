@@ -482,8 +482,10 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
   module added since the baseline was last recorded: 189 pairs over 63 modules (185 `match`, 4
   wazero `reject` in exception-handling tests, the class 33 pinned wazero rejects already are);
   the re-record only ADDED (0 removed, 0 changed). Cross-check: 1341 on baseline, 0 unpinned.
-- ⏳ **`wasmbundle` does not route `importWat`** (compiler-bugs.md, the 2026-06-24 wasmmerge entry,
-  re-verified open 2026-09-30): a non-WASI import in a bundled module is dropped. No test covers it.
+- ✅ **`wasmbundle` routes `importWat` (2026-10-23)**: a non-WASI import in a bundled module was
+  dropped (the bundle did not compile); now kept before every function. Test in
+  `merge_layout_tests` (11 / 11); tool_rows, witgen, the go suites and the one corpus pipeline that
+  bundles (`18_WasmImportMerge`) green.
 
 ## Planned
 
