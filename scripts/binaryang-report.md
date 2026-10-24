@@ -8,11 +8,19 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-23: 1.15.0 pinned; the gate holds as on 1.13.0
+## DRAFT (not yet sent) — 2026-10-23: 1.15.0, then 1.16.1, pinned; the gate holds as on 1.13.0
 
 **Short version:** we bumped wasmtk's pin from 1.13.0 to **1.15.0** (all three specifiers) and ran
-the full gate. Everything is green, nothing is carried as known-failing, and every number you asked
-about is where it was on 1.13.0.
+the full gate, then the same day to **1.16.1**. Everything is green, nothing is carried as
+known-failing, and every number you asked about is where it was on 1.13.0.
+
+**1.16.1, the same day:** nothing moved at all, as your changelog says (`--target portable` and the
+two lowerings are opt-in): golden WATs 554, **0** changed; wast 64,506 / 0 / 16; guard 0;
+`go_asyncify` 12 / 12; cross-check on baseline; every suite at its count. The `delegate` finding
+below still stands on 1.16.1. And we hit 1.16.1's own cause in our gate the same day: our API
+snapshot recorded `VERSION` by its literal value, so every version bump read as an API change (and
+would have forced every release to major); we now record its type. Your release-tooling note made
+us check for exactly that, so: thank you.
 
 **The numbers you asked for:**
 

@@ -626,6 +626,8 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
      first", ahead of the remaining fixes): gate green, every prediction held — wast 64,506 / 0 /
      16, guard 0, `go_asyncify` 12 / 12, 43 pipeline goldens moved, only merged-library functions
      (testing.md, 2026-10-23). Reply DRAFTED in `scripts/binaryang-report.md` (top section).
+     **1.16.1 PINNED the same day** (owner: bump first again): nothing moved, every suite green;
+     added to the same draft.
   2. **binaryang's history was rewritten too (H19, on GitHub 2026-10-23).** `upstream/binaryang`
      was RE-CLONED here the same day from `synapticforge1/binaryang` (the old clone had no local
      work: clean, no stash, `main` only; the new one is at `v1.15.0` `ae9e871`, 22 tags). A
