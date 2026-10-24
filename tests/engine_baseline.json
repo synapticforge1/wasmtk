@@ -739,6 +739,16 @@
     "wasmer": "match",
     "wazero": "match"
   },
+  "28_ArrayNamedMethodsAndStringUnshift": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "28_ArrayNamedMethodsAndStringUnshift.main": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
   "28_ArrayPredicatesAndAt": {
     "wasmtime": "match",
     "wasmer": "match",
@@ -800,6 +810,16 @@
     "wazero": "match"
   },
   "29_ClassEnhancementsCombined": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "29_FieldArraysAndCallResults": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "29_FieldInitializersAndImplicitConstructors": {
     "wasmtime": "match",
     "wasmer": "match",
     "wazero": "match"
