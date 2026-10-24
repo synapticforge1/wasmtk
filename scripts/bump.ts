@@ -77,6 +77,15 @@ if (committed !== serialize(current)) {
 const { tag, surface: released, source } = await surfaceAtLastTag();
 const floor = await diffSurfaces(released, current, await loadReviews(root));
 printFloor(floor, `${tag} (${source})`);
+// Rule 4: a removal must follow a release that deprecated it, at ANY kind (a major does not excuse
+// it; it is what a major would otherwise do without warning).
+if (floor.undeprecatedRemovals.length > 0) {
+  console.error(
+    `❌ bump: ${floor.undeprecatedRemovals.length} removal(s) since ${tag} were never deprecated ` +
+      `(Rule 4). Restore them with a \`@deprecated\` doc tag, release that, then remove them.`,
+  );
+  process.exit(1);
+}
 if (KIND_RANK[kind] < KIND_RANK[floor.kind]) {
   console.error(
     `❌ bump: a ${kind} release is below the surface floor (${floor.kind}) since ${tag}. ` +
