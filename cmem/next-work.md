@@ -135,13 +135,21 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > `WASI_STEP_TIMEOUT_S` (default 300; the whole process tree, `taskkill /T` on Windows, where
 > `wasmtk` is a `.cmd` shim) and FAILS, even where a failure is expected. The superseded branch
 > `feat/i32-overflow-check` (643a33c6, local only) deleted (owner).
-> **Next: re-pin binaryang 1.16.1 → 2.1.0** (a MAJOR; owner 2026-10-24: "finish sw119 first").
-> binaryang's letter to wasmrt (2026-10-24) touches wasmtk in one place: before 2.1.0 every module
-> with a function table was INVALID under binaryang's DEFAULT features — check every wasmtk call of
-> the validator for an explicit feature set. Feature spellings (`sat-float-to-int` →
-> `saturating-float-to-int`, `cliAliases` gone): wasmtk uses none (grep, 2026-10-24). Reference:
-> binaryang `docs/opcode-guide.md` (the portable opcode set; `throw` / `try_table` portable, legacy
-> `try` lowered by `TranslateToExnref`).
+> **2026-10-24: binaryang 1.16.1 → 2.2.0 PINNED** (owner: "bump and push"; 2.2.0 came out the same
+> day, after 2.1.0), gate GREEN, **NOTHING moved, as predicted** from the changelog (1.17.0: new
+> flags only; 2.0.0: removes the `sat-float-to-int` spelling, which wasmtk never used; 2.1.0 and
+> 2.2.0: validator feature checks, and the default-features bug that refused every function table —
+> wasmtk validates only with `allFeatures()` or a set derived from it, `src/wast.ts`). Golden 566
+> byte-identical, wast 64,506 / 0 / 16 with the one known accepted-invalid (`try_delegate`, the
+> `delegate` defect, still not fixed in 2.2.0; report `scripts/binaryang-report.md` still unsent),
+> cross-check 1368, `-Oz` guard 42 / 42, wasi 507/507. Reference: binaryang `docs/opcode-guide.md`
+> (the portable opcode set; `throw` / `try_table` portable, legacy `try` lowered by
+> `TranslateToExnref`; standalone runtimes measured at their maximum switches — wazero at its
+> defaults refuses exception handling, which is why sw119 traps without a try).
+> **Next:** nothing open in the compiler (silent 0, loud 0). Open elsewhere: the binaryang report
+> (`delegate`) and the GitHub Support request, both for the owner to send; H20's JSR-from-
+> `synapticforge1` check before 3.0.0; a 3.0.0 release when the owner asks (sw119 is BREAKING: the
+> README's Breaking Changes row).
 
 > **PAUSED 2026-10-22 (owner: "update the project memory files and pause until later today").**
 > Branch `fix/loud-refusals` = main (main PUSHED 2026-10-23 after the H19 purge; the branch
