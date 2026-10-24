@@ -47,11 +47,14 @@ pin."* The premature `-Oz` skip removal on 2026-08-25 is what that sentence is p
 `git config --global --add safe.directory <abs-path-to>/upstream/binaryang`. The symptom is a silent
 `unknown` where `upstream:link` should print the checkout revision.
 
-## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, and 1.12.1 → 1.13.0)
+## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, and 1.13.0 → 1.15.0)
 
-(1.13.0, 2026-10-20: an optimizer release moves PIPELINE goldens that merge a `-Oz` library, 43 of
-them, only in the merged library's functions; check that no other function moved, and that the
-wasi suite, which runs those pipelines, stays green.)
+(1.13.0, 2026-10-20, and 1.15.0, 2026-10-23: an optimizer release moves PIPELINE goldens that merge
+a `-Oz` library, 43 of them both times, only in the merged library's functions; check that no
+other function moved, and that the wasi suite, which runs those pipelines, stays green. The check:
+copy `tests/.golden` aside, `--record`, then split both snapshots into `(func $name …)` blocks and
+list the changed names — every one must carry a library's `_modc` prefix, and the text outside the
+functions must be identical.)
 
 Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full text before the
 2026-09-30 rewrite: `git show f21bfb5f810:cmem/next-work.md`). Each step has cost time when skipped.
