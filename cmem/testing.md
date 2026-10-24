@@ -119,7 +119,12 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-24, binaryang **1.16.1**; latest release v2.0.3)
+## Current pass counts (2026-10-24, binaryang **2.2.0**; latest release v2.0.3)
+
+> **2026-10-24, later: binaryang 1.16.1 → 2.2.0 pinned, gate GREEN, NOTHING moved** (as predicted:
+> no optimizer or printer change in 1.17.0–2.2.0). wasi 507/507 · golden-WAT 566 byte-identical ·
+> wast 64,506 / 0 / 16, accepted-invalid 1 (`legacy/try_delegate`, pinned) · cross-check 1368 on
+> baseline · `-Oz` guard 42 / 42 · go 7 / 7 / 12 · every other suite green.
 
 > **2026-10-24, sw119 (the i32 check, on by default), sw137, sw138, ld114, gate GREEN.** wasi
 > **507/507** (+`30_I32ArithmeticIsJavaScripts`, `30_I32OverflowThrows`,
