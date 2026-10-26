@@ -12,6 +12,8 @@
  *   ld89   a failed `dync` left `<name>.__dync.ts` and printed the error twice (so did `wasic`).
  *   ld90   a bad flag value became its default; `-o` on run / info / mod was ignored; a command
  *          without its target printed help and exited 0. (Loud rows, 2026-10-22.)
+ *   sw140  a negative number argument (`mod lib.wasm f -1`) was read as a flag and dropped
+ *          (2026-10-26).
  *
  * Runs the INSTALLED wasmtk in a temp directory. sw117 needs TinyGo and is skipped (and said so)
  * without it. Usage: deno run -A tests/tool_rows_tests.ts
@@ -132,6 +134,12 @@ try {
   await expectExit("mod: 'abc' is refused", ["mod", "inc.wasm", "inc", "abc"], dir, 1, /'abc' is not a number/);
   await expectOut("run (library call): a number still works", ["run", "inc.wasm", "inc", "41"], dir, "42");
   await expectExit("run (library call): 'abc' is refused", ["run", "inc.wasm", "inc", "abc"], dir, 1, /'abc' is not a number/);
+
+  console.log("── a negative number is an argument, not a flag (2026-10-26) ──");
+  // Deno's parseArgs read `-5` as a short flag, so the call ran with no argument: inc() = 1.
+  await expectOut("mod: a negative argument", ["mod", "inc.wasm", "inc", "-5"], dir, "-4");
+  await expectOut("run (library call): a negative argument", ["run", "inc.wasm", "inc", "-5"], dir, "-4");
+  await expectOut("mod: a negative argument before another", ["mod", "i64.wasm", "add64", "-3", "1"], dir, "-2");
 
   console.log("── witgen writes a valid WIT (sw118) ──");
   const wit = await Deno.readTextFile(join(dir, "2048.wit")).catch(() => "(no 2048.wit)");

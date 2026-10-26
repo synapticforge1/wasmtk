@@ -41,6 +41,7 @@
 import { basename } from "@std/path";
 import wabtInit from "wabt";
 import binaryen from "./binaryen.ts";
+import { DATA_BASE } from "./console_log.ts";
 import { dataExtent, extractExportNames, mergeWasmWat } from "./wasmmerge.ts";
 import { rt } from "./rt.ts";
 import { emitWitBeside } from "./witgen.ts";
@@ -327,11 +328,18 @@ export async function runWasmBundle(
     for (const n of allNotices) console.log(n);
   }
 
+  // The shared heap starts above the combined static data AND above wasic's reserved low area
+  // (scratch slots and the zero header every empty array points at, below DATA_BASE). With no
+  // data in any module it began at 0, so the first allocation overwrote that header and two
+  // libraries' empty arrays became one (2026-10-26, H11 measurement: the second library's
+  // `push(10)` returned 18).
+  const heapBase = Math.max(dataOffset, DATA_BASE);
+
   // ── Assemble master WAT ───────────────────────────────────────────────────
   // Memory pages: enough for the combined static data PLUS at least one growth
   // page for the shared bump heap (Phase 18.5). Without the +1, an immediately-
   // first allocation can land at the page boundary and trap.
-  const pagesNeeded = Math.max(1, minPages, Math.ceil(dataOffset / 65536) + (anyDroppedAllocator ? 1 : 0));
+  const pagesNeeded = Math.max(1, minPages, Math.ceil(heapBase / 65536) + (anyDroppedAllocator ? 1 : 0));
 
   // WASI imports — one (import ...) per unique WASI function referenced
   const wasiDecls = [...allWasiNames]
@@ -342,12 +350,12 @@ export async function runWasmBundle(
 
   // Phase 18.5: when any merged library dropped its bump allocator, synthesise
   // a single shared $__malloc + $__heap_ptr at module scope. Initial cursor is
-  // seated past the combined static data (sum of every relocated segment).
+  // seated at heapBase (above the combined static data and the reserved area).
   // This is what makes a Map built in libA and read by libB share one heap.
   const sharedAllocatorParts: string[] = [];
   if (anyDroppedAllocator) {
     sharedAllocatorParts.push(
-      `  (global $__heap_ptr (mut i32) (i32.const ${dataOffset}))`,
+      `  (global $__heap_ptr (mut i32) (i32.const ${heapBase}))`,
       `  (func $__malloc (param $size i32) (result i32)`,
       `    (local $ptr i32)`,
       `    (local.set $ptr (global.get $__heap_ptr))`,

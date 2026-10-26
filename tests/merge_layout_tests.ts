@@ -12,6 +12,8 @@
  *   ld85   two imports with one basename collided (`duplicate func $util_add`, 2026-10-22).
  *   2026-06-24 follow-up (closed 2026-10-23): `wasmbundle` dropped a module's NON-WASI import
  *          (`mergeWasmWat`'s `importWat`), so a library calling a host function did not bundle.
+ *   sw139  `wasmbundle` seated the shared heap at 0 when no module had data, below wasic's
+ *          reserved area: two libraries' empty arrays became one (2026-10-26).
  *
  * Runs the INSTALLED wasmtk in a temp directory. Usage: deno run -A tests/merge_layout_tests.ts
  */
@@ -29,6 +31,9 @@ const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKL"
 const libWat = (fn: string, text: string) =>
   `(module (memory 1) (func $${fn} (param $i i32) (result i32) local.get $i i32.const 300 i32.add i32.load8_u)\n` +
   `  (export "${fn}" (func $${fn})) (export "memory" (memory 0)) (data (i32.const 300) "${text}"))\n`;
+const arrLib = (p: string) =>
+  `type i32 = number;\nconst items: i32[] = [];\nexport function ${p}push(n: i32): i32 {\n` +
+  `  for (let i: i32 = 0; i < n; i++) {\n    items.push(i);\n  }\n  return items.length;\n}\n`;
 const FILES: Record<string, string> = {
   "dlib.wat": libWat("getb", ALPHA),
   "elib.wat": libWat("getc", "zyxwvutsrqponmlkjihgfedcbazyxwvutsrqponmlkjihgfedcbazyxwvutsrqpon"),
@@ -63,6 +68,9 @@ const FILES: Record<string, string> = {
     `export { triple, LIMIT as MAX, Pt };\n`,
   "useshapes.ts": `type i32 = number;\nimport { Box, triple, MAX, Pt } from "./shapes.ts";\nconst b: Box = new Box(4);\n` +
     `const a: i32 = b.area();\nconst p: Pt = new Pt(6);\nconst px: i32 = p.x;\nconsole.log(a, triple(5), MAX, px);\n`,
+  // sw139: two wasic libraries, no data, each with a module-level array
+  "arra.ts": arrLib("a"),
+  "arrb.ts": arrLib("b"),
 };
 
 /** One step's output must equal `want` (trimmed) with exit 0. */
@@ -117,6 +125,30 @@ try {
       got = `imports ${imports.join(",")} calc(5)=${ex.calc(5)} getb(40)=${ex.getb(40)}`;
     }
     const want = "imports env.twice calc(5)=11 getb(40)=79";
+    if (got === want) {
+      passed++;
+      console.log(`  ✓ ${name}`);
+    } else {
+      failed++;
+      console.log(`  ✗ ${name}: got "${got}", want "${want}"`);
+    }
+  }
+
+  // sw139: the shared heap of a bundle starts above wasic's reserved area. It began at 0 when no
+  // module had data, so the first allocation overwrote the zero header every empty array points
+  // at: after apush(10), bpush(10) returned 18. One instance, so the calls share the heap.
+  {
+    const name = "wasmbundle: two wasic libraries keep their own arrays (sw139)";
+    await step(["modc", "arra.ts"], dir);
+    await step(["modc", "arrb.ts"], dir);
+    const r = await wasmtk(["wasmbundle", "arra.wasm", "arrb.wasm", "-o", "arrab.wasm"], dir);
+    let got = `exit ${r.code}: ${r.out.trim().split("\n").slice(-2).join(" | ")}`;
+    if (r.code === 0) {
+      const mod = new WebAssembly.Module(await Deno.readFile(join(dir, "arrab.wasm")));
+      const ex = new WebAssembly.Instance(mod, {}).exports as Record<string, (n: number) => number>;
+      got = `apush(10)=${ex.apush(10)} bpush(10)=${ex.bpush(10)} apush(1)=${ex.apush(1)}`;
+    }
+    const want = "apush(10)=10 bpush(10)=10 apush(1)=11";
     if (got === want) {
       passed++;
       console.log(`  ✓ ${name}`);
