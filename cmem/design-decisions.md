@@ -458,6 +458,11 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     read as `number` during a transition; (e) cost: speed and size wherever the integer proof
     fails. First step (proposed): measure the corpus compiled with every `number` f64 and
     integer inference for counters / indices only: size, speed, and which silent rows vanish.
+    **MEASURED 2026-10-26** (owner: "proceed"): [number-model-and-runtime-plan.md](number-model-and-runtime-plan.md)
+    — on today's compiler the plain-number corpus compiles 413 / 443 and matches Deno on 371
+    (typed: 437 / 449), +16 % size; the gap is the f64 path's immaturity (27 invalid modules
+    reported as success), not the model. Scoped together with the Bun transition; decisions N1–N4
+    and the reopened M2 / M4 are the owner's.
   - **Direction of 2026-10-19: untyped is JavaScript's number; JavaScript and npm through the
     bundle (owner, after reviewing the number model; NOT BUILT, measure first).** The owner: "I
     might have over thought this a bit, and should have kept the value inference intact that we

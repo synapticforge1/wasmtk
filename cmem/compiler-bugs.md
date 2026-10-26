@@ -529,7 +529,7 @@ Phase 1 does not start.
 | sw143 | an overridden getter / setter called through a base-typed parameter or `this` in a base method runs the BASE accessor (`20` → `10`, `300` → `3`) | c86, c109, c110, f131, f177, f248 | wasic ~12728, ~12779: accessors called statically (sw126 dispatched methods only) |
 | sw144 | an optional parameter / field (`b?: i32`) has no `undefined`: 0 passed reads as undefined, omitted reads as 0 (`b ?? 100` → 0, prints `0` for `undefined`) | c45, c89, c90, f43, f66, f67, f70, f84, f106, f250 | wasic ~3770: `defaultValue: "0"`, no flag |
 | sw145 | float `%` by `x - trunc(x/y)*y`: `5 % Infinity` NaN (5), `-10 % 5` `0` (`-0`), `1e17 % 7` `0` (5) | c06, c21, c22, c135 | wasic ~14280 (and `%=` ~16493), console_log ~3695 |
-| sw146 | i32 `%` giving JavaScript's `-0` (`-6 % 3`, `b % 3` with b = -3) prints `0` in an f64 / console context — **owner ruling needed** (rule 4 names `+ - *`) | c94, k08 | `i32.rem_s` in both emitters |
+| sw146 | (2026-10-26: NO ruling needed — under the owner's plain-numbers direction `%` is f64, and the repros still print `0` only because of sw145's float formula; fix sw145 and this closes; number-model-and-runtime-plan.md) i32 `%` giving JavaScript's `-0` (`-6 % 3`, `b % 3` with b = -3) prints `0` in an f64 / console context — **owner ruling needed** (rule 4 names `+ - *`) | c94, k08 | `i32.rem_s` in both emitters |
 | sw147 | `replace` / `replaceAll` copy `$&`, `$$`, `` $` ``, `$'` literally | c56 | wasic `$__str_replace` ~23244, `$__str_replace_all` |
 | sw148 | `trim*` keep `\v` and `\f` | c57 | wasic ~23065: only 0x20, 0x09, 0x0a, 0x0d |
 | ~~sw149~~ | ✅ FIXED 2026-10-26: cases stay in SOURCE order; the tests run in order and `br` goes to wherever `default` is. No existing switch's golden moved. Test `48_SwitchOrderNestingAndCaseValues`. Was: `switch`: a `default` that is not last is MOVED last, so fall-through order changes (`1 2 11` → `1 2 9`) | f02, f32, f247 | wasic ~19855 |
@@ -585,6 +585,12 @@ Phase 1 does not start.
 
 **Loud** (invalid modules, traps where JavaScript has a value, refusals of ordinary TypeScript, misleading messages):
 
+- **Found measuring plain numbers, 2026-10-26 (number-model-and-runtime-plan.md):** wasic
+  REPORTS SUCCESS for an INVALID module (it never validates its output): 27 corpus programs
+  rewritten to plain `number` compiled "✅" and failed only when a runtime compiled the module
+  (i32 / f64 mismatches). Not seen on the typed corpus, so filed with the plan (work item 2:
+  validate before reporting success) rather than as a typed-corpus row. Also: a struct field
+  typed `number` is i32 while an array of `number` is f64 (`[95, 88, 72]` read as denormals).
 - **Found fixing, 2026-10-26 (loud):** the console path has NO hex literal (`console.log(x ^ 0xFF)`:
   "cannot emit the expression"); a field of a chained call result in console.log (`new V(7).add(new
   V(8)).x`); a declaration `const v: V = new V(7).add(…)` is matched as a plain `new` declaration
