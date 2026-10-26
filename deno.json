@@ -42,6 +42,7 @@
     "@std/cli/parse-args": "jsr:@std/cli@^1.0.0/parse-args",
     "@std/path": "jsr:@std/path@^1.1.2",
     "binaryen-backend": "jsr:@jrmarcum/binaryang@2.2.0/compat/binaryen",
+    "binaryang-bundle": "jsr:@jrmarcum/binaryang@2.2.0/tools/wasm-bundle",
     "binaryang-validate": "jsr:@jrmarcum/binaryang@2.2.0/wasm-validate",
     "wasm2js": "npm:wasm2js@^0.2.0",
     "wabt": "jsr:@jrmarcum/binaryang@2.2.0/compat/wabt"

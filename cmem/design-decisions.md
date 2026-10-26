@@ -439,6 +439,25 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
        be an integer in range, i64 takes a bigint (or a safe-integer number), f32 rounds (its
        meaning), f64 passes as is; an issue throws a RangeError / TypeError naming the function,
        the parameter and the type; unsigned results come back unsigned.
+  - 🔒 **Direction of 2026-10-26 (owner; DECIDED IN PRINCIPLE, NOT BUILT, measure first): no type
+    hints, no wasMath — plain TypeScript numbers.** Owner: "I am more and more inclined to leave
+    out the type hints and stick to normal javascript and typescript number types and not use the
+    wasMath module at all. That would necessitate the need for the wasic compiler to translate
+    the numbers to correct application in wasm. 'number' would be 'f64' in wasm and 'BigInt'
+    would be 'i64' in wasm. loop numbers and index numbers would necessarily be integer based in
+    wasm." And: "I understand this will change the examples again also. But I think this is a
+    good project base change that simplifies things for the user and the wasm compiler in the
+    long run." This goes further than the 2026-10-19 direction below (which kept `i32` / `f32` /
+    `i64` as opt-in hints): the hints go. Consequences to scope before building (not decided yet):
+    (a) the compiler INFERS an integer only where it can prove one (a loop counter, an index, a
+    length, `| 0` / `>>>` results) and is f64 everywhere else, so every result is JavaScript's;
+    (b) retired with the hints: D3, integer `/` refused, rule 4 (sw119, `$__i32_fit`), and the
+    i32-typing bug classes (much of round 3: sw146, sw160, sw162–sw164, sw167); (c) `./wasMath`
+    is a PUBLISHED entrypoint (3.0.0): Rule 4 needs a release that deprecates it before removal;
+    (d) the corpus and examples are written with `type i32 = number`: migrated, or the aliases
+    read as `number` during a transition; (e) cost: speed and size wherever the integer proof
+    fails. First step (proposed): measure the corpus compiled with every `number` f64 and
+    integer inference for counters / indices only: size, speed, and which silent rows vanish.
   - **Direction of 2026-10-19: untyped is JavaScript's number; JavaScript and npm through the
     bundle (owner, after reviewing the number model; NOT BUILT, measure first).** The owner: "I
     might have over thought this a bit, and should have kept the value inference intact that we
@@ -632,10 +651,21 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
 - **Struct/class field-base sentinel: use `.ptr < 0`, not `=== -1`.** Both `structVars` (`sv`) and
   `classVars` (`cv`) field/method base computations choose `(local.get $var)` for ptr `< 0` and
   `(i32.const ptr)` for ptr `≥ 0`. `-1` = param/runtime-local, `-3` = heap-malloc'd struct literal
-  (runtime fields); both must read via `local.get`. `cv` only holds `-1`/static today (no class
-  heap-alloc), but the `< 0` form keeps the two paths consistent and future-proof (mirrors the struct
-  fix; reverting `cv` to `=== -1` would re-open the 6b_SimpleStructs class of bug if class heap-alloc
-  is ever added). The array sentinel `-2` is never a struct/class `ptr`.
+  (runtime fields); both must read via `local.get`. Since 2026-10-26 (sw141) every class variable
+  declared with `new` is `-1`, a pointer local, so `cv` holds `-1` in practice; the `< 0` form keeps
+  the two paths consistent. The array sentinel `-2` is never a struct/class `ptr`.
+- 🔒 **Every `new C(…)` makes a FRESH instance on the heap (sw141, sw142, round 3, 2026-10-26).**
+  `new` as a value is `(call $__new_<C> args…)`: a per-class wrapper (`emitClassNewWrappers`) that
+  `$__malloc`s the instance size, ZEROES every byte (a free-list block is dirty), stores the class
+  tag when the module has an inheritance header, calls `<C>_constructor`, and returns the pointer.
+  Its parameters are the constructor's, so `new A(new B())` nests with no temp. A declaration
+  `const c: C = new C(…)` registers `c` as a pointer local (`ptr: -1`) in BOTH pre-scans (function
+  and top level) and the statement is `(local.set $c (call $__new_<C> …))`. Was: each site was ONE
+  static block laid out at compile time, so objects made in a loop, a factory, or a method returning
+  `new` were the same object, and a reassigned class variable kept reading its first object
+  (fields were read at `(i32.const ptr)`). Do not reintroduce a static block for a `new`: only a
+  literal STRUCT (no class) may be laid out statically, and only where it runs once. Test
+  `9_NewMakesAFreshObject` (fails on the old compiler).
 - **Brace-less single-line control flow** (`if`/`while`/`for…of`/`for(;;)` with `stmt;` and no braces)
   is handled in `emitBlock` by capturing the inline tail and `splitStmts`-ing it as the body. The
   `for…of` form was a gap (fixed 2026-06-08). NOTE: `emitBlock`'s `while (i < lines.length)` loop
@@ -895,11 +925,10 @@ string-array element, and `Math.*`/`Number.*` handling all have such twins.
   `instanceof Error` etc. still hit their existing handlers). Result is i32 0/1, promoted to
   f64/i64 when the context type is wider (same pattern as the short-circuit `&&`/`||` handler).
 - **Module-level class instances (Phase 51)** are registered in `classVars` by a `newClassPre`
-  block in the `startBodyLines` pre-scan that mirrors `emitFunction`'s. It MUST allocate a static
-  ptr via `allocStructData(cd.struct, {}, classTag)` — the const-new statement handler emits
-  `(i32.const ptr)` for both the `local.set` and the constructor call, so registering with `ptr:-1`
-  would `local.set`/construct at address -1. The `if (cd)` guard skips TypedArrays (PascalCase but
-  not in `classDefs`).
+  block in the `startBodyLines` pre-scan that mirrors `emitFunction`'s. SUPERSEDED 2026-10-26
+  (sw141): it registers `ptr: -1` and the const-new handler sets the local from `$__new_<C>` (the
+  rule above); it used to need a static ptr because the handler emitted `(i32.const ptr)`. The
+  `if (cd)` guard skips TypedArrays (PascalCase but not in `classDefs`).
 - **Class-instance array literals (Phase 51)** — `const a: C[] = [new C(…), …]` is desugared to
   `const a: C[] = []; a.push(new C(…));…` by `expandClassInstanceArrayLiterals()` (source pre-pass,
   after `parseClasses`, before `parseFunctions`/`parseTopLevel`). The static struct-array path can't

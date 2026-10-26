@@ -119,7 +119,23 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-24, binaryang **2.2.0**; latest release v2.0.3)
+## Current pass counts (2026-10-26, binaryang **2.2.0**; latest release v3.0.0)
+
+> **2026-10-26, H11 (`wasmbundle` on binaryang's `bundle()`) + round 3's worst rows (sw141/sw142
+> fresh `new`, sw149–sw152 switch, sw160 i32 literal range, sw174; sw139, sw140), full gate GREEN
+> on the final tree.** wasi **509/509** (+`48_SwitchOrderNestingAndCaseValues`,
+> +`9_NewMakesAFreshObject`) · golden-WAT **568** byte-identical after a deliberate re-record: 44
+> entries moved, every one a class program (the `$__new_<C>` wrappers) or `7d_ConsoleArrays`
+> (`u32[0] = 4000000000` now spelled as its wrapped constant, same bits) plus the new switch test;
+> the 81 class corpus tests read as Deno before the re-record. Earlier the same day the snapshot
+> stopped freezing the repo's absolute path (`<repo>`; 9 refusal entries re-recorded, path only) ·
+> merge_layout **17** (+5 bundle rows, +sw139) · tool_rows **37** (+3 negative arguments) ·
+> outpath **14** (+2 dync) · witgen **24** (+1 binaryang header) · typed_decl **50** (+3 refused
+> literals, +1 accepted set) · wast 64,506 / 0 / 16 ALL CLEAN · cross-check **1368** on baseline,
+> 0 regressed, then `--update-baseline` added the two new tests' 6 pairs (all `match`) · every
+> other suite at its count. **Go suites ran with `GOFLAGS=-buildvcs=false`** (git's
+> `safe.directory` does not cover the new path; machine config, cmem/local). Gate runner: one suite
+> at a time, in workflow.md's order, each to its own log.
 
 > **2026-10-24, later: binaryang 1.16.1 → 2.2.0 pinned, gate GREEN, NOTHING moved** (as predicted:
 > no optimizer or printer change in 1.17.0–2.2.0). wasi 507/507 · golden-WAT 566 byte-identical ·

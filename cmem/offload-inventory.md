@@ -2,7 +2,8 @@
 
 Answer to workspace letter **H11** (`../../cmem/handoffs.md`) and divergence row **I10**: the owner's
 direction is "anything wasmtk can offload in the main program will ultimately be a benefit" and
-"nothing moves before its trigger". **This is an inventory. Nothing has moved.**
+"nothing moves before its trigger". **This is an inventory. Moved so far: `wasmbundle` →
+binaryang's `bundle()` (2026-10-26; note below).**
 
 Sources, all read 2026-09-28: a full survey of `main.ts` + `src/`, and the siblings' own memory
 (binaryang `open-work.md` / `binaryen-ts.md`, wasmrt/wazmrt READMEs + `interop.md`, the
@@ -37,8 +38,19 @@ universalWasmLoader SPEC 3.0.0) plus workspace rows I2 / I10 / I11 / C1 / S4. Li
 > Conflict policy, WASI dedup and `_start` move with it; `witgen` and the prompt stay ours. Our
 > producer measurements are drafted in `scripts/binaryang-report.md` (see next-work.md).
 
-> **2026-10-26, H11 measured: the `wasm-bundle` switch is BLOCKED on binaryang (one API ask) and
-> on wasic (relocation marks).** binaryang 2.2.0's `wasmBundle` was run over the inputs of every
+> **2026-10-26, H11: `wasmbundle` SWITCHED to binaryang's `bundle()` (the move the owner decided
+> 2026-10-06).** `src/wasmbundle.ts` reads each input into binaryang's IR (`readBinary(…)._inner`,
+> documented), turns wasic's `__heap_ptr` / `__exn_tag` / `__exn_kind` into imports of a small
+> `wasmtk_rt` module (one heap, one tag), resolves export conflicts per conflict as before, calls
+> `bundle()` with `unmarked: 'guess'` (its warning printed), seats the shared heap above the last
+> image, always exports a memory, `-Oz`, `.wit`. Fixed by it: sw178–sw181 for the bundle path;
+> import map entry `binaryang-bundle`. **The note below, written earlier the same day, said the
+> switch was BLOCKED on an API ask: WRONG** — the read / write route was public all along
+> (binaryang README, 1.6.0 changelog); the ask was withdrawn from the draft letter. Still open:
+> wasic's relocatable output (exact relocation instead of guessed), and offload #1 for the wasic
+> MERGE path (`import … from "x.wasm"`), which still runs on wasmmerge's regexes.
+>
+> **Earlier the same day (superseded where it says BLOCKED):** binaryang 2.2.0's `wasmBundle` was run over the inputs of every
 > wasmtk test that bundles (merge_layout's four, tool_rows' dual export, witgen's pair,
 > `18_WasmImportMerge`): with `unmarked: 'guess'` every output is right; with its default `refuse`
 > every input is refused (nothing we produce carries `linking` / `reloc.*`). It was right where

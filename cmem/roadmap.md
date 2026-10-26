@@ -38,6 +38,26 @@
 > replace it with the real version at publish time. A breaking change may ALSO warrant a Feature
 > Status row if it ships alongside a feature — but the Breaking Changes row is mandatory.
 
+## The unreleased block (on `main`, after v3.0.0)
+
+1. **`wasmbundle` on binaryang's `bundle()` (2026-10-26, H11).** One memory, every index space
+   renumbered on the IR, each import shared once; wasic's heap / tag / kind shared through a
+   `wasmtk_rt` module of ours; relocation guessed with a printed warning until wasic marks its
+   addresses. A start function, global exports and non-wasic counters now survive a bundle
+   (sw178–sw181); `-o` naming an input is refused. Output differs in layout from the regex
+   bundler's (each image at its own base). New import-map entry `binaryang-bundle`.
+2. **Every `new` makes a fresh object (sw141, sw142).** `$__new_<C>` wrappers; class variables are
+   pointer locals. Every class program's WAT moved (44 goldens), no output did.
+3. **`switch` in source order, nested switches, `case CONST:`, float switch expressions**
+   (sw149–sw152).
+4. **BREAKING (the next release's floor decides): an i32 literal that does not fit is a compile
+   error (sw160)**, the owner's rule 4 at compile time; bitwise operands and integer typed-array
+   stores still wrap as JavaScript does. Needs a README Breaking Changes row.
+5. **CLI:** a negative number argument is an argument (sw140); `dync -o <input>` refused (sw174);
+   witgen replaces a binaryang-generated `.wit` (H11).
+6. **sw139:** the regex bundler's shared heap at 0 (fixed before the switch, kept as a test).
+7. Test harness: the golden snapshot writes the repo root as `<repo>`.
+
 ## Release status (2026-10-24) — v3.0.0: JavaScript's numbers, whole-object printing, binaryang 2.2.0
 
 PUBLISHED 2026-10-24 (tag `v3.0.0`, CI run green, provenance recorded on JSR; the first release

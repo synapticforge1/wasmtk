@@ -5,6 +5,66 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show f21bfb5f810:cmem/next-work.md`.
 
+## 2026-10-26 — H11, H12 round 3, and the owner's number-type direction
+
+Owner, 2026-10-26: "fix H11 and H12 then explain what the consumer suites are waiting on"; scope
+chosen by the owner: H11 = the `wasm-bundle` switch, H12 = audit round 3 (not a gate waiver);
+then, after round 3's size: "record + worst few", and "land" the switch.
+
+- ✅ **H11: `wasmbundle` runs on binaryang's `bundle()`** (offload-inventory.md, 2026-10-26 note).
+  Found measuring it and fixed: sw139 (shared heap at 0), sw140 (a negative CLI argument read as
+  a flag), witgen accepting binaryang's `.wit` header, sw178–sw181 on the bundle path. Draft reply
+  in `scripts/binaryang-report.md` (2026-10-26, owner to send; one question: is `Module._inner` a
+  stable contract). Open from H11: wasic's relocatable output (exact relocation), offload #1 for
+  the wasic MERGE path (sw178 / sw180 still there).
+- ⏳ **H12: audit round 3 NOT converged** (compiler-bugs.md § "audit round 3"): 52 silent + ~105
+  loud; fixed today sw141, sw142, sw149–sw152, sw160, sw174, sw179, sw181 (+ sw178 / sw180 for the
+  bundle). **Open: silent 23 compiler + 20 tool**, then the loud groups ld115–ld118. Phase 1 of
+  the modularization stays gated.
+- 🔒 **Owner's direction, 2026-10-26 (design-decisions.md, top of the number-model section):** no
+  type hints, no wasMath; `number` = f64, `bigint` = i64, integers only where the compiler proves
+  them (loop counters, indices). Decided in principle, NOT built. **Next, before more i32-typing
+  fixes:** measure it (the corpus with every `number` f64 and integer inference for counters /
+  indices only: size, speed, which silent rows vanish), then a plan for the owner (`./wasMath` is
+  published: Rule 4 deprecation first; corpus and examples migrate).
+- **H6.5b, the consumer suites — what they wait on** (asked 2026-10-26): (1) the OWNER's go-ahead,
+  recorded since 2026-09-30 and in the workspace's owner-actions list: the step runs the ten
+  loaders' fixture suites and LeptonPad against the unpublished wasmtk, in temp copies (never
+  writing into those repos), on nine toolchains (Dart, .NET, Go, Rust, Python, JVM, V, Zig, C);
+  (2) the fixtures themselves: they are stamped from a wasmtk commit (H7 / drift X8); loader-js
+  re-stamps from the pushed post-purge `84b3e180eba` first, then the ports copy, so until that
+  the suites test against old fixtures; (3) two loaders have NO suite to run (-v, -zig; H7);
+  (4) the workspace rule (layout-and-packaging Rule 3) makes a red consumer suite a release
+  BLOCKER for a patch or minor, so it will gate wasmtk's next 3.x release once it exists (3.0.0
+  was a major and went out without it).
+- **Environment (machine-local, cmem/local/environment.md):** git's `safe.directory` no longer
+  covers this checkout's new path; TinyGo's VCS stamping then fails `go_bindgen`
+  (`GOFLAGS=-buildvcs=false` → 7 / 7). Owner's machine config.
+
+## For the workspace review — 2026-10-26 (W6–W11; the workspace pulls these, nothing written there from here except the owner-directed notes block)
+
+- **W6. H22 is NOT recorded in wasmtk** (the 2026-10-26 review's "H22 recorded: … wasmtk" and
+  H25's "wasmtk fully compliant" do not hold): `cmem/` has no written privacy rule or path test.
+  Record-only; not done this session (not asked).
+- **W7. H24 + H27 + C8, ONE re-copy, open for wasmtk:** best-practices.md ★ 5.2 still has the
+  old "`D:` drive" wording (H24); the stamp at `:728` names `wasmExamples/…` and must read
+  exactly `Copied from synapticforge1/cmem/best-practices.md on <date>` (H27; the only
+  `wasmExamples` mention left in tracked files outside the legacy archive); ★ 6.1 quotes
+  binaryang's pre-purge `b8fafaa3f` (C8, canonical still unfixed 2026-10-26). Do it once C8's
+  canonical fix lands: re-copy the whole block, compare the 28 bullets by number + normalized TEXT
+  (0 differences, and an inverted run that catches one changed word), re-date the stamp.
+- **W8. Stale workspace cells (verified 2026-10-26):** H16 wasmtk done (gc strategy set, 1 pack);
+  H17 / H19 force-push done 2026-10-23; H20 done (3.0.0 published from `synapticforge1` with
+  provenance); H21 wasmtk's map is pushed (`history-purge-2026-10-23.md`); H7 / X8 stamp
+  `84b3e180eba` is on `origin/main`.
+- **W9. H11 and H12 status for the table:** H11 — `wasmbundle` switched (this session's commits);
+  H12 — round 3 not converged, Phase 1 gated.
+- **W10. The owner's number-type direction (2026-10-26)** touches the workspace's I11 / H12 bar
+  for `ts2wasm` (wasic's subset changes) and any loader fixture built from typed wasic sources.
+- **W11. A cross-repo method note:** golden snapshots must not freeze a checkout's absolute path
+  (wasmtk's did; the workspace move made 9 entries "diverge"); worth a line in best-practices if
+  another repo keeps snapshots of error text.
+
 ## For the workspace review — all taken up (W1–W3 closed by letter H15, W4–W5 by the workspace, 2026-10-23)
 
 Kept as the record of what was raised. W1 (the Bun rule) is the workspace floor now; W2's first
@@ -569,7 +629,8 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 - **`wasic` modularization, Phases 1–3** (wasic-modularization-plan.md; letter H12): output-
   preserving, gated by golden-WAT and `wasic_seam_tests`.
 - **Offload #1: our regex-over-WAT merging gives way to binaryang's parser** (offload-inventory.md;
-  I2 / H11). Trigger: binaryang RELEASES its one-front-end stage 5 (not in 1.8.x).
+  I2 / H11). The trigger is MET on our pin (2.2.0). The bundle path moved 2026-10-26; the wasic
+  MERGE path (`import … from "x.wasm"`, wasmmerge.ts) is what remains.
 - **The next release** (roadmap.md, the unreleased block since v2.0.3): the compatibility gate's
   floor since v2.0.3 is now **MAJOR** (re-measured 2026-10-09, `deno task api-surface --floor`),
   set by ONE symbol: `./console_log` `LogSegment`, whose four variants gained an OPTIONAL property
@@ -632,7 +693,8 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
     2. wasic emits `(@reloc data)` on every data address: strings, arrays, structs,
        string-array pointer words, `$__heap_ptr`'s initial value.
     3. Bundle the three projects UNOPTIMISED and report.
-    4. Then retire `wasmbundle.ts` and its range relocation.
+    4. ~~Then retire `wasmbundle.ts` and its range relocation~~ DONE 2026-10-26: `wasmbundle.ts`
+       is now a pass around binaryang's `bundle()` (relocation guessed, warned, until 2 lands).
   - Our `witgen` check should accept binaryang's header line (`// Generated by binaryang from
     core wasm signatures`), or the log "not generated from core signatures" is false.
 

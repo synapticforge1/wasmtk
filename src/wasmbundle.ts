@@ -5,14 +5,33 @@
  * Merges N standalone .wasm modules (WASI executables or pure libraries) into one
  * combined .wasm that exports all their functions under a unified namespace.
  *
+ * ## On binaryang's `wasm-bundle` (2026-10-26, workspace letter H11)
+ *
+ * The owner decided (2026-10-06) that bundling moves to binaryang as `wasm-bundle`, which we import
+ * back. Its `bundle()` lays each input's whole memory image at its own base in ONE memory, renumbers
+ * every index space on the IR, shares each import once, and relocates addresses from the producer's
+ * `linking` / `reloc.*` sections, or, for a module without them, by its data's address range with
+ * a printed warning (`unmarked: 'guess'`; wasic marks no addresses yet, so every wasic input is
+ * guessed, as the regex bundler this replaced always did, silently).
+ *
+ * What stays ours is wasic's runtime contract, done as a pass over binaryang's IR around `bundle()`:
+ * every wasic module exports its heap pointer (`__heap_ptr`), its exception tag (`__exn_tag`) and
+ * the kind of the exception in flight (`__exn_kind`). Bundled as they are, each module would keep
+ * its own heap, which grows upward and calls `memory.grow` only past `memory.size`, so in the
+ * per-image layout the first module's heap would run into the next module's image; and its own
+ * tag, so a program's `catch` would not see a library's `throw` (ld114). Before `bundle()`, each
+ * one becomes an IMPORT of a small module of ours, `wasmtk_rt`, which defines them once; after it,
+ * the shared heap is seated above the last image. Every wasic module then allocates from one heap
+ * at the end of memory, and throws and catches one tag.
+ *
+ * The IR is binaryang's, read with `readBinary` from `compat/binaryen` (`module._inner` is the IR,
+ * documented there) and written with `new Module(ir).emitBinary()`. So this command needs the
+ * binaryang backend, which deno.json pins.
+ *
  * ## Conflict resolution (Phase 20)
  *
- * When two or more input modules export a function with the same name, wasmbundle
- * detects the conflict and resolves it. Internal WAT symbol names are always mangled
- * for uniqueness ($mathlib_add); only the WASM export string uses the clean name
- * ("add"), so consumers always see original, predictable function names.
- *
- * Resolution options:
+ * When two or more input modules export the same name, wasmbundle detects the conflict and
+ * resolves it, per conflict:
  *
  *  - Interactive (default): four-option prompt per conflict:
  *      [1] Prefix with module name  →  mathlib_add, utils_add
@@ -24,53 +43,54 @@
  *  - --on-conflict=exclude: auto-exclude all conflicting exports.
  *  - --alias a.wasm=m,b.wasm=n : supply alias prefixes for interactive or alias mode.
  *
- * Non-conflicting exports always keep their bare name in the output.
+ * Non-conflicting exports always keep their bare name in the output. The resolution is applied to
+ * the inputs' exports before `bundle()`, which then sees no conflict.
  *
  * ## Pipeline
  *
- *  1. Load each .wasm with wabt; disassemble to WAT text.
- *  2. Extract export names; identify conflicts across all modules.
- *  3. Resolve conflicts (interactive or via --on-conflict flag).
- *  4. Merge each module's WAT using mergeWasmWat, tracking data offsets.
- *  5. Assemble a master WAT module with all fragments and export declarations.
- *  6. Compile master WAT → binary via wabt.
- *  7. Optimize with Binaryen (-Oz) if available.
- *  8. Write output (default: combined.wasm).
+ *  1. Read each .wasm into binaryang's IR.
+ *  2. wasic's runtime trio → imports of `wasmtk_rt`; export names collected.
+ *  3. Resolve conflicts (interactive or via --on-conflict flag) on the inputs' exports.
+ *  4. `bundle()` the inputs and `wasmtk_rt`; print its report and warnings.
+ *  5. Seat the shared heap above the last image, with room to allocate.
+ *  6. Write the IR, optimize with Binaryen (-Oz), write the output (default: combined.wasm) and its
+ *     .wit.
  */
 
 import { basename } from "@std/path";
+import { bundle, type BundleInput, moduleNameOf } from "binaryang-bundle";
 import wabtInit from "wabt";
 import binaryen from "./binaryen.ts";
-import { DATA_BASE } from "./console_log.ts";
-import { dataExtent, extractExportNames, mergeWasmWat } from "./wasmmerge.ts";
+import { samePath } from "./outpath.ts";
 import { rt } from "./rt.ts";
 import { emitWitBeside } from "./witgen.ts";
 
 // ---------------------------------------------------------------------------
-// Constants
+// The IR's shapes, as bundle() takes them
 // ---------------------------------------------------------------------------
 
-const WASI_MODULE = "wasi_snapshot_preview1";
+type IrModule = BundleInput["module"];
+type IrExport = IrModule["exports"][number];
+type IrGlobal = IrModule["globals"][number];
+type IrTag = IrModule["tags"][number];
 
-/**
- * Inline type signatures for WASI snapshot preview1 functions.
- * Used when building WASI import declarations in the master WAT.
- */
-const WASI_SIGNATURES: Record<string, string> = {
-  fd_write: "(param i32 i32 i32 i32) (result i32)",
-  fd_read: "(param i32 i32 i32 i32) (result i32)",
-  fd_seek: "(param i32 i64 i32 i32) (result i32)",
-  fd_close: "(param i32) (result i32)",
-  fd_fdstat_get: "(param i32 i32) (result i32)",
-  proc_exit: "(param i32)",
-  args_get: "(param i32 i32) (result i32)",
-  args_sizes_get: "(param i32 i32) (result i32)",
-  environ_get: "(param i32 i32) (result i32)",
-  environ_sizes_get: "(param i32 i32) (result i32)",
-  random_get: "(param i32 i32) (result i32)",
-  clock_time_get: "(param i32 i64 i32) (result i32)",
-  path_open: "(param i32 i32 i32 i32 i64 i64 i32 i32) (result i32)",
-  path_filestat_get: "(param i32 i32 i32 i32 i32) (result i32)",
+/** binaryang's `ExternalKind` values (the binary format's export kinds). */
+const KIND = { Func: 0, Table: 1, Memory: 2, Global: 3, Tag: 4 } as const;
+
+/** The module that defines wasic's shared runtime state in a bundle; each wasic input imports it. */
+const RT_MODULE = "wasmtk_rt";
+
+/** wasic's runtime exports, by name and kind. */
+const RT_EXPORTS: ReadonlyMap<string, number> = new Map([
+  ["__heap_ptr", KIND.Global],
+  ["__exn_tag", KIND.Tag],
+  ["__exn_kind", KIND.Global],
+]);
+
+const RT_WAT: Record<string, string> = {
+  __heap_ptr: `(global $__heap_ptr (export "__heap_ptr") (mut i32) (i32.const 0))`,
+  __exn_tag: `(tag $__exn_tag (export "__exn_tag") (param i32 i32))`,
+  __exn_kind: `(global $__exn_kind (export "__exn_kind") (mut i32) (i32.const 0))`,
 };
 
 // ---------------------------------------------------------------------------
@@ -125,20 +145,75 @@ async function promptConflict(
   return "stop";
 }
 
+/** Print an error and exit 1. */
+function fail(message: string): never {
+  console.error(`❌ wasmbundle: ${message}`);
+  rt.exit(1);
+  throw new Error(message); // unreachable: rt.exit does not return
+}
+
+/** The entity an export names, by name (binaryang's reader names every reference). */
+function exportTarget(m: IrModule, e: IrExport): string {
+  if (e.var.kind === "name") return e.var.name;
+  // An index: imports of the kind first, then definitions.
+  const imported = m.imports.filter((i) => i.kind === e.kind);
+  const i = e.var.value;
+  if (i < imported.length) {
+    const imp = imported[i] as unknown as Record<string, { name: string }>;
+    return (imp.global ?? imp.tag ?? imp.func ?? imp.table ?? imp.memory).name;
+  }
+  const defs: { name: string }[] = e.kind === KIND.Global
+    ? m.globals
+    : e.kind === KIND.Tag
+    ? m.tags
+    : e.kind === KIND.Func
+    ? m.functions
+    : e.kind === KIND.Table
+    ? m.tables
+    : m.memories;
+  return defs[i - imported.length]?.name ?? "";
+}
+
 /**
- * Compute the highest byte address (relative to the module's own address space)
- * used by any data segment, i.e. base + length of that segment.
- * Returns 0 if there are no data segments.
- *
- * Used to advance the dataReloc offset after each module is merged.
+ * wasic's runtime state becomes imports of `wasmtk_rt`: each of `__heap_ptr` / `__exn_tag` /
+ * `__exn_kind` this module DEFINES and exports loses its export and its definition, and is
+ * imported under the same internal name, so every reference to it stays as it is. Returns the
+ * names it moved, and the tag, whose signature the shared one must match.
  */
-function getDataMaxEnd(wat: string): number {
-  // wasmmerge's one data-extent reader. This had its own regex, which wabt's printing changes
-  // broke twice: `(i32.const N)` → `i32.const N` (wabt-ts 1.4.1), then binaryang 1.12's
-  // `(data (;0;) (offset (i32.const N)) …)`, which it never matched, so it returned 0, every
-  // module's data stacked at the same base and $__heap_ptr sat at 0 (sw109, 2026-10-19). It
-  // also counted a `\n` escape as two bytes.
-  return dataExtent(wat).hi;
+function importRuntimeState(m: IrModule, what: string): { moved: string[]; tag?: IrTag } {
+  const moved: string[] = [];
+  let tag: IrTag | undefined;
+  for (const [name, kind] of RT_EXPORTS) {
+    const e = m.exports.find((x) => x.name === name && x.kind === kind);
+    if (e === undefined) continue;
+    const target = exportTarget(m, e);
+    if (kind === KIND.Global) {
+      const at = m.globals.findIndex((g) => g.name === target);
+      if (at < 0) continue; // already an import (a bundle bundled again): it stays one
+      const g: IrGlobal = m.globals[at]!;
+      if (!g.mutable) fail(`${what}: its ${name} is not a mutable global, as wasic's is`);
+      m.globals.splice(at, 1);
+      m.imports.push(
+        {
+          kind: KIND.Global,
+          module: RT_MODULE,
+          field: name,
+          global: { name: g.name, type: g.type, mutable: true },
+        } as IrModule["imports"][number],
+      );
+    } else {
+      const at = m.tags.findIndex((t) => t.name === target);
+      if (at < 0) continue;
+      tag = m.tags[at]!;
+      m.tags.splice(at, 1);
+      m.imports.push(
+        { kind: KIND.Tag, module: RT_MODULE, field: name, tag } as IrModule["imports"][number],
+      );
+    }
+    m.exports.splice(m.exports.indexOf(e), 1);
+    moved.push(name);
+  }
+  return { moved, tag };
 }
 
 // ---------------------------------------------------------------------------
@@ -148,8 +223,11 @@ function getDataMaxEnd(wat: string): number {
 interface ModuleEntry {
   filePath: string;
   prefix: string;
-  wat: string;
+  module: IrModule;
+  /** The exports a conflict is judged on: every kind but memory (one memory serves all). */
   exports: string[];
+  /** Its own memory's initial pages, when it carries wasic's runtime (the heap's headroom). */
+  wasicPages: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,27 +252,41 @@ export async function runWasmBundle(
     console.error("❌ No input files specified.");
     rt.exit(1);
   }
+  // `-o` naming an input would overwrite it (sw181, 2026-10-26; sw113's rule for every command)
+  const clash = inputs.find((f) => samePath(f, outputPath));
+  if (clash !== undefined) {
+    fail(`the output '${outputPath}' is the input '${clash}'; it would be overwritten`);
+  }
 
-  // ── Load wabt ─────────────────────────────────────────────────────────────
-  const wabt = await wabtInit();
-
-  // ── Load and disassemble each module ─────────────────────────────────────
+  // ── Read each module into binaryang's IR; wasic's runtime → imports ──────
   console.log(`\nLoading ${inputs.length} module(s)...`);
   const modules: ModuleEntry[] = [];
+  let sharedTag: IrTag | undefined;
+  const needed = new Set<string>();
   for (const filePath of inputs) {
-    const bytes = await rt.readFile(filePath);
-    // Index form, not debug names: extractExportNames and mergeWasmWat parse `(func N)` /
-    // `(func (;N;) …)`. binaryang 1.6.0 began honouring `true` (1.5.3 ignored it).
-    const wabtMod = wabt.readWasm(bytes, { readDebugNames: false });
-    const wat = wabtMod.toText({ inlineExport: false });
-    wabtMod.destroy();
-    const exports = extractExportNames(wat);
-    // Also include _start for WASI executables — mergeWasmWat preserves it in
-    // wasmbundle mode (when exportOverrides is supplied) so the bundle is runnable.
-    if (/\(export\s+"_start"\s+\(func\s+\d+\)\)/.test(wat) && !exports.includes("_start")) {
-      exports.push("_start");
+    let module: IrModule;
+    try {
+      module = binaryen.readBinary(await rt.readFile(filePath))._inner as IrModule;
+    } catch (e) {
+      fail(`cannot read ${basename(filePath)}: ${e instanceof Error ? e.message : e}`);
     }
-    modules.push({ filePath, prefix: modulePrefix(filePath), wat, exports });
+    const ownPages = Number(module.memories[0]?.limits.initial ?? 0n);
+    const { moved, tag } = importRuntimeState(module, basename(filePath));
+    for (const n of moved) needed.add(n);
+    if (tag !== undefined) {
+      if (sharedTag !== undefined && JSON.stringify(tag.sig) !== JSON.stringify(sharedTag.sig)) {
+        fail(`${basename(filePath)}: its __exn_tag has a different signature than another input's`);
+      }
+      sharedTag = tag;
+    }
+    const exports = module.exports.filter((e) => e.kind !== KIND.Memory).map((e) => e.name);
+    modules.push({
+      filePath,
+      prefix: modulePrefix(filePath),
+      module,
+      exports,
+      wasicPages: moved.includes("__heap_ptr") ? ownPages : 0,
+    });
     const expList = exports.length ? exports.join(", ") : "(none)";
     console.log(`  ✓ ${basename(filePath)}: ${exports.length} export(s): ${expList}`);
   }
@@ -218,9 +310,7 @@ export async function runWasmBundle(
     console.log(`\n⚠️  ${conflictNames.size} export conflict(s) detected:`);
   }
 
-  // ── Resolve conflicts ────────────────────────────────────────────────────
-  // resolutionMap: "filePath::exportName" → output export name string, or null (exclude)
-  const resolutionMap = new Map<string, string | null>();
+  // ── Resolve conflicts, on the inputs' exports ────────────────────────────
   for (const [name, files] of conflictNames) {
     let resolution: "prefix" | "alias" | "exclude" | "stop";
 
@@ -251,159 +341,94 @@ export async function runWasmBundle(
       rt.exit(1);
     }
 
-    for (const file of files) {
+    for (const mod of modules) {
+      if (!files.includes(mod.filePath)) continue;
+      const own = mod.module.exports.filter((e) => e.name === name && e.kind !== KIND.Memory);
       if (resolution === "exclude") {
-        resolutionMap.set(`${file}::${name}`, null);
-      } else if (resolution === "prefix") {
-        resolutionMap.set(`${file}::${name}`, `${modulePrefix(file)}_${name}`);
-      } else {
-        // alias
-        const alias = aliases.get(basename(file)) ?? aliases.get(file) ?? modulePrefix(file);
-        resolutionMap.set(`${file}::${name}`, `${alias}_${name}`);
+        mod.module.exports = mod.module.exports.filter((e) => !own.includes(e));
+        continue;
       }
+      const prefix = resolution === "prefix"
+        ? mod.prefix
+        : aliases.get(basename(mod.filePath)) ?? aliases.get(mod.filePath) ?? mod.prefix;
+      for (const e of own) e.name = `${prefix}_${name}`;
     }
   }
 
-  // ── Merge all modules sequentially ────────────────────────────────────────
-  let dataOffset = 0;
-  const funcParts: string[] = [];
-  const globalParts: string[] = [];
-  const dataParts: string[] = [];
-  const importParts: string[] = [];
-  const exportDeclParts: string[] = [];
-  const allWasiNames = new Set<string>();
-  const allNotices: string[] = [];
-  // Phase 18.5: track whether any merge dropped a bump allocator. When true,
-  // the master WAT must synthesise a single shared $__malloc + $__heap_ptr
-  // because each library's call / global.get sites were redirected to those
-  // names. Without a synthesis here, the WAT compile step fails with
-  // "undefined function $__malloc".
-  let anyDroppedAllocator = false;
-  let anyExnTag = false; // a module throws or catches wasic's exception (sw119)
-  let minPages = 0; // the largest memory a module declared (ld81)
-
+  // ── wasmtk_rt: the one heap pointer, tag and kind every wasic input imports ──
+  const bundleInputs: BundleInput[] = [];
+  const taken = new Set<string>([RT_MODULE]);
   for (const mod of modules) {
-    // Build exportOverrides for this module:
-    //   null        → excluded from output
-    //   string      → the public export name in (export "..."); may differ from $internal
-    // Non-conflicting exports keep their original bare name (Phase 20: clean exports).
-    const overrides = new Map<string, string | null>();
-    for (const exp of mod.exports) {
-      const resolved = resolutionMap.get(`${mod.filePath}::${exp}`);
-      overrides.set(exp, resolved !== undefined ? resolved : exp);
+    let name = moduleNameOf(mod.filePath);
+    for (let i = 2; taken.has(name); i++) name = `${moduleNameOf(mod.filePath)}_${i}`;
+    taken.add(name);
+    bundleInputs.push({ name, module: mod.module, source: mod.filePath });
+  }
+  if (needed.size > 0) {
+    const wabt = await wabtInit();
+    const wat = `(module\n  ${[...needed].map((n) => RT_WAT[n]).join("\n  ")})`;
+    const rtMod = wabt.parseWat(`${RT_MODULE}.wat`, wat, { exceptions: true });
+    const { buffer } = rtMod.toBinary({});
+    rtMod.destroy();
+    const module = binaryen.readBinary(new Uint8Array(buffer))._inner as IrModule;
+    const ours = module.tags[0];
+    if (
+      sharedTag !== undefined && ours && JSON.stringify(ours.sig) !== JSON.stringify(sharedTag.sig)
+    ) {
+      fail("an input's __exn_tag is not wasic's (param i32 i32)");
     }
+    bundleInputs.push({ name: RT_MODULE, module, source: `${RT_MODULE} (wasmtk)` });
+  }
 
-    const result = mergeWasmWat(mod.wat, mod.prefix, dataOffset, overrides);
+  // ── Bundle ───────────────────────────────────────────────────────────────
+  console.log("\nBundling...");
+  let result: ReturnType<typeof bundle>;
+  try {
+    result = bundle(bundleInputs, {
+      onConflict: "refuse", // resolved above
+      unmarked: "guess",
+      log: (line) => console.log(line),
+    });
+  } catch (e) {
+    fail(e instanceof Error ? e.message : String(e));
+  }
+  const { module: out, report } = result;
 
-    // A module's non-WASI imports (a host function): dropped until 2026-10-23, so its call sites
-    // named an undefined function (the 2026-06-24 wasmmerge fix's follow-up).
-    if (result.importWat) importParts.push(result.importWat);
-    if (result.funcWat) funcParts.push(result.funcWat);
-    if (result.globalWat) globalParts.push(result.globalWat);
-    if (result.dataWat) dataParts.push(result.dataWat);
-    exportDeclParts.push(...result.exportDecls);
-    for (const w of result.wasiImportNames) allWasiNames.add(w);
-    for (const notice of result.notices) {
-      allNotices.push(`  ℹ️  ${basename(mod.filePath)}: ${notice}`);
+  // ── The shared heap: above the last image, with the largest wasic image's pages to grow in
+  // (a library's allocator does not grow memory; a program's does, past memory.size) ──
+  if (needed.has("__heap_ptr")) {
+    const heapExport = out.exports.find((e) => e.name === "__heap_ptr" && e.kind === KIND.Global);
+    const heap = heapExport && out.globals.find((g) => g.name === exportTarget(out, heapExport));
+    const first = heap?.init?.children[0] as { kind: string; value: { value: number } } | undefined;
+    const memory = out.memories[0];
+    if (!heap?.init || first?.kind !== "const" || !memory) {
+      fail("cannot find the bundle's shared heap pointer");
     }
-    if (result.droppedAllocator) anyDroppedAllocator = true;
-    if (result.usesExnTag) anyExnTag = true;
-    // A module's mutable globals (a stack pointer, a heap cursor) point into ITS memory: the bundle
-    // keeps at least the pages the module declared, and wasic's 3-page floor when it has such
-    // globals. A 1-page bundle took a library whose cursor sat at 131072: out of bounds (ld81,
-    // 2026-10-22).
-    const ownPages = parseInt(
-      mod.wat.match(/\(memory\s+(?:\(;\d+;\)\s+)?(?:\(export\s+"[^"]*"\)\s+)?(\d+)/)?.[1] ?? "0",
-    );
-    minPages = Math.max(minPages, ownPages, result.hasMutableGlobals ? 3 : 0);
-
-    // Advance dataOffset: next module's data goes above this module's data region.
-    // getDataMaxEnd returns the highest original address + length in this module's
-    // WAT; mergeWasmWat shifts all data by dataOffset, so the occupied range is
-    // [dataOffset, dataOffset + maxEnd).  Next module's offset = dataOffset + maxEnd.
-    const maxEnd = getDataMaxEnd(mod.wat);
-    if (maxEnd > 0) dataOffset += maxEnd;
+    const base = report.memory.pages * 65536;
+    (heap.init.children as unknown[])[0] = { ...first, value: { ...first.value, value: base } };
+    const pages = BigInt(report.memory.pages + Math.max(1, ...modules.map((m) => m.wasicPages)));
+    memory.limits.initial = pages;
+    if (memory.limits.max !== undefined && memory.limits.max < pages) memory.limits.max = pages;
+    console.log(`  shared heap at ${base}; memory ${pages} page(s)`);
   }
 
-  if (allNotices.length > 0) {
-    console.log("\nNotices:");
-    for (const n of allNotices) console.log(n);
-  }
-
-  // The shared heap starts above the combined static data AND above wasic's reserved low area
-  // (scratch slots and the zero header every empty array points at, below DATA_BASE). With no
-  // data in any module it began at 0, so the first allocation overwrote that header and two
-  // libraries' empty arrays became one (2026-10-26, H11 measurement: the second library's
-  // `push(10)` returned 18).
-  const heapBase = Math.max(dataOffset, DATA_BASE);
-
-  // ── Assemble master WAT ───────────────────────────────────────────────────
-  // Memory pages: enough for the combined static data PLUS at least one growth
-  // page for the shared bump heap (Phase 18.5). Without the +1, an immediately-
-  // first allocation can land at the page boundary and trap.
-  const pagesNeeded = Math.max(
-    1,
-    minPages,
-    Math.ceil(heapBase / 65536) + (anyDroppedAllocator ? 1 : 0),
-  );
-
-  // WASI imports — one (import ...) per unique WASI function referenced
-  const wasiDecls = [...allWasiNames]
-    .filter((name) => WASI_SIGNATURES[name])
-    .map(
-      (name) => `  (import "${WASI_MODULE}" "${name}" (func $${name} ${WASI_SIGNATURES[name]}))`,
-    );
-
-  // Phase 18.5: when any merged library dropped its bump allocator, synthesise
-  // a single shared $__malloc + $__heap_ptr at module scope. Initial cursor is
-  // seated at heapBase (above the combined static data and the reserved area).
-  // This is what makes a Map built in libA and read by libB share one heap.
-  const sharedAllocatorParts: string[] = [];
-  if (anyDroppedAllocator) {
-    sharedAllocatorParts.push(
-      `  (global $__heap_ptr (mut i32) (i32.const ${heapBase}))`,
-      `  (func $__malloc (param $size i32) (result i32)`,
-      `    (local $ptr i32)`,
-      `    (local.set $ptr (global.get $__heap_ptr))`,
-      `    (global.set $__heap_ptr (i32.add (local.get $ptr) (local.get $size)))`,
-      `    (local.get $ptr))`,
+  // A bundle always has a memory, exported as "memory": the runner and the host bindings read it
+  // (the regex bundler always declared one; bundle() gives one only when an input has memory).
+  if (out.memories.length === 0) {
+    out.memories.push({ name: "$memory", limits: { initial: 1n, isShared: false, is64: false } });
+    out.exports.push(
+      { name: "memory", kind: KIND.Memory, var: { kind: "name", name: "$memory" } } as IrExport,
     );
   }
 
-  // WAT spec: imports must precede all non-import definitions (memory, funcs, etc.)
-  const watParts: string[] = ["(module"];
-  if (wasiDecls.length > 0) watParts.push(wasiDecls.join("\n"));
-  if (importParts.length > 0) watParts.push("  " + importParts.join("\n  "));
-  watParts.push(`  (memory ${pagesNeeded})`);
-  if (sharedAllocatorParts.length > 0) watParts.push(sharedAllocatorParts.join("\n"));
-  // one exception for every module: its tag and the kind in flight (sw119)
-  if (anyExnTag) {
-    watParts.push(
-      `  (tag $__exn_tag (export "__exn_tag") (param i32 i32))\n  (global $__exn_kind (mut i32) (i32.const 0))`,
-    );
-  }
-  if (funcParts.length > 0) watParts.push("  " + funcParts.join("\n  "));
-  if (globalParts.length > 0) watParts.push("  " + globalParts.join("\n  "));
-  if (dataParts.length > 0) watParts.push("  " + dataParts.join("\n  "));
-  // Always export memory — the wasmtk runner and host bindings require it
-  watParts.push(`  (export "memory" (memory 0))`);
-  if (exportDeclParts.length > 0) watParts.push("  " + exportDeclParts.join("\n  "));
-  watParts.push(")");
-  const masterWat = watParts.join("\n");
-
-  // ── Compile master WAT → binary ───────────────────────────────────────────
-  console.log("\nCompiling...");
-  const masterMod = wabt.parseWat("combined.wat", masterWat, { exceptions: true });
-  const { buffer } = masterMod.toBinary({});
-  masterMod.destroy();
+  let bytes: Uint8Array = new binaryen.Module(out).emitBinary();
 
   // ── Optimize with Binaryen ────────────────────────────────────────────────
-  let finalBytes: Uint8Array;
   try {
-    const bMod = binaryen.readBinary(new Uint8Array(buffer));
+    const bMod = binaryen.readBinary(bytes);
     bMod.setFeatures(binaryen.Features.All);
     bMod.optimize();
-    finalBytes = bMod.emitBinary();
+    bytes = bMod.emitBinary();
     bMod.dispose();
     console.log("  ✓ Optimized with Binaryen");
   } catch (e) {
@@ -414,16 +439,15 @@ export async function runWasmBundle(
         e instanceof Error ? e.message : e
       }`,
     );
-    finalBytes = new Uint8Array(buffer);
   }
 
   // ── Write output ──────────────────────────────────────────────────────────
-  await rt.writeFile(outputPath, finalBytes);
-  const exportCount = exportDeclParts.length;
+  await rt.writeFile(outputPath, bytes);
+  const exportCount = report.exports.length;
   console.log(
     `\n✅ ${inputs.length} module(s) bundled → ${outputPath}` +
-      ` (${exportCount} export(s), ${finalBytes.length} bytes)`,
+      ` (${exportCount} export(s), ${bytes.length} bytes)`,
   );
-  // .wit auto-emission for the bundle (owner, 2026-09-28): assembled from WAT and optimised.
+  // .wit auto-emission for the bundle (owner, 2026-09-28): from the optimised module.
   await emitWitBeside(outputPath, "wasmbundle");
 }

@@ -88,6 +88,15 @@ After Phase 1, it means every module under the core tree. `tests/wasic_seam_test
   repros). Next: fix them in the planned order (sw01, the console fallback cluster, the parser,
   typing), then audit round 2.
   One owner question is open (`dq01`, unannotated integer literals → i32).
+- 🔄 **Phase 0b round 2 (2026-10-15) and round 3 (2026-10-26).** Round 2: 43 silent rows, all fixed
+  by 2026-10-24. **Round 3: NOT converged** — 52 silent rows (sw141–sw192) and ~105 loud, four
+  auditors over a frozen worktree, every row run (compiler-bugs.md § "audit round 3"; repros in
+  `scripts/phase0/round3/`). 12 fixed the same day (the severe ones: `new` sharing one object,
+  switch order / nesting, i32 literals wrapping, `dync` overwriting its source, the bundler rows).
+  **So Phase 1 does NOT start** (the owner chose to run round 3 rather than waive the gate,
+  2026-10-26). ⚠️ The owner's 2026-10-26 number-type direction (design-decisions.md: plain
+  `number` = f64, no type hints, no wasMath) would retire much of the i32-typing code and a share
+  of round 3's rows; scope it before fixing those rows one by one.
 - ⏳ **Phase 0b–0d: the audit loop.** Run "look for code issues" over `wasic.ts` + `console_log.ts`
   until a full pass finds nothing new. Each fix is validated by a golden diff showing ONLY the
   intended change, then the full gate. 0d re-freezes the golden after the loop converges.
