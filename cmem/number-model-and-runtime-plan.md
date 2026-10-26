@@ -85,11 +85,8 @@ Deno 2.9.8, Bun 1.4.4, Node 24.21.0 (fnm), binaryang 2.2.0, wasmtk `main` after 
    `.length`, a `| 0` / `>>> 0` / `& m` result, `Math.floor` / `trunc` into an index — i32 where
    PROVEN (integral and in range), f64 otherwise. Never visible in a program's output: a wrong
    proof is a silent-wrong bug, so each rule needs a test that drives the value out of range.
-   **The owner's note (2026-10-26):** JavaScript carries type hints in COMMENTS (JSDoc,
-   `/** @type {number} */`, read by TypeScript's `checkJs` and editors; a convention, not part of
-   ECMAScript — the TC39 types-as-comments proposal was at Stage 1 when last known here). An
-   optional comment hint could ask for an integer where inference cannot prove one, never
-   changing what the program computes (decision N2).
+   **No hints of any kind (N2, decided 2026-10-26):** comment types (JSDoc, read by TypeScript's
+   `checkJs`) are TypeScript's types, which have no integer — so inference is the only route.
 5. **`undefined` for numbers** (sw144: optional parameters and fields; the corpus's two
    `@allow-output-diff` destructuring files): the new model must say how an f64 slot holds
    `undefined` (decision N3) — today a 0 sentinel.
@@ -137,8 +134,13 @@ Deno 2.9.8, Bun 1.4.4, Node 24.21.0 (fnm), binaryang 2.2.0, wasmtk `main` after 
 ## Decisions for the owner
 
 - **N1.** Build the number model (this file's work list), in the order above?
-- **N2.** Integers: inference only, or inference plus an optional comment hint (JSDoc-style) for
-  what inference cannot prove?
+- ~~**N2.**~~ **DECIDED 2026-10-26 (owner): integers by INFERENCE ONLY.** Owner: "the only legal
+  comment hint for javascript is the same for typescript 'number', so integer hints won't be
+  legal" — TypeScript's type system (which JSDoc types use) has no integer type, so no legal hint
+  can say "integer". (A custom JSDoc tag would be ignored by TypeScript rather than refused, but it
+  is not a type, not standard, and brings the hints back.) So integer inference (work item 4) is
+  the whole of the size / speed recovery: the benchmark set (item 8) comes first, and every
+  inference rule ships with a test that drives the value out of range.
 - **N3.** `undefined` in a number slot: how it is represented (a NaN payload, a side flag as the
   nullable fields have today, or refused for parameters).
 - **N4.** wasMath: deprecated in the next minor, removed in the major that ships the model?

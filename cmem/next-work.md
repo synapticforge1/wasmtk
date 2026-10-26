@@ -28,7 +28,8 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   (`scripts/migr/`), the typed baseline, the plain-number measurement, sw146 folded into sw145
   (item 7: no ruling needed), the refreshed Deno-exit order (item 8: P0 done; M2 / M4 reopened).
   **M2 / M4 DECIDED 2026-10-26** (the oracle rule; Bun stays the reference). **Waiting on the
-  owner: decisions N1–N4.**
+  owner: decisions N1, N3, N4** (N2 decided 2026-10-26: integers by inference only — no legal
+  integer hint exists in TypeScript's types).
 - 🔒 **Owner's direction, 2026-10-26 (design-decisions.md, top of the number-model section):** no
   type hints, no wasMath; `number` = f64, `bigint` = i64, integers only where the compiler proves
   them (loop counters, indices). Decided in principle, NOT built. **Next, before more i32-typing
