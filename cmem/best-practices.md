@@ -723,13 +723,18 @@ it; an unmarked older section is UNKNOWN, not sent.
 Go suites could not run, the useful record was not "3 suites red" but "'ran the ENTIRE suite set'
 carries a three-suite asterisk on this machine, including in today's commit messages".
 
-## ★ The workspace's convergent rules — a COPY, stamped 2026-09-30 (workspace letter H6)
+## ★ The workspace's convergent rules — a COPY, stamped 2026-10-26 (workspace letters H6, H24, H27)
 
-**Copied from wasmExamples/cmem/best-practices.md on 2026-09-30** (the stamp wording
-`memory-conventions.md` prescribes). **Source:** `../cmem/best-practices.md` (the workspace, "compiled across the siblings"), last
-modified 2026-09-20; **28 rules**, every bullet the source marks **★ = convergent**: two or more
-repos derived it without reading each other. Copied VERBATIM, with the source's section headings
-and rule numbers, so a rule can be cited as "workspace 2.1" in either place.
+**Copied from synapticforge1/cmem/best-practices.md on 2026-10-26** (the stamp wording of letter
+H27 and `memory-conventions.md` § Open book; first copied 2026-09-30). **28 rules**, every bullet the
+source marks **★ = convergent**: two or more repos derived it without reading each other. Copied
+VERBATIM, with the source's section headings (`##` there, `###` here) and rule numbers, so a rule
+can be cited as "workspace 2.1" in either place. **Checked by TEXT, not by count** (2026-10-26): a
+one-time Bun script compared the 28 bullets by number and whitespace-normalized full text — before
+the re-copy 1 difference (5.2, letter H24's new wording), after it 0; inverted (one word added to
+the source's 6.1, in memory) it reports `DIFF 6.1`. **Known mismatch, kept verbatim:** 6.1 quotes
+binaryang's PRE-purge id `b8fafaa3f`; on binaryang's `origin/main` that commit is `8d9ba0cb9`
+(ledger C8). The source is fixed first, then this block is re-copied — it is not corrected here.
 
 - **Do not edit these here.** The source is authoritative. If it changes, re-copy the whole block
   and re-stamp the date; a hand-edited copy is the drift H10 exists to stop.
@@ -820,8 +825,8 @@ and rule numbers, so a rule can be cited as "workspace 2.1" in either place.
   right by luck. [wazmrt + wasmrt]
 - **5.2 ★ Identify the LAYER before naming a cause; the stage that REPORTS a failure is usually
   not the stage that caused it; finding a real defect at a layer is not evidence it causes your
-  symptom — vary one thing.** "Memory-grow ordering" was decoder reordering; the `D:` drive symptom
-  was diagnosed wrong three times. [wazmrt + binaryen-ts + wasmtk + wasmrt]
+  symptom — vary one thing.** "Memory-grow ordering" was decoder reordering; a symptom caused by the
+  development drive's FILESYSTEM (exFAT) was diagnosed wrong three times. [wazmrt + binaryen-ts + wasmtk + wasmrt]
 
 ### §6 Recording and claims
 

@@ -34,6 +34,31 @@ publish) and the traps that have already cost time.
   authoritative knowledge there — it is gitignored and would not survive a clone. Its pre-2026-07-30
   contents are archived verbatim in [legacy-claude-archive.md](legacy-claude-archive.md).
 
+### 🔒 No secrets or personal information in anything public (owner, 2026-10-22; letters H18, H19, H22)
+
+Everything committed is public, `cmem/` included (the workspace's `working-rules.md` § Records is
+the full rule). Never in a committed file, commit message, issue, the JSR package or a test
+snapshot: tokens or keys, email addresses, machine names, or **machine-specific paths**.
+**The path test is "is it machine-specific?", not "is it absolute?"** (owner, 2026-10-23; H22).
+*Not public:* any path that records the owner's machine layout — a user profile
+(`C:\Users\<name>\…`), the project tree (`D:\Programs\…`), other drives (`J:\…`), scoop / AppData
+installs, a scratchpad or session id. *Fine:* repo- or sibling-relative paths (`../binaryang/…`),
+environment variables, placeholders (`<repo-root>`, `<repo>`, `<scratchpad>`), and a CONVENTION
+path that names nothing about one machine and works on any comparable host. Real paths and machine
+facts go in the gitignored `cmem/local/`; tool settings (`.claude/`) are never tracked (removed
+from every commit by the 2026-10-23 purge). **The one email exception** (owner, 2026-10-23;
+widened 2026-10-26): the maintainer contact email, in a registry's manifest field and as the git
+commit author/committer address — nowhere else. wasmtk fills neither: JSR reads no author field,
+and wasmtk's commits carry the GitHub noreply address (since the 2026-10-23 purge), which the
+widening permits it to keep. **Before committing, scan the diff**:
+`git grep -I -n -i -E '[A-Za-z]:[\\/]+(Programs|Users|scoop|tools)[\\/]|/[a-z]/(Programs|Users)/'`
+plus an email pattern. A hit is a CANDIDATE, judged by the path test: `upstream/` (gitignored) and
+the third-party `node_modules/.deno/@jsr+std__path` test strings in OLD commits are not ours; the
+`legacy-claude-archive.md` placeholders (`<home>`) are already scrubbed. Binaries count too (a
+committed `.wasm` can carry debug paths; binaryang found five, 2026-10-26): scan with `-a`, not
+`-I`, before committing a binary. A golden or test snapshot must not freeze an absolute path (the
+golden harness writes `<repo>`, 2026-10-26).
+
 ### Trigger — "update the project memory" (binding on every agent)
 
 When the owner says **"update the project memory"** (or a clear synonym), do BOTH:
@@ -106,7 +131,7 @@ written (`../cmem/handoffs.md`, this repo's `next-work.md`).
 
 | File | What it holds |
 | --- | --- |
-| [best-practices.md](best-practices.md) | METHOD, not findings: rules that stop a defect class recurring, each with its incident and origin tag; ends with the workspace's 28 ★ convergent rules (a stamped copy, never edited here). Read before an audit, a conformance pass or a bump. |
+| [best-practices.md](best-practices.md) | METHOD, not findings: rules that stop a defect class recurring, each with its incident and origin tag; ends with the workspace's 28 ★ convergent rules (a stamped copy, never edited here; re-copied 2026-10-26, checked by text, 6.1's stale id kept verbatim until the source is fixed — ledger C8). Read before an audit, a conformance pass or a bump. |
 | [workflow.md](workflow.md) | The working loop (branch only for a fix → gate → memory → commit → merge), the release flow (SemVer bump behind the compatibility gate), the binaryang bump checklist, `upstream/` co-development, context boundaries, traps. |
 | [overview.md](overview.md) | What wasmtk is; repo layout; the key source files. |
 | [architecture.md](architecture.md) | wasic / modc / bindgen / hybrid; the pluggable binaryang backend; the build and merge pipeline; the `wast` spec runner. |
