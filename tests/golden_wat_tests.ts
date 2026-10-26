@@ -54,13 +54,20 @@ async function quiet<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** The repo root, written `<repo>` in a frozen message: an error names its file by absolute path,
+ *  and the snapshot must not depend on where the checkout sits (2026-10-26: the workspace moved
+ *  and all 9 refusal entries "diverged" on the path alone). */
+const ROOT = join(HERE, "..");
+const stripRoot = (s: string): string =>
+  s.split(ROOT).join("<repo>").split(ROOT.replaceAll("\\", "/")).join("<repo>");
+
 function statusText(r: WasicResult): string {
   return JSON.stringify(
     {
       success: r.success,
       aborted: r.aborted ?? false,
-      error: r.error ?? null,
-      diagnostics: r.diagnostics ?? [],
+      error: r.error === undefined || r.error === null ? null : stripRoot(r.error),
+      diagnostics: (r.diagnostics ?? []).map((d) => typeof d === "string" ? stripRoot(d) : d),
     },
     null,
     2,

@@ -1,0 +1,7 @@
+// hand-written
+package local:imp;
+
+world imp {
+  import log: func(msg: string);
+  export go: func();
+}
