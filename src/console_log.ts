@@ -320,7 +320,10 @@ let _objectInspectResolver:
 /** Inject the object writer's resolver (ld45). Pass `undefined` to clear it. */
 export function setObjectInspectResolver(
   fn:
-    | ((token: string, locals: Map<string, string>) => { ptrWat: string; lenWat: string } | undefined)
+    | ((
+      token: string,
+      locals: Map<string, string>,
+    ) => { ptrWat: string; lenWat: string } | undefined)
     | undefined,
 ): void {
   _objectInspectResolver = fn;
@@ -378,7 +381,9 @@ export function setU64Resolver(
 /** Marks the i64 segment of a `u64` expression `unsigned` (printed by `$__u64_to_str`). */
 function markU64(segs: LogSegment[], token: string, locals: Map<string, string>): LogSegment[] {
   const only = segs.length === 1 ? segs[0] : undefined;
-  if (only && (only.kind === "i64var" || only.kind === "i64expr") && _u64Resolver?.(token, locals)) {
+  if (
+    only && (only.kind === "i64var" || only.kind === "i64expr") && _u64Resolver?.(token, locals)
+  ) {
     only.unsigned = true;
     _mathHelperNeeded?.("u64_to_str");
   }
@@ -449,8 +454,9 @@ export function setExprFallbackResolver(
 /** sw119: an i32 `+ - *` where an i32 SLOT is wanted (a call's i32 argument, an index): wasic's
  *  emitExpr gives JavaScript's result through its checked store, which throws a RangeError when the
  *  value does not fit. Returns the WAT, or undefined. Set by wasic.ts around parseConsoleLogArgs. */
-let _i32SlotResolver: ((token: string, locals: Map<string, string>) => string | undefined) | undefined =
-  undefined;
+let _i32SlotResolver:
+  | ((token: string, locals: Map<string, string>) => string | undefined)
+  | undefined = undefined;
 /** Inject the checked i32 store's resolver (sw119). Pass `undefined` to clear it. */
 export function setI32SlotResolver(
   fn: ((token: string, locals: Map<string, string>) => string | undefined) | undefined,
@@ -524,7 +530,11 @@ const USER_CALL = /\(call \$(?!__)|\(call_indirect\b/;
  */
 function hoistCallingArgs(segments: LogSegment[]): { segments: LogSegment[]; pre: string[] } {
   const wats = (s: LogSegment): string[] =>
-    "wat" in s ? [s.wat] : s.kind === "joinarr" ? [s.arrWat] : s.kind === "strcall"
+    "wat" in s
+      ? [s.wat]
+      : s.kind === "joinarr"
+      ? [s.arrWat]
+      : s.kind === "strcall"
       ? [s.callWat]
       : s.kind === "strexpr"
       ? [s.ptrWat, s.lenWat]
@@ -566,7 +576,10 @@ function hoistCallingArgs(segments: LogSegment[]): { segments: LogSegment[]; pre
 }
 
 /** The `$__clt_*` temporaries a function body uses (sw68), as `(local …)` declarations. */
-export function consoleTempLocals(body: string, declared: { has(name: string): boolean }): string[] {
+export function consoleTempLocals(
+  body: string,
+  declared: { has(name: string): boolean },
+): string[] {
   const names = new Set<string>();
   for (const m of body.matchAll(/\$(__clt_(i32|i64|f64)_\d+)\b/g)) {
     if (!declared.has(m[1])) names.add(m[1]);
@@ -575,13 +588,18 @@ export function consoleTempLocals(body: string, declared: { has(name: string): b
 }
 
 /** The `$__arr_inspect` call for an `arrptr` segment, appending at the cursor stored at `cursorWat`. */
-function arrInspectCall(seg: { wat: string; elemType: string; nameLen?: number }, cursorWat: string): string {
+function arrInspectCall(
+  seg: { wat: string; elemType: string; nameLen?: number },
+  cursorWat: string,
+): string {
   const kind = arrInspectKind(seg.elemType);
   if (kind === undefined) {
     // parseSingleArg refuses these before emission; reaching here is a compiler bug, never output
     throw new Error(`console.log: no array writer for elements of type '${seg.elemType}'`);
   }
-  return `(call $__arr_inspect ${seg.wat} (i32.const ${kind}) (i32.const ${seg.nameLen ?? 0}) ${cursorWat})`;
+  return `(call $__arr_inspect ${seg.wat} (i32.const ${kind}) (i32.const ${
+    seg.nameLen ?? 0
+  }) ${cursorWat})`;
 }
 
 /** Callback to resolve an array variable by name: returns its element type, base ptr, and length.
@@ -891,11 +909,17 @@ function isConcatString(
   }
   if (/^String\s*\(/.test(t)) return true;
   const cm = t.match(/^(\w+)\s*\(([\s\S]*)\)$/);
-  if (cm && parenDepthNeverNegative(cm[2]!) && funcLookup?.(cm[1]!)?.result === "string") return true;
+  if (cm && parenDepthNeverNegative(cm[2]!) && funcLookup?.(cm[1]!)?.result === "string") {
+    return true;
+  }
   const mm = t.match(
     /^(.+?)\.(toUpperCase|toLowerCase|trim|trimStart|trimEnd|slice|charAt|substring|substr|replace|replaceAll|padStart|padEnd|repeat|join|toFixed|toString)\s*\(.*\)$/,
   );
-  if (mm && (/^(join|toFixed|toString)$/.test(mm[2]!) || isConcatString(mm[1]!, locals, arrayLookup, funcLookup, globals))) {
+  if (
+    mm &&
+    (/^(join|toFixed|toString)$/.test(mm[2]!) ||
+      isConcatString(mm[1]!, locals, arrayLookup, funcLookup, globals))
+  ) {
     return true;
   }
   const i = findTopLevelOp(t, "+");
@@ -1587,7 +1611,9 @@ function parseSingleArg(
         ? `(local.get $${arrName})`
         : `(i32.const ${arrInfo.ptr})`;
       // a string array joins its (ptr, len) slots' TEXT ($__cbuf_join_str, sw76)
-      const joinElem = arrInfo.isStringArr || arrInfo.elemType === "string" ? "string" : arrInfo.elemType;
+      const joinElem = arrInfo.isStringArr || arrInfo.elemType === "string"
+        ? "string"
+        : arrInfo.elemType;
       return [{ kind: "joinarr", arrWat, sepPtr, sepLen, elemType: joinElem }];
     }
   }
@@ -1642,7 +1668,16 @@ function parseSingleArg(
       const watArgsList = argList.map((a, idx) => {
         const pt = (closureSig.params[idx] ?? "i32") as string;
         return intArgWat(
-          exprToWat(a.trim(), locals, pt, funcLookup, allocString, arrayLookup, structLookup, globals),
+          exprToWat(
+            a.trim(),
+            locals,
+            pt,
+            funcLookup,
+            allocString,
+            arrayLookup,
+            structLookup,
+            globals,
+          ),
           a,
           callee,
           pt,
@@ -1669,7 +1704,11 @@ function parseSingleArg(
     if ((!sig || argList.some((a) => a.trim().startsWith("["))) && _exprFallbackResolver) {
       const r = _exprFallbackResolver(token, locals);
       if (r) {
-        const kind = r.type === "f64" ? "f64expr" as const : r.type === "i64" ? "i64expr" as const : "i32expr" as const;
+        const kind = r.type === "f64"
+          ? "f64expr" as const
+          : r.type === "i64"
+          ? "i64expr" as const
+          : "i32expr" as const;
         return [{ kind, wat: r.wat }];
       }
     }
@@ -1712,7 +1751,16 @@ function parseSingleArg(
       }
       return [
         intArgWat(
-          exprToWat(a.trim(), locals, ptype, funcLookup, allocString, arrayLookup, structLookup, globals),
+          exprToWat(
+            a.trim(),
+            locals,
+            ptype,
+            funcLookup,
+            allocString,
+            arrayLookup,
+            structLookup,
+            globals,
+          ),
           a,
           callee,
           ptype,
@@ -1732,7 +1780,9 @@ function parseSingleArg(
           if (bound.unsafe) {
             _diagnosticSink?.(
               `'${callee}(…)': the default of an omitted parameter reads an argument with a side effect ` +
-                `('${bound.unsafe.slice(0, 40)}'), which it would evaluate twice; pass the parameter.`,
+                `('${
+                  bound.unsafe.slice(0, 40)
+                }'), which it would evaluate twice; pass the parameter.`,
             );
           }
           watArgsList.push(
@@ -1790,7 +1840,11 @@ function parseSingleArg(
   if (/^\w+\[[^\[\]]+\]\s*\([\s\S]*\)$/.test(token) && _exprFallbackResolver) {
     const r = _exprFallbackResolver(token, locals);
     if (r) {
-      const kind = r.type === "f64" ? "f64expr" as const : r.type === "i64" ? "i64expr" as const : "i32expr" as const;
+      const kind = r.type === "f64"
+        ? "f64expr" as const
+        : r.type === "i64"
+        ? "i64expr" as const
+        : "i32expr" as const;
       return [{ kind, wat: r.wat }];
     }
   }
@@ -1848,7 +1902,8 @@ function parseSingleArg(
   // A tuple's STRING element, `mix[0]` (not an array): wasic's string resolver, which answers
   // nothing for a number element (`${mix[0]}` printed the pointer, found with ld76, 2026-10-22)
   if (
-    bracketMatch && _stringExprResolver && /^\w+\[\d+\]$/.test(token) && !arrayLookup?.(bracketMatch[1]) &&
+    bracketMatch && _stringExprResolver && /^\w+\[\d+\]$/.test(token) &&
+    !arrayLookup?.(bracketMatch[1]) &&
     (locals.get(bracketMatch[1]) ?? globals?.get(bracketMatch[1])) !== "string"
   ) {
     const r = _stringExprResolver(token, locals);
@@ -2323,7 +2378,10 @@ function parseSingleArg(
     // f64 ops over i64 values, ld59; wasic's inferExprType has the same literal rule)
     const call2 = rest2.match(/^(\w+)\s*\(/)?.[1];
     if (call2 && funcLookup?.(call2)?.result === "i64") leadType = "i64";
-    if (/(^|[^\w.])\d+n\b/.test(token) && /^[\w\s()+\-*/%&|^<>~]+$/.test(token) && !isTopLevelComparison(token)) {
+    if (
+      /(^|[^\w.])\d+n\b/.test(token) && /^[\w\s()+\-*/%&|^<>~]+$/.test(token) &&
+      !isTopLevelComparison(token)
+    ) {
       leadType = "i64";
     }
     // ...or by a bigint FIELD (`-h.big` printed `-12`, sw103, 2026-10-19)
@@ -2348,7 +2406,8 @@ function parseSingleArg(
   // An i32-led expression with a KNOWN float in it (`i + f`, `i * 0.5`) is a float (sw15's console
   // twin, 2026-10-06); printing an integral value as f64 gives the same text, so this is safe.
   const hasKnownFloat = [...token.matchAll(/(?<![\w.])(-?\d+\.\d*(?:[eE][+-]?\d+)?|[A-Za-z_]\w*)/g)]
-    .some((m) => isKnownFloat(m[1]!, locals, globals)) || hasFloatField(token, structLookup) ||
+    .some((m) => isKnownFloat(m[1]!, locals, globals)) ||
+    hasFloatField(token, structLookup) ||
     hasFloatElem(token, arrayLookup) ||
     // `**` of numbers is a float (Math.pow): `n ** 2` of an i32 n was asked for as i32 (ld67)
     findTopLevelOp(token, "**") > 0;
@@ -2485,11 +2544,22 @@ function watOuterType(
 
 /** An argument for an integer parameter: a float there is the owner's D3 refusal (2026-10-13), the
  *  console twin of wasic's checkImplicitTrunc (it passed the f64 raw, an invalid module). */
-function intArgWat(w: string, arg: string, callee: string, ptype: string, locals: Map<string, string>, globals?: Map<string, string>): string {
+function intArgWat(
+  w: string,
+  arg: string,
+  callee: string,
+  ptype: string,
+  locals: Map<string, string>,
+  globals?: Map<string, string>,
+): string {
   const t = watOuterType(w, locals, globals);
   const isInt = ptype === "i32" || ptype === "i64";
-  if (isInt && (t === "f64" || t === "f32" || /^\((i32|i64)\.trunc_f(32|64)_s /.test(w.trimStart()))) {
-    _diagnosticSink?.(implicitTruncDiagnostic(`${callee}(… ${arg.trim().slice(0, 30)} …)`, `passed to '${callee}'`));
+  if (
+    isInt && (t === "f64" || t === "f32" || /^\((i32|i64)\.trunc_f(32|64)_s /.test(w.trimStart()))
+  ) {
+    _diagnosticSink?.(
+      implicitTruncDiagnostic(`${callee}(… ${arg.trim().slice(0, 30)} …)`, `passed to '${callee}'`),
+    );
   }
   return w;
 }
@@ -2518,13 +2588,31 @@ function toInt32Wat(
   // an i32 `+ - *` (sw119): ToInt32 of JavaScript's exact value; asked for as an i32 it is the
   // checked store, which throws where JavaScript wraps
   if (isArithChain(e)) {
-    const f = exprToWat(e, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals);
+    const f = exprToWat(
+      e,
+      locals,
+      "f64",
+      funcLookup,
+      allocString,
+      arrayLookup,
+      structLookup,
+      globals,
+    );
     if (watOuterType(f, locals, globals) === "f64") {
       _mathHelperNeeded?.("i32_toint32");
       return `(call $__i32_toint32 ${f})`;
     }
   }
-  const w = exprToWat(e, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals);
+  const w = exprToWat(
+    e,
+    locals,
+    "i32",
+    funcLookup,
+    allocString,
+    arrayLookup,
+    structLookup,
+    globals,
+  );
   const have = watOuterType(w, locals, globals);
   if (have === "i64") return w;
   const truncated = /^\(i32\.trunc_f(32|64)_s /.test(w.trimStart());
@@ -2896,8 +2984,14 @@ function exprToWat(
       // `Math` is f64-only: a bigint argument is a TypeError in JavaScript (sw63, 2026-10-09).
       for (const e of a) {
         const t = e.trim();
-        if (/^-?\d+n$/.test(t) || (/^\w+$/.test(t) && (locals.get(t) ?? globals?.get(t)) === "i64")) {
-          _diagnosticSink?.(`Math.${fn}: a bigint argument is a TypeError in JavaScript (${t.slice(0, 40)}); use wasMath's i64 / u64`);
+        if (
+          /^-?\d+n$/.test(t) || (/^\w+$/.test(t) && (locals.get(t) ?? globals?.get(t)) === "i64")
+        ) {
+          _diagnosticSink?.(
+            `Math.${fn}: a bigint argument is a TypeError in JavaScript (${
+              t.slice(0, 40)
+            }); use wasMath's i64 / u64`,
+          );
         }
       }
       const arg0 = exprToWat(
@@ -3146,7 +3240,16 @@ function exprToWat(
       }
       return [
         intArgWat(
-          exprToWat(a.trim(), locals, ptype, funcLookup, allocString, arrayLookup, structLookup, globals),
+          exprToWat(
+            a.trim(),
+            locals,
+            ptype,
+            funcLookup,
+            allocString,
+            arrayLookup,
+            structLookup,
+            globals,
+          ),
           a,
           callee,
           ptype,
@@ -3166,7 +3269,9 @@ function exprToWat(
           if (bound.unsafe) {
             _diagnosticSink?.(
               `'${callee}(…)': the default of an omitted parameter reads an argument with a side effect ` +
-                `('${bound.unsafe.slice(0, 40)}'), which it would evaluate twice; pass the parameter.`,
+                `('${
+                  bound.unsafe.slice(0, 40)
+                }'), which it would evaluate twice; pass the parameter.`,
             );
           }
           watArgsList.push(
@@ -3262,14 +3367,28 @@ function exprToWat(
   // operator, so it applies only when none sits at top level: `-n + m` is `(-n) + m`, not
   // `-(n + m)` (an invalid module: `f64.neg` of an i32 sum; H12, found with sw23, 2026-09-30).
   // (Not `--x`, a decrement: wasic's emitExpr owns it through the fallback below; ld71.)
-  if (expr.startsWith("-") && !expr.startsWith("--") && !/^-\d/.test(expr) && !hasTopLevelBinaryOp(expr)) {
+  if (
+    expr.startsWith("-") && !expr.startsWith("--") && !/^-\d/.test(expr) &&
+    !hasTopLevelBinaryOp(expr)
+  ) {
     const inner = expr.slice(1).trim();
     if (isFloat) {
-      const iw = exprToWat(inner, locals, numType, funcLookup, allocString, arrayLookup, structLookup, globals);
+      const iw = exprToWat(
+        inner,
+        locals,
+        numType,
+        funcLookup,
+        allocString,
+        arrayLookup,
+        structLookup,
+        globals,
+      );
       // an i32 operand (an element, a field: `-ia[0]`) widened first; it was `f64.neg` of an i32,
       // an invalid module (ld55, 2026-10-20)
       const it = watOuterType(iw, locals, globals);
-      return `(${expectedType}.neg ${it === "i32" ? (widenNumeric(iw, "i32", numType) ?? iw) : iw})`;
+      return `(${expectedType}.neg ${
+        it === "i32" ? (widenNumeric(iw, "i32", numType) ?? iw) : iw
+      })`;
     }
     // a bigint (the i64 segment of `console.log(-a)`, sw64, 2026-10-13)
     if (expectedType === "i64") {
@@ -3354,7 +3473,10 @@ function exprToWat(
       const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
       if (widened !== null) return widened;
     }
-    if (isEquality && [strLhs, strRhs].some((x) => x === "undefined" || x === "null") && _exprFallbackResolver) {
+    if (
+      isEquality && [strLhs, strRhs].some((x) => x === "undefined" || x === "null") &&
+      _exprFallbackResolver
+    ) {
       const r = _exprFallbackResolver(expr, locals);
       const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
       if (widened !== null) return widened;
@@ -3544,7 +3666,9 @@ function exprToWat(
     // instead of defaulting to f64 (which produced wrong output or a type error).
     const leadArrElem = (leadM && leadM[2] === undefined && restAfterLead.startsWith("["))
       // a row's `.length` is an i32 (ld55)
-      ? (/^(?:\s*\[[^\[\]]*\])+\.length(?![\w(])/.test(restAfterLead) ? "i32" : arrayLookup?.(leadM[1])?.elemType)
+      ? (/^(?:\s*\[[^\[\]]*\])+\.length(?![\w(])/.test(restAfterLead)
+        ? "i32"
+        : arrayLookup?.(leadM[1])?.elemType)
       : undefined;
     // A boolean element is an i32 (`flags[0] === false` was f64.eq over an i32 load: an invalid
     // module; found with sw69).
@@ -3556,7 +3680,9 @@ function exprToWat(
       : undefined;
     const leadNum = (t: string | undefined) =>
       t === "i32" || t === "i64" || t === "f64" || t === "f32" || t === "bool" ? t : undefined;
-    const lhsArrNumType = leadElemField ? (leadNum(leadFieldType) ?? leadNum(leadArrElem)) : leadNum(leadArrElem);
+    const lhsArrNumType = leadElemField
+      ? (leadNum(leadFieldType) ?? leadNum(leadArrElem))
+      : leadNum(leadArrElem);
     const lhsLocalType = lhsArrNumType
       ? lhsArrNumType
       : !leadIsSimpleAtom || !leadM
@@ -3637,7 +3763,8 @@ function exprToWat(
     // results, an invalid module (ld23, 2026-10-15).
     const boolEquality = (op === "===" || op === "!==" || op === "==" || op === "!=") &&
       (isBoolOperand(lhs, locals, globals) || isBoolOperand(rhs, locals, globals));
-    const i32Typed = (effLhsType === "i32" || effLhsType === "bool") && !isKnownFloat(rhs, locals, globals) &&
+    const i32Typed = (effLhsType === "i32" || effLhsType === "bool") &&
+      !isKnownFloat(rhs, locals, globals) &&
       !hasFloatField(rhs, structLookup) && !hasFloatElem(rhs, arrayLookup);
     // sw119: a comparison of i32s where a side is a `+ - *` chain compares JavaScript's exact
     // values (`big + 1 > 0` of an i32 max is true), as wasic's emitExpr does
@@ -3658,7 +3785,16 @@ function exprToWat(
     if (opType === "i32" && !alwaysI32 && (op === "+" || op === "-" || op === "*")) {
       if (expectedType === "f64" || expectedType === "f32") {
         const f = (s: string) => {
-          const w = exprToWat(s, locals, "f64", funcLookup, allocString, arrayLookup, structLookup, globals);
+          const w = exprToWat(
+            s,
+            locals,
+            "f64",
+            funcLookup,
+            allocString,
+            arrayLookup,
+            structLookup,
+            globals,
+          );
           return watOuterType(w, locals, globals) === "i32" ? `(f64.convert_i32_s ${w})` : w;
         };
         const fw = `(f64.${op === "+" ? "add" : op === "-" ? "sub" : "mul"} ${f(lhs)} ${f(rhs)})`;
@@ -3668,7 +3804,9 @@ function exprToWat(
       if (checked) return checked;
       // never the wrapping op: that is the silent result sw119 removed
       _diagnosticSink?.(
-        `console argument: cannot emit '${expr.trim().slice(0, 60)}' with JavaScript's result (sw119)`,
+        `console argument: cannot emit '${
+          expr.trim().slice(0, 60)
+        }' with JavaScript's result (sw119)`,
       );
     }
     const watOp = (opType === "f64" || opType === "f32")
@@ -3682,8 +3820,19 @@ function exprToWat(
     // An i32 operand of a float operation (an element, a row's length: `ia[1] + fa[1]`) is widened;
     // it reached the f64 op as is, an invalid module (ld55 / ld56, 2026-10-20). Not a boolean.
     const operand = (s: string) => {
-      if (alwaysI32) return toInt32Wat(s, locals, funcLookup, allocString, arrayLookup, structLookup, globals);
-      const w = exprToWat(s, locals, opType, funcLookup, allocString, arrayLookup, structLookup, globals);
+      if (alwaysI32) {
+        return toInt32Wat(s, locals, funcLookup, allocString, arrayLookup, structLookup, globals);
+      }
+      const w = exprToWat(
+        s,
+        locals,
+        opType,
+        funcLookup,
+        allocString,
+        arrayLookup,
+        structLookup,
+        globals,
+      );
       return (opType === "f64" || opType === "f32") && watOuterType(w, locals, globals) === "i32" &&
           !isBoolOperand(s, locals, globals)
         ? (widenNumeric(w, "i32", opType) ?? w)
@@ -3906,7 +4055,9 @@ const TOP_LEVEL_BINARY_OPS = [
 function isTopLevelComparison(expr: string): boolean {
   if (findTopLevelOp(expr, "&&") !== -1 || findTopLevelOp(expr, "||") !== -1) return false;
   if (findTopLevelOp(expr, "?") !== -1) return false;
-  return ["===", "!==", "==", "!=", "<=", ">=", "<", ">"].some((op) => findTopLevelOp(expr, op) > 0);
+  return ["===", "!==", "==", "!=", "<=", ">=", "<", ">"].some((op) =>
+    findTopLevelOp(expr, op) > 0
+  );
 }
 
 function hasTopLevelBinaryOp(expr: string): boolean {
@@ -4175,7 +4326,8 @@ export function emitConsoleLog(
     const fits = worst <= SCRATCH_BYTES;
     const B = fits ? `(i32.const ${scratchBase})` : "(global.get $__cbuf)";
     /** The buffer address `off` bytes in (a constant when the line uses the fixed scratch). */
-    const at = (off: number) => fits ? `(i32.const ${scratchBase + off})` : `(i32.add ${B} (i32.const ${off}))`;
+    const at = (off: number) =>
+      fits ? `(i32.const ${scratchBase + off})` : `(i32.add ${B} (i32.const ${off}))`;
     if (fits) {
       statements.push(
         `${indent}(i32.store (i32.const ${iovBase}) (i32.const ${scratchBase}))`,
@@ -4200,7 +4352,9 @@ export function emitConsoleLog(
     /** Pins the compile-time cursor into memory (before a helper reads it). */
     const pin = () => {
       if (!runtimeCursor) {
-        statements.push(`${indent}(i32.store (i32.const ${cursorAddr}) (i32.const ${compileCursor}))`);
+        statements.push(
+          `${indent}(i32.store (i32.const ${cursorAddr}) (i32.const ${compileCursor}))`,
+        );
         runtimeCursor = true;
       }
     };
@@ -4212,7 +4366,9 @@ export function emitConsoleLog(
         if (!runtimeCursor) {
           // Compile-time position: buffer-relative constant offsets
           for (let j = 0; j < bytes.length; j++) {
-            statements.push(`${indent}(i32.store8 ${at(compileCursor + j)} (i32.const ${bytes[j]}))`);
+            statements.push(
+              `${indent}(i32.store8 ${at(compileCursor + j)} (i32.const ${bytes[j]}))`,
+            );
           }
           compileCursor += bytes.length;
         } else {
@@ -4240,7 +4396,9 @@ export function emitConsoleLog(
         const ptrWat = ptrMsc ? `(i32.const ${ptrMsc[1]})` : `(local.get $${seg.ptrLocal})`;
         const lenWat = lenMsc ? `(i32.const ${lenMsc[1]})` : `(local.get $${seg.lenLocal})`;
         pin();
-        statements.push(`${indent}(call $__cbuf_put ${ptrWat} ${lenWat} (i32.const ${cursorAddr}))`);
+        statements.push(
+          `${indent}(call $__cbuf_put ${ptrWat} ${lenWat} (i32.const ${cursorAddr}))`,
+        );
       } else if (seg.kind === "boolvar" || seg.kind === "boolexpr") {
         // Bool — copy "true"/"false" bytes into scratch via $__str_gather, advance cursor.
         //
@@ -4289,7 +4447,9 @@ export function emitConsoleLog(
       } else if (seg.kind === "strexpr") {
         // Arbitrary WAT ptr+len expressions, evaluated pointer first, as before
         pin();
-        statements.push(`${indent}(call $__cbuf_put ${seg.ptrWat} ${seg.lenWat} (i32.const ${cursorAddr}))`);
+        statements.push(
+          `${indent}(call $__cbuf_put ${seg.ptrWat} ${seg.lenWat} (i32.const ${cursorAddr}))`,
+        );
       } else {
         // Numeric segment — convert directly into the buffer at the cursor (32 bytes holds any
         // number: an f64 is at most 24, an i64 21 with its `n`)

@@ -115,7 +115,18 @@ async function main(): Promise<void> {
   // `mod lib.wasm add64 9007199254740993 1` passed 9007199254740992 (ld87, 2026-10-22). A token
   // starting with `-` that is not a number is a flag; a string flag without `=` takes the next one.
   {
-    const stringFlags = new Set(["name", "n", "o", "on-conflict", "alias", "any-policy", "runtime", "lang", "go-runtime", "go-target"]);
+    const stringFlags = new Set([
+      "name",
+      "n",
+      "o",
+      "on-conflict",
+      "alias",
+      "any-policy",
+      "runtime",
+      "lang",
+      "go-runtime",
+      "go-target",
+    ]);
     const raw: string[] = [];
     for (let i = 0; i < Deno.args.length; i++) {
       const t = Deno.args[i];
@@ -151,7 +162,9 @@ async function main(): Promise<void> {
     if (raw === undefined) continue;
     const v = flag.startsWith("go-") ? raw.toLowerCase() : raw;
     if (!choices.includes(v)) {
-      console.error(`❌ wasmtk: --${flag}=${raw} is not a value it takes; use one of: ${choices.join(", ")}`);
+      console.error(
+        `❌ wasmtk: --${flag}=${raw} is not a value it takes; use one of: ${choices.join(", ")}`,
+      );
       Deno.exit(1);
     }
   }

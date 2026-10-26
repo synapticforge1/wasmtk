@@ -312,7 +312,9 @@ export async function runWasmBundle(
     // keeps at least the pages the module declared, and wasic's 3-page floor when it has such
     // globals. A 1-page bundle took a library whose cursor sat at 131072: out of bounds (ld81,
     // 2026-10-22).
-    const ownPages = parseInt(mod.wat.match(/\(memory\s+(?:\(;\d+;\)\s+)?(?:\(export\s+"[^"]*"\)\s+)?(\d+)/)?.[1] ?? "0");
+    const ownPages = parseInt(
+      mod.wat.match(/\(memory\s+(?:\(;\d+;\)\s+)?(?:\(export\s+"[^"]*"\)\s+)?(\d+)/)?.[1] ?? "0",
+    );
     minPages = Math.max(minPages, ownPages, result.hasMutableGlobals ? 3 : 0);
 
     // Advance dataOffset: next module's data goes above this module's data region.
@@ -339,7 +341,11 @@ export async function runWasmBundle(
   // Memory pages: enough for the combined static data PLUS at least one growth
   // page for the shared bump heap (Phase 18.5). Without the +1, an immediately-
   // first allocation can land at the page boundary and trap.
-  const pagesNeeded = Math.max(1, minPages, Math.ceil(heapBase / 65536) + (anyDroppedAllocator ? 1 : 0));
+  const pagesNeeded = Math.max(
+    1,
+    minPages,
+    Math.ceil(heapBase / 65536) + (anyDroppedAllocator ? 1 : 0),
+  );
 
   // WASI imports — one (import ...) per unique WASI function referenced
   const wasiDecls = [...allWasiNames]
@@ -372,7 +378,9 @@ export async function runWasmBundle(
   if (sharedAllocatorParts.length > 0) watParts.push(sharedAllocatorParts.join("\n"));
   // one exception for every module: its tag and the kind in flight (sw119)
   if (anyExnTag) {
-    watParts.push(`  (tag $__exn_tag (export "__exn_tag") (param i32 i32))\n  (global $__exn_kind (mut i32) (i32.const 0))`);
+    watParts.push(
+      `  (tag $__exn_tag (export "__exn_tag") (param i32 i32))\n  (global $__exn_kind (mut i32) (i32.const 0))`,
+    );
   }
   if (funcParts.length > 0) watParts.push("  " + funcParts.join("\n  "));
   if (globalParts.length > 0) watParts.push("  " + globalParts.join("\n  "));

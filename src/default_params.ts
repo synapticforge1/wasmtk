@@ -20,7 +20,10 @@ export function bindDefaultParam(
   const bind = (d: string, n: number): string => {
     const names = params.slice(0, n).map((p) => p.name).filter((x): x is string => !!x);
     if (names.length === 0) return d;
-    const re = new RegExp(`(?<![\\w$.])(${names.map((x) => x.replace(/\$/g, "\\$")).join("|")})(?![\\w$])`, "g");
+    const re = new RegExp(
+      `(?<![\\w$.])(${names.map((x) => x.replace(/\$/g, "\\$")).join("|")})(?![\\w$])`,
+      "g",
+    );
     return d.replace(re, (nm) => {
       const k = params.findIndex((p) => p.name === nm);
       const v = values[k] ?? nm;

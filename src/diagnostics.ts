@@ -127,7 +127,9 @@ function find(
   files: SourceFile[],
   used: Set<string>,
 ): { file: string; line: number; col: number; length: number; sourceLine: string } | undefined {
-  const parts = snippet.split(/\s+/).filter(Boolean).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const parts = snippet.split(/\s+/).filter(Boolean).map((p) =>
+    p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
   if (!parts.length) return undefined;
   const re = new RegExp(parts.join("\\s*"), "g");
   let fallback: { f: SourceFile; m: RegExpMatchArray; key: string } | undefined;
@@ -178,7 +180,12 @@ export function locate(diagnostics: readonly string[], files: SourceFile[]): Loc
     }
     const code = classify(first);
     const loc = quoted(first).map((q) => find(q, files, used)).find((l) => l !== undefined);
-    return { code, headline: first.trim(), notes: rest.map((r) => r.trim()).filter(Boolean), ...loc };
+    return {
+      code,
+      headline: first.trim(),
+      notes: rest.map((r) => r.trim()).filter(Boolean),
+      ...loc,
+    };
   });
 }
 
@@ -186,9 +193,10 @@ export function locate(diagnostics: readonly string[], files: SourceFile[]): Loc
 export function formatReport(diagnostics: readonly string[], files: SourceFile[]): string {
   const out: string[] = [];
   // In source order (file as listed, line, column); an error that could not be located goes last.
-  const rank = (d: Located) => d.line === undefined
-    ? [Infinity, 0, 0]
-    : [files.findIndex((f) => f.path === d.file), d.line, d.col ?? 0];
+  const rank = (d: Located) =>
+    d.line === undefined
+      ? [Infinity, 0, 0]
+      : [files.findIndex((f) => f.path === d.file), d.line, d.col ?? 0];
   const sorted = locate(diagnostics, files).map((d, i) => ({ d, i, r: rank(d) }))
     .sort((a, b) => a.r[0] - b.r[0] || a.r[1] - b.r[1] || a.r[2] - b.r[2] || a.i - b.i)
     .map((x) => x.d);
