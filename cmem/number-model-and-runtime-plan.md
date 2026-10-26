@@ -120,7 +120,9 @@ Deno 2.9.8, Bun 1.4.4, Node 24.21.0 (fnm), binaryang 2.2.0, wasmtk `main` after 
   binaryang are pure TypeScript (the seam gate proves the core has no host access), so compiling
   in a page through bytes-in / bytes-out APIs is realistic; the CLI, file reading / writing and the
   Go / Zig / Rust producers are not web features. Proof needed: one real headless-browser run.
-- **REOPENED by the number direction: M2 and M4** (🗓️ owner). M4 said corpus lines that compare a
+- **REOPENED by the number direction: M2 and M4 — DECIDED the same day** (§ "Parity on the wasm
+  side": Bun stays the reference; transcendental `Math` is judged by a correctly rounded oracle).
+  What was open: M4 said corpus lines that compare a
   transcendental `Math` value move to wasMath; with wasMath gone that answer is gone. M2 (Bun is
   the TypeScript reference) leaned on M4. Options: (a) the reference runs on V8 (Node 24), Bun
   and Deno legs compare too; (b) Bun stays the reference and `Math` lines compare within 1 ulp;
@@ -140,5 +142,33 @@ Deno 2.9.8, Bun 1.4.4, Node 24.21.0 (fnm), binaryang 2.2.0, wasmtk `main` after 
 - **N3.** `undefined` in a number slot: how it is represented (a NaN payload, a side flag as the
   nullable fields have today, or refused for parameters).
 - **N4.** wasMath: deprecated in the next minor, removed in the major that ships the model?
-- **M2 / M4 (reopened):** which TypeScript reference, and how `Math` lines compare (a, b or c
-  above).
+- ~~**M2 / M4 (reopened)**~~ **DECIDED 2026-10-26 (owner: "i agree")** — option (c), with Bun
+  KEPT as the reference: see § "Parity on the wasm side" below.
+
+## Parity on the wasm side (owner, 2026-10-26: decided)
+
+Asked: "so bun has the most correct math?" — no: on the 2 programs measured 2026-10-13 V8 was the
+correctly rounded one and JavaScriptCore was 1 ulp off; NEITHER engine promises correct rounding
+(ECMAScript lets `Math.sin` / `tan` / `exp` / `log` / `pow` … be implementation-approximated);
+wasmtk's compiled `Math` (its mathlib, "CR, in both") is the correctly rounded one. Then: "how do we
+make sure we have parity on the wasm side?" — the rule, agreed:
+
+- **The wasm side is deterministic by construction:** wasm `f64` arithmetic, `sqrt`, `floor`,
+  conversions are IEEE 754 (bit-identical on every engine but a NaN's payload), and compiled `Math`
+  runs wasmtk's mathlib INSIDE the module, never the engine's. Gated by the harness (the same
+  module identical on Deno / Bun / Node: 449 / 449, 2026-10-26) and the engine cross-check
+  (wasmtime, wasmer, wazero).
+- **The reference per kind of value:**
+  - arithmetic, comparisons, `%`, conversions, number printing and parsing (`String(x)`,
+    `toFixed`, `parseFloat`: the spec defines them EXACTLY) — any engine running the TypeScript;
+  - transcendental `Math` — a CORRECTLY ROUNDED ORACLE (the wasMath-style batteries, 199 / 199
+    exact, kept as a test of compiled `Math` when the library itself retires), never an engine;
+  - console layout of objects / arrays — Deno / Node's (M3, unchanged).
+- **The corpus compares against an engine only where the spec is exact.** A line printing a
+  transcendental result is checked against the oracle, or written so the value is exactly
+  representable (a test of behaviour, not rounding).
+- **An engine disagreeing on a `Math` line is judged by the oracle:** wasm = oracle → an engine
+  ulp, recorded, not a wasmtk bug.
+- **So M2 stands: Bun is the TypeScript reference** (it runs wasic's input as written and is the
+  main runtime), with Node LTS and Deno legs in CI comparing the same outputs. **M4 is replaced by
+  the oracle rule** (its "move the lines to wasMath" needed the library that goes away).

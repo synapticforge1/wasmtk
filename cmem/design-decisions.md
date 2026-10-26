@@ -462,7 +462,12 @@ allocation per value), refusing the type (left as the fallback), keeping "0 is n
     — on today's compiler the plain-number corpus compiles 413 / 443 and matches Deno on 371
     (typed: 437 / 449), +16 % size; the gap is the f64 path's immaturity (27 invalid modules
     reported as success), not the model. Scoped together with the Bun transition; decisions N1–N4
-    and the reopened M2 / M4 are the owner's.
+    are the owner's. 🔒 **Decided the same day — parity on the wasm side:** wasm arithmetic is
+    IEEE-exact and compiled `Math` runs wasmtk's correctly rounded mathlib inside the module, so the
+    module is the same on every engine (gated); a program is compared with an ENGINE only where
+    ECMAScript is exact (arithmetic, conversions, number printing / parsing); transcendental `Math`
+    is checked against a correctly rounded ORACLE, and an engine disagreeing there is an engine
+    ulp, not a wasmtk bug. Bun stays the TypeScript reference (M2); M4 is replaced by this rule.
   - **Direction of 2026-10-19: untyped is JavaScript's number; JavaScript and npm through the
     bundle (owner, after reviewing the number model; NOT BUILT, measure first).** The owner: "I
     might have over thought this a bit, and should have kept the value inference intact that we
