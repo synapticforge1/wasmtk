@@ -3,7 +3,7 @@
 Only open items, each pointing at its record (workspace `memory-conventions.md`: working memory,
 not an archive; git is the archive). Completed work appears below only as dated summaries with
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
-branch audit and superseded plan):** `git show f21bfb5f810:cmem/next-work.md`.
+branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
 ## 2026-10-26 — H11, H12 round 3, and the owner's number-type direction
 
@@ -32,7 +32,7 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   loaders' fixture suites and LeptonPad against the unpublished wasmtk, in temp copies (never
   writing into those repos), on nine toolchains (Dart, .NET, Go, Rust, Python, JVM, V, Zig, C);
   (2) the fixtures themselves: they are stamped from a wasmtk commit (H7 / drift X8); loader-js
-  re-stamps from the pushed post-purge `84b3e180eba` first, then the ports copy, so until that
+  re-stamps from the pushed post-purge `4a5c3cf668d` first, then the ports copy, so until that
   the suites test against old fixtures; (3) two loaders have NO suite to run (-v, -zig; H7);
   (4) the workspace rule (layout-and-packaging Rule 3) makes a red consumer suite a release
   BLOCKER for a patch or minor, so it will gate wasmtk's next 3.x release once it exists (3.0.0
@@ -58,14 +58,16 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   owner's profile, scoop and AppData paths and the OLD project path; every earlier scan used `-I`
   (binaries skipped), as binaryang's own finding the same day. **Fixed at HEAD 2026-10-26:** its
   seven `.debug_*` custom sections removed byte-exactly (every other section unchanged; 6,225 →
-  336 bytes; `mod_tests` 55 / 55); the 68 tracked binaries now scan clean with `-a`. **Still in
-  public history** (since at least `ad0a9167`, 2026-07-02; the 2026-10-23 purge searched text):
-  removing it is a second history rewrite + force-push — 🗓️ OWNER (binaryang has the same
-  decision open for its five binaries).
+  336 bytes; `mod_tests` 55 / 55); the 68 tracked binaries now scan clean with `-a`. **History
+  PURGED and force-pushed 2026-10-26** (owner: "lets get the second history fixed"): every blob of
+  every GitHub ref scanned (one leaking blob, older than the v1.2.x tags), 745 commits rewritten,
+  148 refs force-pushed with leases, GitHub = the verified mirror; this checkout realigned and
+  gc'd. **Every hash from v1.2.x to `main` changed again** — record and map in
+  [history-purge-2026-10-26.md](history-purge-2026-10-26.md); the H7 stamp is now `4a5c3cf668d`.
 - **W8. Stale workspace cells (verified 2026-10-26):** H16 wasmtk done (gc strategy set, 1 pack);
   H17 / H19 force-push done 2026-10-23; H20 done (3.0.0 published from `synapticforge1` with
   provenance); H21 wasmtk's map is pushed (`history-purge-2026-10-23.md`); H7 / X8 stamp
-  `84b3e180eba` is on `origin/main`.
+  `4a5c3cf668d` is on `origin/main`.
 - **W9. H11 and H12 status for the table:** H11 — `wasmbundle` switched (this session's commits);
   H12 — round 3 not converged, Phase 1 gated.
 - **W10. The owner's number-type direction (2026-10-26)** touches the workspace's I11 / H12 bar
@@ -156,7 +158,7 @@ recorded here before. Measured the same day: `origin` = `jrmarcum/wasmtk`, `main
   pair by pair; 152 refs force-pushed with leases. Local `user.email` is now noreply. **Every hash
   changed** — the record, the branch decisions and the tag-by-tag map are in
   [history-purge-2026-10-23.md](history-purge-2026-10-23.md); the 100 hashes cited in this repo's
-  Markdown were rewritten through the map. The H7 stamp (old `f50c8e4`) is now `84b3e180eba`, on
+  Markdown were rewritten through the map. The H7 stamp (old `f50c8e4`) is now `4a5c3cf668d`, on
   the pushed `main`: loader-js can re-stamp from it (drift X8). Never push from the private
   pre-purge bundle or an old clone. **Open (owner): the GitHub Support request** — old commits are
   still served by hash (measured 2026-10-23: the old v2.0.3 commit returns 200); 0 forks, 0 pull
@@ -216,7 +218,7 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > `TranslateToExnref`; standalone runtimes measured at their maximum switches — wazero at its
 > defaults refuses exception handling, which is why sw119 traps without a try).
 > **2026-10-24: 3.0.0 PUBLISHED** (owner: "push", then "Publish 3.0.0 now"): `deno task publish`
-> tagged `v3.0.0` (at `e6159331`) and pushed; CI run 40083193079 green in every step — the
+> tagged `v3.0.0` (at `4708daa4`) and pushed; CI run 40083193079 green in every step — the
 > compatibility gate on the tag, `deno publish`, the `release/v3.0.0` branch, the GitHub Release,
 > and **provenance RECORDED on JSR** (the verify step passed). JSR latest 3.0.0. **H20 DONE:** JSR's
 > `@jrmarcum/wasmtk` is linked to `synapticforge1/wasmtk` (api.jsr.io `githubRepository`), and the
@@ -291,7 +293,7 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > ld41–ld43, ld45, ld66–ld74, ld76–ld80, ld91–ld93), then the 9 tool rows (ld81–ld85, ld87,
 > ld89, ld90), then items 3–5.
 
-> **PAUSED 2026-10-19, end of day (owner).** `main` is clean at `a9ef2edabbd` and green on
+> **PAUSED 2026-10-19, end of day (owner).** `main` is clean at `6068e6d7b48` and green on
 > binaryang 1.12.1: wasi **480/480**, golden **537** (9 fail on purpose), typed_decl 45, wast
 > 64,506 / 0 / 16, cross-check 1152 on baseline, go 7 / 7 / 12, outpath 12, merge_layout 7,
 > tool_rows 16, wast_cli 4; api-surface unchanged since its last re-baseline. Nothing pushed,
@@ -321,7 +323,7 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > (`scripts/binaryang-report.md`).** Still pending from before: the 3.0.0
 > release, the Deno-exit plan P0.
 >
-> **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `7e586a5` and green on binaryang
+> **PAUSED 2026-10-15, end of day (owner).** `main` is clean at `6a833d4` and green on binaryang
 > 1.12.1 (wasi 466/466, golden 523, typed_decl 45, wast 64,506 / 0 / 16, go 7 / 7 / 12; nothing
 > pushed, published or tagged). Done today: binaryang 1.12.1 pinned (`go_asyncify` 12 / 12, count
 > sent); the `wasmValidate` letter answered; all 21 loud rows of 2026-10-13 closed (two batches,
@@ -470,7 +472,7 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > waits on the owner's word.
 >
 > **PAUSED 2026-10-09, end of day (owner).** `main` was clean at the integer-division commit
-> (`82fd3ca`). Decided later the
+> (`5fde9c0`). Decided later the
 > same day (owner): `(a / b) | 0` STAYS refused, pointing at wasMath; **D6: a compile-stopping
 > issue is REPORTED with its location** (below); **D3: an implicit f64 → i32 conversion is
 > REFUSED**, naming `f64.toI32` (traps) / `f64.toI32Sat` (clamps) / `f64.toI32Wrap` (wraps).
@@ -521,18 +523,18 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 > **2026-10-09, state.** binaryang shipped 1.9.0 (`./definitions`) and 1.10.0 (`wasm-bundle`,
 > `(@reloc data)`); the owner ordered the open compiler bugs FIRST, then those items (§ "binaryang
 > caught up" below). Five H12 batches merged locally today, each through the full gate:
-> `b083578` (string conversions, sw06–sw09, sw19, sw28, sw50, ld24, ld25), `c18f7bd` (`&&` / `||`
-> operands, boxed parameters: sw48, sw49), `fd0dc8d` (closure result types: sw52, ld21), `353901e`
-> (boxed f64 captures: sw53), `2ca577d` (nullable fields carry a flag word, owner's option A:
+> `7528042` (string conversions, sw06–sw09, sw19, sw28, sw50, ld24, ld25), `93aa40a` (`&&` / `||`
+> operands, boxed parameters: sw48, sw49), `3fb3b27` (closure result types: sw52, ld21), `e657fff`
+> (boxed f64 captures: sw53), `c40c16d` (nullable fields carry a flag word, owner's option A:
 > sw51, sw54–sw56, ld26). Suite 449/449. Nothing is pushed; nothing is half-done; `main` is
 > clean. Then the wasm number types were scoped (wasm-number-types.md); its `Math` scan found
 > sw57–sw61 and ld27–ld29 (and sw62, a console bug). wasMath L1, L2, L3 followed (L3 closed the
 > `Math` rows), then the owner's division decision (integer `/` is a compile error; sw36, sw37
 > closed). Open silent-wrong: sw62, sw64.
 
-- ⏳ **H6 (workspace letter, owner chose it 2026-09-30).** Done: H6.1 SemVer `6813988`, H6.2 the ★
-  block `306d517`, H6.3 the compatibility gate `51152af` + reviewed exceptions `30c1dc1`, H6.4 the
-  CLI surface `f21bfb5` (rules: design-decisions.md § Semantic Versioning and § The compatibility
+- ⏳ **H6 (workspace letter, owner chose it 2026-09-30).** Done: H6.1 SemVer `3542840`, H6.2 the ★
+  block `f075a60`, H6.3 the compatibility gate `1348f60` + reviewed exceptions `66a3bfb`, H6.4 the
+  CLI surface `2d15171` (rules: design-decisions.md § Semantic Versioning and § The compatibility
   gate). **Open:**
   - ✅ **H6.5a DONE 2026-09-30:** Rule 3, the previous release's `tests/` against the new `src/`,
     `scripts/check_prev_tests.ts` (fresh clone, v2.0.3's `tests/`, `--only` to re-run, red rows
@@ -784,7 +786,7 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 - **2026-10-06 — wasm-math Phase 1** (wasm-math-plan.md; compiler-bugs.md): exact `Math.sign`,
   `Math.round`, n-ary `Math.hypot` (V8's algorithm, bit-identical) as shared helpers; every Math
   result at the declared type (ld15); console helper requests (ld04). Silent-wrong 23 → 21.
-- **2026-09-30 — the wasm-types ruling and the Math scope** (`40af4fd`): design-decisions.md,
+- **2026-09-30 — the wasm-types ruling and the Math scope** (`dd5df73`): design-decisions.md,
   wasm-math-plan.md; sw36 narrowed, sw37–sw40 and ld15 found.
 - **2026-09-30 — the `modc` / exit-code defect** found by H6.5a (compiler-bugs.md, FIXED):
   `modc` of a dynrt-merged library assembles again (`wasmmerge` resolves a copied import's
@@ -796,18 +798,18 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
   reviewed exceptions (the floor since v2.0.3 is MINOR), the CLI surface. Self-test
   `scripts/check_compat_gate.ts` 15/15.
 - **2026-09-30 — the binaryang 1.8.1 round ("THE ORDER")**: the five-engine check of
-  `LowerCustomPageSizes` held on 1.8.1 (`4beffd9`); `assert_trap` checks the trap KIND
-  (`85df6be`, from 5,263 logged passes); pin 1.8.1 (`f53b085`; compat `toText` re-laid-out,
+  `LowerCustomPageSizes` held on 1.8.1 (`55f3fa7`); `assert_trap` checks the trap KIND
+  (`abe1d94`, from 5,263 logged passes); pin 1.8.1 (`c689998`; compat `toText` re-laid-out,
   tokens identical, 60 golden entries layout-only); the lowering wired into the wast gate, skips
-  66 → 16 (`55728b0`); reply SENT (`f1b496f`). design-decisions.md and testing.md hold the rules.
-- **2026-09-29/30 — H12 fixes**: sw01 + sw33 (`7c87f12`), sw02 (`5bcf65a`), sw03 + sw34
-  (`c8018f9`), the console fallback delegates or aborts: sw04 + sw27 fixed, 7 rows loud
-  (`27a0e42`); sw05 + sw35 found with it, sw21 (`4d07201`); sw18 + sw22 + sw23, loud rows (2026-09-30,
+  66 → 16 (`62b70ae`); reply SENT (`21460bf`). design-decisions.md and testing.md hold the rules.
+- **2026-09-29/30 — H12 fixes**: sw01 + sw33 (`c263f25`), sw02 (`3b903f4`), sw03 + sw34
+  (`a85f488`), the console fallback delegates or aborts: sw04 + sw27 fixed, 7 rows loud
+  (`8147f1b`); sw05 + sw35 found with it, sw21 (`a5d1ee5`); sw18 + sw22 + sw23, loud rows (2026-09-30,
   `fix/h12-sw18-sw22-sw23`). Open silent-wrong 31 → 18, then 19 with sw36 found.
-- **2026-09-29 — binaryang 1.7.1 and the validator oracle** (`9790162`): wast 64,434 / 105 →
+- **2026-09-29 — binaryang 1.7.1 and the validator oracle** (`1ad8728`): wast 64,434 / 105 →
   64,473 / 66, the guard at 0 valid modules rejected.
-- **2026-09-30 — stale-item sweep** (`3336fd0`): every open marker re-checked against code or a
+- **2026-09-30 — stale-item sweep** (`4680925`): every open marker re-checked against code or a
   test; three closed, one sharpened.
 - Everything earlier (the binaryang 1.5.3 → 1.7.0 bumps, the false-pass audit, the wast census
   history, the EH migration, the runner fixes, the branch audit): `git show
-  f21bfb5f810:cmem/next-work.md`.
+  2d151714025:cmem/next-work.md`.

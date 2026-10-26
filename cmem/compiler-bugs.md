@@ -508,7 +508,7 @@ Classified 2026-09-28 from each entry's own text; re-tally whenever an entry is 
 
 **Class:** per row · **Status:** OPEN unless struck · **Scope:** compiler and tools
 
-Four parallel auditors over a frozen worktree of `main` (`27b5fbc1`), as round 2: fall-throughs
+Four parallel auditors over a frozen worktree of `main` (`0976c052`), as round 2: fall-throughs
 (252 probes), wasic codegen (148), wasic ↔ console (461 expressions × up to 5 forms = 1,677
 forms), and the other source files + CLI + dead code (~86 checks, two forks on wast.ts and on
 hybrid / jstyper / tsbundler). Every row RUN: `scripts/phase0/verify_repros.ts` on
@@ -885,7 +885,7 @@ reads 142/142. Three linked defects, each confirmed 2026-09-30:
    ("inline function type does not match explicit type", lines 3 and 4). ⚠️ History of this very
    path: on the wabt-ts 1.4.0 attempt, stripping the `(type N)` made it compile and then produced
    EMPTY OUTPUT, because a regex in `internalizeDynrtHostImports` started matching a line it had
-   been skipping (next-work.md before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`). A fix
+   been skipping (next-work.md before 2026-09-30: `git show 2d151714025:cmem/next-work.md`). A fix
    must check the host-import internalization, and the output, not just the assembly.
 2. **`wasmtk modc` exits 0 when assembly fails** and writes no `.wasm`. SILENT-WRONG in the CLI's exit
    contract: a script or CI step calling `modc` believes it succeeded.
@@ -961,9 +961,9 @@ valid twin (here: V8 refuses `(memory i64 0x1_0000_0000_0000)`, which is valid) 
 
 **Class:** LOUD · **Status:** FIXED 2026-09-28 · **Scope:** compiler (+ docs)
 
-Found by the branch audit (next-work.md § "Branch audit 2026-09-28" (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`)). Phase 36
+Found by the branch audit (next-work.md § "Branch audit 2026-09-28" (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`)). Phase 36
 (`type Toggle<T> = T extends i32 ? f64 : i32`, resolved at compile time by
-`expandConditionalTypes`) was built on branch `1.4.1` (adac98c1cbc, 2026-04-29) and **never
+`expandConditionalTypes`) was built on branch `1.4.1` (34a749e54b4, 2026-04-29) and **never
 merged**. The README's feature table and roadmap row described it as shipped, with four named tests
 and "124/124 suite"; `main` had neither the method nor the tests, and every Phase 36 program failed
 to compile (`Unsupported statement: const a: Toggle<i32> = 3.5;`). Loud for a user, but the docs
@@ -1042,7 +1042,7 @@ condition evaluated once). It is used by both template branches and the concat b
 still unrenderable is now a DIAGNOSTIC: a concat operand, and a template segment (a second silent
 skip in the same code). The temps are declared exactly, from a per-body flag in both assemblers,
 not from the `${`-only line pre-scan. Regression: `11_StringConcatScalars` (inversion: the old
-output is back without the fix). Commit `ed9ffb1`.
+output is back without the fix). Commit `ab5e750`.
 
 ## The compiler killed its host process on an undeclared receiver (FIXED 2026-09-28)
 
@@ -1053,7 +1053,7 @@ ONLY host access inside the class (H12 measurement). It was loud for the CLI, bu
 embedding host outright, including `hybrid`/`dync`'s speculative probe compiles, which should just
 fail. It is now a diagnostic, worded to match the CLI's undefined-name guidance; user-visible
 behaviour is the same. Regression: `22_UndeclaredReceiverDiagnostic`. Guard: `wasic_seam_tests.ts`.
-Commit `3aac1da`.
+Commit `8fba843`.
 
 ## The 2026-08-24 "-Oz failure is no longer silent" fix was DEAD CODE (FIXED 2026-09-28)
 
@@ -1112,7 +1112,7 @@ corrected to `reject`. The VANISHED check was inversion-tested by planting a mod
 
 **How found:** an audit of what each permissive pass path actually passed on, counted with temporary
 instrumentation over the whole corpus (not by reading). Full table in next-work.md § "FALSE-PASS
-AUDIT" (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`). Gate 63,986 → **63,800 passed**, 618 → 804 skipped, 0 failed.
+AUDIT" (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`). Gate 63,986 → **63,800 passed**, 618 → 804 skipped, 0 failed.
 
 **Root cause:** four handlers were written as `catch { passed++ }` or "any throw counts". The
 `assert_malformed` stage split of 2026-09-19 fixed this class for ONE directive; the others were
@@ -1244,7 +1244,7 @@ Three defects in `src/wast.ts`, none in the compiler or binaryang. Corpus 37,370
 
 **Lesson.** The runner reported all 100 as conformance gaps, and for a month they read as
 GC/ref-types work waiting on the toolchain. Before attributing a failure to the thing under test,
-check that the harness gave it the same SETUP the spec did (the method note in next-work.md § A, before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`;
+check that the harness gave it the same SETUP the spec did (the method note in next-work.md § A, before 2026-09-30: `git show 2d151714025:cmem/next-work.md`;
 now proven on the whole set).
 
 ## binaryang 1.6.0 honoured `readDebugNames: true`, and the merge path broke (FIXED 2026-09-28)
@@ -1833,8 +1833,8 @@ lists work against ModuleBuilder/named-WAT modules; needs name-section retention
 wired to binary-parsed input. Nested-backtick-inside-`${…}` is the one residual hybrid template
 edge. Both documented inline.
 
-Commits: binaryen-ts `e616d8f`/`27a6f2f`/`0cc225b`/`c5bee62`, wasmtk `9e43bc4`/`cdb1336`/`c1ef9e5`/
-`e2e85d9`/`5bb9329`.
+Commits: binaryen-ts `e616d8f`/`27a6f2f`/`0cc225b`/`c5bee62`, wasmtk `8fa041f`/`9f781e2`/`3a03638`/
+`4d269d5`/`4b43f43`.
 
 ## wabt-ts BACKEND bugs surfaced by the `.wast` spec runner — NOT wasmtk-side
 
@@ -2048,7 +2048,7 @@ tested `pick(1 === 1)` and it printed 10/20 correctly — an earlier branch catc
 **Structural gap, flagged not fixed: `zigwasic.ts` (286 lines) and `rustwasic.ts` (64) have NO test
 suite**, while `zig`, `cargo` and `rustc` are all installed and working here and Zig fixtures sit in
 the corpus. Two of the findings above live in exactly that unguarded code. A small suite would have
-caught the `report()` bug automatically. See [next-work.md](next-work.md) (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`).
+caught the `report()` bug automatically. See [next-work.md](next-work.md) (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`).
 
 ### `fd_write` short writes — ✅ FIXED 2026-08-24 (found by the multi-engine gate on run one)
 
@@ -2160,7 +2160,7 @@ not parse, which is expected: that one really is upstream-wabt parity.
 
 **Corpus effect, measured:** passes **27,983 → 37,247** (+9,264), skips **37,252 → 27,275**
 (−9,977), unrunnable **1 → 0**, files **287 → 288**. Failures went 12 → 102, every one of them in a
-file that had been DARK. Scoped in [next-work.md](next-work.md) (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`).
+file that had been DARK. Scoped in [next-work.md](next-work.md) (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`).
 
 #### Blocker 1 of 3 — `unknown type` — ✅ FIXED 2026-08-25 (and it was not what it looked like)
 
@@ -2467,7 +2467,7 @@ alone. Same class as the `ref.null` encode bug below: same message, same writer,
 is exposed on neither `/compat` nor `wat2wasm`. **Plausibly one fix for both.**
 
 **Expected to be fixed in wabt-ts 1.4.0** (owner, 2026-08-24). Verify with the encoder probe BEFORE
-re-recording anything — see [next-work.md](next-work.md) § "THE NEXT BUMP IS wabt-ts 1.4.0" (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`).
+re-recording anything — see [next-work.md](next-work.md) § "THE NEXT BUMP IS wabt-ts 1.4.0" (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`).
 
 **Why it blocks us:** wasic's pipeline is WAT text → **wabt** → binary → binaryen
 (`watToOptimisedWasm`, `src/wasic.ts:205–240`). wabt is unavoidable, so wasic cannot emit

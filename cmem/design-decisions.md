@@ -1313,7 +1313,7 @@ silently break (all `src/wasic.ts`):
     was **empty** afterwards, confirming zero content change (git had been normalising them all
     along).
   - **`.wast` IS pinned: `*.wast text eol=lf`** (with `*.wat`, under a wildcard-first
-    `* text=auto eol=lf` default; commits `b38428e2d54` and `fc41373278d`). It was flagged as a live
+    `* text=auto eol=lf` default; commits `be89ce15316` and `d285086fe49`). It was flagged as a live
     trap on 2026-08-20: under `core.autocrlf=true` a CRLF checkout of the vendored corpus
     (`tests/module/wasm_wast/testsuite-main/`) would silently break the byte-for-byte diff against
     upstream that makes a corpus sync verifiable (see [testing.md](testing.md) § "Vendored spec
@@ -1396,9 +1396,9 @@ silently break (all `src/wasic.ts`):
     - History, for the reasoning only: `^1.3.5` let wabt-ts 1.4.0 (a stricter validator rejecting
       three malformations we emitted) in through a reload — the `wast` gate went 156 files
       off-baseline while `deno.json` still said 1.3.5 — so it was EXACT-pinned at 1.3.5
-      (`15a7cee42b6`, 2026-08-25), then 1.4.1 once those were fixed (`8de9432a4fc`); binaryen-ts went
+      (`9ad2738abac`, 2026-08-25), then 1.4.1 once those were fixed (`cd272e46bd5`); binaryen-ts went
       `^1.4.3` → exact 1.5.0 by the same lesson (a caret is how 1.4.0 got in and regressed us). Both
-      merged into binaryang on 2026-08-27 (`d7b755d6de3`).
+      merged into binaryang on 2026-08-27 (`8b881a9f56d`).
     - **The `try_table` emitter needs a backend that can encode it** (wabt-ts 1.3.5 could not: every
       handler form was an ENCODE-FAIL). Reverting the backend below that line means reverting the
       emitter too, or the compiler emits WAT its own assembler rejects.
@@ -1541,7 +1541,7 @@ silently break (all `src/wasic.ts`):
   `percentageDocumentedSymbols >= 0.80`; every exported symbol (incl. **each interface field**
   individually) needs a `/** … */` JSDoc, every public function must not return a private type
   (`private-type-ref`), and computed exported consts need an explicit type (`missing-explicit-type`).
-  v1.7.0 brought this from 0.79 → 0.97 (commit `5dec7eb`). As part of that, the producer result
+  v1.7.0 brought this from 0.79 → 0.97 (commit `a8e9605`). As part of that, the producer result
   types **`GoResult` / `ZigResult` / `RustResult` are now `export`ed** (they're returned by the
   public `compileGoWasi` / `scaffoldGoProject` / `compileZig` / `scaffoldZigProject` / `runRust`
   functions) — do not re-privatize them. Run `deno doc --lint <all 15 exports>` before publishing;
@@ -1616,7 +1616,7 @@ silently break (all `src/wasic.ts`):
   (`api.jsr.io/scopes/jrmarcum/packages/wasmtk/versions/<v>` → `rekorLogId`): **v1.11.2 (2026-07-03)
   is the last version with a Rekor entry** (`2053916008`); **v1.11.3 (2026-07-09) is the first
   without**, and every release since — including v1.11.12 — is `null`.
-  `.github/workflows/publish.yml` had not changed since 2026-06-15 (commit `5dec7eb`), i.e. it was
+  `.github/workflows/publish.yml` had not changed since 2026-06-15 (commit `a8e9605`), i.e. it was
   byte-identical to what produced provenance for v1.11.2, `git diff v1.11.2..v1.11.3` touches only
   `deno.json` deps, and the JSR↔GitHub repo link is intact — so nothing in the repo explained it.
   **The workflow floated `deno-version: v2.x`, so every release picked up whatever Deno was newest

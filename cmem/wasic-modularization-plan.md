@@ -66,7 +66,7 @@ After Phase 1, it means every module under the core tree. `tests/wasic_seam_test
 - ✅ Measurement, the one core seam fix, the seam gate.
 - ✅ Bug classification: every `compiler-bugs.md` entry has a class line and the tally is at the
   top. **Bar (c) is met today: 0 open silent-wrong compiler entries.** The first tally said 2;
-  both were reproduced, found broader than recorded, and fixed (`ed9ffb1` string+number/bool
+  both were reproduced, found broader than recorded, and fixed (`ab5e750` string+number/bool
   concat; the escaped-quote literal pair). That is 0 KNOWN; Phase 0's audit loop is what makes it
   mean something.
 - ✅ **Phase 0a DONE 2026-09-28: `tests/golden_wat_tests.ts`.** It compiles in-process (no
@@ -79,7 +79,7 @@ After Phase 1, it means every module under the core tree. `tests/wasic_seam_test
     EMITTER change is caught at line 1 of every module; (4) the same on a pipeline (its `modc`
     lib, `wasic` main and test).
   - A check that compares NOTHING fails (a typo'd filter once printed ✅).
-  - **Recorded on `main` @ `b68943c`, Deno 2.9.7, binaryang 1.6.0.**
+  - **Recorded on `main` @ `b13e1f1`, Deno 2.9.7, binaryang 1.6.0.**
 - 🔄 **Phase 0b round 1 DONE 2026-09-28: 28 silent-wrong + 8 loud, all CONFIRMED by running**
   (compiler-bugs.md § "H12 Phase 0b, audit round 1"; repros in `scripts/phase0/round1/`, verifier
   `scripts/phase0/verify_repros.ts`). Bar (c) is at **31** (2026-09-28): sw29 closed by the owner's
@@ -251,6 +251,6 @@ public `compileWasiTs` / `compileLibTs` / `compileWat` functions. Target: a few 
 - Full suite green throughout (wasi 375/375, bindgen, jstyper, go), **zero golden-WAT diff** across
   Phases 1–3.
 - `deno doc --lint` clean on any new exported surface (hold the JSR score; new files get an
-  `@module` tag — see the wast.ts lesson in [next-work.md](next-work.md) (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`)).
+  `@module` tag — see the wast.ts lesson in [next-work.md](next-work.md) (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`)).
 - The extracted `types.ts` / `maptype.ts` / emit layer are importable as the "supported subset"
   contract that wabt-ts `wasm2ts` builds against.

@@ -1,5 +1,9 @@
 # history-purge-2026-10-23.md — the H19 rewrite of every ref, and its old→new map
 
+> **2026-10-26: a SECOND rewrite** changed most of the "new" hashes below again (one binary's
+> debug paths, which this text-only purge missed). This file's map stays as it was (old → the
+> 2026-10-23 value); take the second hop in [history-purge-2026-10-26.md](history-purge-2026-10-26.md).
+
 **Every commit hash in this repository changed on 2026-10-23.** A hash quoted anywhere outside
 this repo before that date (JSR provenance, the loaders' fixture stamps, the workspace letters,
 old chat transcripts) names a commit that no longer exists here. Translate it with the tables
