@@ -7,8 +7,8 @@
 
 | class | compiler-open | compiler-fixed | other-open | other-fixed |
 | --- | --- | --- | --- | --- |
-| SILENT-WRONG | 0 | 154 | 0 | 27 |
-| LOUD | 0 | 121 | 0 | 19 |
+| SILENT-WRONG | 29 | 154 | 23 | 29 |
+| LOUD | 3 | 121 | 1 | 19 |
 | n/a | — | 3 | — | 3 |
 
 Re-counted from the round-1 table's rows 2026-10-15 (the open column had drifted: it read 3 / 20
@@ -21,6 +21,31 @@ Batch 2 (the same day) closed ld10, ld14, ld37, found and fixed sw74 and ld44, a
 bug; re-tallied 2026-09-28 after the typed-declaration rule landed: sw29 closed, sw30–sw32 and
 ld09–ld14 added, and the new entry "Landing the typed-declaration rule" holds 2 fixed and counts
 once, as SILENT-WRONG, its worst); 2 pure groupings (`### wabt-ts 1.4.0` with its blockers under `####`, and `## FIXED — the 7 long-standing test failures`) carry a note instead and are not counted. An entry covering several defects takes its WORST class. PARTIAL counts as open. n/a entries have no status and sit in the -fixed column for placement only.
+
+**2026-10-26: H12 Phase 0b audit round 3 — NOT converged** (§ "audit round 3" below: 52 silent
+rows, sw141–sw192, and the loud groups ld115–ld118, all CONFIRMED BY RUNNING).
+
+**2026-10-26, found measuring binaryang's `wasm-bundle` against our bundling tests (letter H11):
+sw139, sw140 (silent, tools), both FIXED** (branch `fix/h11-bundle-findings-2026-10-26`).
+- **sw139** `wasmbundle` seated the synthesized shared `$__heap_ptr` at the sum of the modules'
+  data extents: 0 when no module has data. wasic reserves the bytes below `DATA_BASE` (260):
+  scratch slots and the zero header every EMPTY array points at (an empty array is the pointer 0).
+  The first allocation overwrote that header, so two libraries' empty arrays became one: after
+  `apush(10)`, `bpush(10)` returned 18 (exit 0). Now `heapBase = max(data end, DATA_BASE)`.
+  binaryang's bundler (`--on-conflict=prefix`) gave 10. Untested because every bundling test had
+  at most one wasic library, or one with data. Test `merge_layout_tests` (one instance, so the
+  calls share the heap; fails with the fix stashed).
+- **sw140** a negative number argument was read as a FLAG: Deno's `parseArgs` takes `-5` for a
+  short flag, so its positional list was shorter than main.ts's own scan, and the guard
+  `raw.length === args._.length` kept parseArgs' list. `mod lib.wasm inc -5` called `inc()` and
+  printed 1 (exit 0); `run lib.wasm inc -5` the same; `add64 -3 1` lost both (`-3` took `1` as its
+  value: a loud BigInt error). A negative number now selects the scan's list. Test `tool_rows_tests`
+  (three rows; fail with the fix stashed).
+- Also: witgen now replaces a `.wit` that binaryang generated (its header names binaryang), as
+  binaryang already replaces ours; it was kept as if hand-written (`witgen_tests`).
+- Seen in the same probes, a LOUD compiler gap, handed to audit round 3: `modc` refuses `tag.length`
+  where `tag` is a top-level `const` string read inside an exported function ("Unsupported
+  expression: tag.length").
 
 **sw119 FIXED 2026-10-24 (the owner's rule 4, ON by default, the `--i32-check` flag removed);
 sw137, sw138 (silent) and ld114 found and fixed** (open: silent 0, loud 0).
@@ -475,6 +500,93 @@ exports `DATA_BASE` / `SCRATCH_SLOTS` / `ArrayLookup` (console_log.ts); the unus
 `watToOptimisedWasm` vs `binaryenOptimize`.
 
 Classified 2026-09-28 from each entry's own text; re-tally whenever an entry is added or closed.
+
+## H12 Phase 0b, audit round 3 (2026-10-26): 29 silent compiler + 23 silent tool rows, ~105 loud, CONFIRMED BY RUNNING — NOT CONVERGED
+
+**Class:** per row · **Status:** OPEN unless struck · **Scope:** compiler and tools
+
+Four parallel auditors over a frozen worktree of `main` (`27b5fbc1`), as round 2: fall-throughs
+(252 probes), wasic codegen (148), wasic ↔ console (461 expressions × up to 5 forms = 1,677
+forms), and the other source files + CLI + dead code (~86 checks, two forks on wast.ts and on
+hybrid / jstyper / tsbundler). Every row RUN: `scripts/phase0/verify_repros.ts` on
+`scripts/phase0/round3/{console,codegen,fallthrough}` (repro ids `k…`, `c…`, `f…`); the tool rows
+have their inputs and a `README.txt` (command, expected, observed) in `round3/tools/<id>_<name>/`.
+Rows below are de-duplicated by ROOT CAUSE across auditors; the repro ids name every file. The
+owner's order (2026-10-26): record everything, fix the most severe silent rows now, the rest is the
+open list. The convergence bar (H12 Phase 0, "a full pass finds nothing new") is NOT met, so
+Phase 1 does not start.
+
+**Silent-wrong, compiler** (native → compiled):
+
+| id | defect | repros | root cause |
+| --- | --- | --- | --- |
+| sw141 | every run of one `new C(…)` site is ONE object: objects made in a loop, a factory, or a method returning `new` alias (`0,10,20` → `20,20,20`; `1 7` → `7 7`) | c111, c112, c114, c115, c132 | wasic ~13255 / ~16282: `allocStructData` gives each site one static block at compile time |
+| sw142 | a class variable reassigned (`a = b`) still reads its first object's fields (`9` → `1`) | c131 | wasic ~12773: a field read uses `(i32.const cv.ptr)` when the variable had a static object |
+| sw143 | an overridden getter / setter called through a base-typed parameter or `this` in a base method runs the BASE accessor (`20` → `10`, `300` → `3`) | c86, c109, c110, f131, f177, f248 | wasic ~12728, ~12779: accessors called statically (sw126 dispatched methods only) |
+| sw144 | an optional parameter / field (`b?: i32`) has no `undefined`: 0 passed reads as undefined, omitted reads as 0 (`b ?? 100` → 0, prints `0` for `undefined`) | c45, c89, c90, f43, f66, f67, f70, f84, f106, f250 | wasic ~3770: `defaultValue: "0"`, no flag |
+| sw145 | float `%` by `x - trunc(x/y)*y`: `5 % Infinity` NaN (5), `-10 % 5` `0` (`-0`), `1e17 % 7` `0` (5) | c06, c21, c22, c135 | wasic ~14280 (and `%=` ~16493), console_log ~3695 |
+| sw146 | i32 `%` giving JavaScript's `-0` (`-6 % 3`, `b % 3` with b = -3) prints `0` in an f64 / console context — **owner ruling needed** (rule 4 names `+ - *`) | c94, k08 | `i32.rem_s` in both emitters |
+| sw147 | `replace` / `replaceAll` copy `$&`, `$$`, `` $` ``, `$'` literally | c56 | wasic `$__str_replace` ~23244, `$__str_replace_all` |
+| sw148 | `trim*` keep `\v` and `\f` | c57 | wasic ~23065: only 0x20, 0x09, 0x0a, 0x0d |
+| sw149 | `switch`: a `default` that is not last is MOVED last, so fall-through order changes (`1 2 11` → `1 2 9`) | f02, f32, f247 | wasic ~19855 |
+| sw150 | a nested `switch`: the inner one's `case` lines become the outer's cases | f115, f224 | wasic ~19786: the case parser ignores depth |
+| sw151 | `case RED:` with `RED` a const string compares the TEXT "RED" | f102 | wasic ~19884: quotes stripped by regex |
+| sw152 | `switch` on a float EXPRESSION truncates it (1.2 matches `case 1`) | f122, f123 | wasic ~19813: the type comes from a bare identifier only |
+| sw153 | string search with a position (`startsWith("a", 3)`, `includes`, `endsWith`), a template needle, `indexOf(x, from)` on an f64 array, `"abc".indexOf("", 10)`: wrong results in console (`1 1 1`) | f23, f34, f62, f71, f72, f230 | the argument list reaches `emitStringPtrLen` as one expression; the console resolvers (~17943, ~18458) accept the `""` / stub sentinel |
+| sw154 | an escaped `\${` in a template is substituted | f45, f65 | wasic `splitTemplateLiteral` ~10053 |
+| sw155 | a `readonly f64[]` / `Array<f64>` / `ReadonlyArray<f64>` parameter reads its elements as i32 (`3.5` → `1072693248`) | f146, f161, f162 | wasic ~3734: `arrElemMatch` takes only `\w+[]` |
+| sw156 | a `type Flag = boolean` value prints `1` | f171 | not traced |
+| sw157 | a struct / instance in a template or concat prints its ADDRESS (`[object Object]` → `260`); a user `toString()` there prints the address too | k12, f190, f191, f192, f195, f252 | wasic ~9645 / ~9808: typed i32 |
+| sw158 | a string-enum value in a concat prints its tag (`d=UP` → `d=0`) | f200, f251 | wasic ~9808 |
+| sw159 | `join` / template of a `boolean[]`, a `bigint[]`, a 2-D array: `1\|0`, `1,0`, row addresses | k13, f197 | console_log `cbufJoinHelper` ~5471 sends every non-f64 / non-string element to `$__cbuf_join_i32` |
+| sw160 | an i32 literal outside i32 (`3000000000`, an argument `2147483648`, `0xFFFFFFFF` declared i32) WRAPS: owner rule 4 says a store that does not fit throws (the `x & 0xFFFFFFFF` mask idiom must keep wrapping) | f235, f236, f245 | wasic ~11829, ~11843: no range check |
+| sw161 | console `p.s + 1` (a struct / class string field) adds to the POINTER (`pq1` → `277`) | k01 | console_log ~879 `isConcatString`, ~825 `looksLikeString` |
+| sw162 | `const v: f64 = a + hf(1)` (i32 left, float call / paren / product right) adds as i32 (`7.5` → `7`) | k02 | wasic ~14261 `rhsKnownFloat` |
+| sw163 | in a function, `String(a + x)` / `` `${a + x}` `` truncates (`9.5` → `9`) | k03 | wasic ~10731: `inferExprType` by the left i32 local |
+| sw164 | console `s.charCodeAt(0) + x` / `indexOf` / a method result plus a float truncates | k04 | wasic ~17761 `dotCallLookupFn` emits at i32 |
+| sw165 | console `ss[1].length + 1` concatenates (`3` → `21`) | k05 | console_log ~833 `looksLikeString` takes `ss[` as a string |
+| sw166 | console `e \|\| s` / `s && e` of strings prints `1` | k06 | wasic ~14529, ~1270: no string case |
+| sw167 | `b >>> 0` prints SIGNED in console / template / String (`4294967293` → `-3`) | k07 | console_log ~2357; wasic ~14343 converts unsigned only in f64 context |
+| sw168 | console format specifiers (`%d %s %i %f %o %%`) are not substituted | k09 | console_log ~3978 `parseConsoleLogArgs` |
+| sw169 | `console.log` of an array LITERAL, an element struct (`ps[1]`), a nested field struct, or an array-valued call (`xs.slice(1)`) prints an address | k10, k11, k14 | wasic ~7233 `inspectConsoleArg`, ~7167 `inspectTarget` (names and calls only) |
+
+**Silent-wrong, tools** (all exit 0):
+
+| id | defect | repro | root cause |
+| --- | --- | --- | --- |
+| sw170 | WIT keywords (`list`, `type`, `from`, …) written unescaped in export / param / package names (an invalid `.wit`); bindgen's name regex then drops a `%`-escaped name: fix the three together | t01, t02, t09 | witgen.ts:33; wasic `generateWit` ~25422; bindgen.ts:146 |
+| sw171 | `run lib.wasm addd 1 2` (a typo) prints nothing, exit 0 | t03 | utils.ts:313 falls through to `_initialize` / `_start` |
+| sw172 | `mod` never checks the argument COUNT (`add 5` → 5) | t04 | utils.ts ~490 |
+| sw173 | `mod` takes `1.5` / `Infinity` / `4294967297` for an i32 parameter (ToInt32) | t05 | utils.ts ~509: only i64 is checked |
+| sw174 | `dync prog.ts -o prog.ts` writes the module OVER its source | t06 | dync.ts:47, :80: no `assertNotInput` (sw113's list missed dync) |
+| sw175 | an unknown flag (`--on-conflit=prefix`, `--outdir`, `--lang=pyhton`) is ignored (loud by ld90's precedent) | t07 | main.ts:93: no unknown-flag check; `lang` missing from `FLAG_CHOICES` |
+| sw176 | bindgen maps `u32` / `u64` to signed (`4294967295` → `-1`) | t08 | bindgen.ts:67 |
+| sw177 | bindgen passes an imported `string` parameter to the host as a number | t10 | bindgen.ts:315: import marshalling handles bool only |
+| sw178 | `wasmbundle` drops a module's `(start)` function | t12 | wasmmerge.ts:1109 (the wasic merge path shares it) |
+| sw179 | `wasmbundle` drops non-function exports (a global) without a notice | t13 | wasmmerge.ts:205, :976 |
+| sw180 | `wasmbundle` sets EVERY `(mut i32)` global of a non-wasic module to 131072 (a counter starts at 131072) | t14 | wasmmerge.ts:1087 |
+| sw181 | `wasmbundle a.wasm b.wasm -o a.wasm` overwrites its input | t15 | wasmbundle.ts: no same-file check (sw113's list missed it) |
+| sw182 | `modc main.zig` exports only the root file's `export fn`s | t16 | zigwasic.ts:96 scans the root only; `--export=` instead of `-rdynamic` |
+| sw183 | `run x.zig -o rel/x.wasm` reports and runs a STALE module (sw117, fixed for Go only) | t17 | zigwasic.ts:144, :166 |
+| sw184 | `wast`: an sNaN result checked against `nan:arithmetic` passes (wasmtime fails it) | t30 | wast.ts:611: only `nan:0x…` uses the trampoline |
+| sw185 | `wast` of a USER file named like a corpus file skips its unbuilt module as "known" (✅, exit 0) | t31 | wast.ts:1932: `KNOWN_UNBUILT` by basename |
+| sw186 | `tsbundle` renames an import's OBJECT KEY / interface field, not its uses (`undefined`) | t40 | tsbundler.ts:204 `applyRenames` |
+| sw187 | `tsbundle` drops an unresolvable import (`./util.js`, a typo) | t41 | tsbundler.ts:345, :360, :581 |
+| sw188 | `jstyper` drops a function whose body has a comment with an apostrophe | t43 | jstyper.ts:59 |
+| sw189 | `jstyper` drops arrow / `function*` / function-expression exports without a warning | t44 | jstyper.ts:97, :111 |
+| sw190 | `jstyper` discards a parameter's default (`add(5)` → 5, not 15) | t45 | jstyper.ts:248 |
+| sw191 | `hybrid --auto` on a function without a return annotation returns `undefined` | t46 | hybrid.ts:100 (and wasic's void result) |
+| sw192 | `hybrid`: an `@wasm` function's default parameter is lost | t47 | hybrid.ts:388 |
+
+**Loud** (invalid modules, traps where JavaScript has a value, refusals of ordinary TypeScript, misleading messages):
+
+- **ld115 console** (`round3/console/`): k15 `console.log(["a","b"])` invalid module; k16 `indexOf(4) + x` into f64; k17 `s.length * 0.5` in a function; k18 `!s` / `!x` (f64); k20 `c.k + c.half()`; k21 `c.tag() + a`; k22 `p.s < s`; k23 `` `${-a}` `` in a function; k24 `Boolean(a)`.
+- **ld116 codegen** (`round3/codegen/`): c93 i32 `% 0` traps (NaN in JavaScript); invalid modules c61, c62, c83, c108, c88, c136; refusals c10, c37, c13, c19, c26, c27, c36, c42, c44, c46, c47, c48, c53, c55, c66, c67, c72, c75, c96, c98, c101, c124, c133.
+- **ld117 fall-throughs** (`round3/fallthrough/`, every COMPILE-FAIL / RUN-FAIL file): invalid modules f12, f50, f85, f98, f121, f124, f140, f175, f203; misleading messages f249, f163, f164, f172, f104, f166, f170, f173, f134; gaps (numeric literal forms, built-in method arities, `#private`, static `this`, IIFE, `for…in`, comma operator, `void`, braced `case` bodies, switch on strings from fields / calls, …) in the remaining files.
+- **ld118 tools** (`round3/tools/`): t11 bindgen binds a commented-out `.wit` export; t18 `mod` / `run` print `[object WebAssembly.Exception]` for a wasic throw; t19 `mod missing.wasm` prints "✅ Module loaded" first; t32 `wast` false fail on `get` of a NaN global; t42 `export default`; t48 `hybrid -o` runner imports.
+- **Dead** (t20): `rt.env.set`, `rt.stderr.write` have no caller; round 2's dead / stale items are all still present (listed in t20's README).
+
+Noted, not rows: `const v: i32 = -z` printing `0` follows the declared type; boolean arithmetic is not TypeScript; UTF-8 byte `.length` is documented; `wast` reports ✅ for an empty file (a policy question).
 
 ## H12 Phase 0b, audit round 2 (2026-10-15): 33 silent-wrong compiler + 10 silent tool defects, ~44 loud, CONFIRMED BY RUNNING
 

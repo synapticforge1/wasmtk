@@ -1,0 +1,7 @@
+// hand-written
+package local:u32lib;
+
+world u32lib {
+  export big: func() -> u32;
+  export %list: func() -> s32;
+}

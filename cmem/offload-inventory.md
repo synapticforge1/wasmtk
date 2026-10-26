@@ -11,6 +11,9 @@ universalWasmLoader SPEC 3.0.0) plus workspace rows I2 / I10 / I11 / C1 / S4. Li
 
 ## Where each sibling stands (the facts the triggers depend on)
 
+- **2026-10-26: binaryang 2.2.0 is pinned**; stage 5 (one front end) is long released, so #1's
+  trigger is met on our pin; `./ir` is public, but its binary reader / writer are not (see the
+  2026-10-26 note below). The 2026-09-28 facts follow.
 - **binaryang 1.6.0** (pinned here): assembler, disassembler, validator, objdump, strip, `wasm-opt`,
   and a pass runner, each on a published subpath. **One front end, stage 5: DONE on binaryang `main`
   2026-09-28, UNRELEASED**: one text front end, one reader, one writer. That is I2's trigger, and
@@ -33,6 +36,25 @@ universalWasmLoader SPEC 3.0.0) plus workspace rows I2 / I10 / I11 / C1 / S4. Li
 > `reloc.*` sections. A module without them is refused, or range-relocated with a printed warning.
 > Conflict policy, WASI dedup and `_start` move with it; `witgen` and the prompt stay ours. Our
 > producer measurements are drafted in `scripts/binaryang-report.md` (see next-work.md).
+
+> **2026-10-26, H11 measured: the `wasm-bundle` switch is BLOCKED on binaryang (one API ask) and
+> on wasic (relocation marks).** binaryang 2.2.0's `wasmBundle` was run over the inputs of every
+> wasmtk test that bundles (merge_layout's four, tool_rows' dual export, witgen's pair,
+> `18_WasmImportMerge`): with `unmarked: 'guess'` every output is right; with its default `refuse`
+> every input is refused (nothing we produce carries `linking` / `reloc.*`). It was right where
+> ours was WRONG (sw139: two wasic libraries' arrays; fixed in ours). What stops the switch:
+> (1) every pair of wasic modules clashes on `__heap_ptr`, `__exn_tag`, `__exn_kind`; prefixed,
+> each keeps its own heap (a wasic heap grows upward from its pointer and grows memory only past
+> `memory.size`, so in binaryang's per-image layout the first module's heap runs into the next
+> image once it outgrows its pages) and its own tag (a library's throw no longer meets the
+> program's catch, ld114). Sharing them is a wasmtk pass over binaryang's IR (as #2 below says),
+> and the IR's read / write entry points (`readForPasses`, `writeWasm`) are not exported: the only
+> routes today are `compat/binaryen`'s private `_inner` or regex over printed WAT, which is what
+> this move retires. Asked in `scripts/binaryang-report.md` (DRAFT 2026-10-26, owner to send).
+> (2) wasic needs a relocatable output: unoptimised, `(@reloc data)` on every data address (about
+> 165 allocation sites in wasic + console_log), bundled first and `-Oz` after. Ours to build once
+> (1) is answered. Probes: the session's scratch `h11_probe.ts` / `h11_heap_probe.ts` /
+> `h11_trap.ts` (deleted; the method is in the report).
 
 ## Candidates
 
