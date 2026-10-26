@@ -65,6 +65,8 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   148 refs force-pushed with leases, GitHub = the verified mirror; this checkout realigned and
   gc'd. **Every hash from v1.2.x to `main` changed again** — record and map in
   [history-purge-2026-10-26.md](history-purge-2026-10-26.md); the H7 stamp is now `4a5c3cf668d`.
+  🗓️ OWNER: JSR (its provenance for 3.0.0 and earlier names the pre-purge commits) — the owner is
+  handling it (2026-10-26: "I will fix the jsr").
 - **W8. Stale workspace cells (verified 2026-10-26):** H16 wasmtk done (gc strategy set, 1 pack);
   H17 / H19 force-push done 2026-10-23; H20 done (3.0.0 published from `synapticforge1` with
   provenance); H21 wasmtk's map is pushed (`history-purge-2026-10-23.md`); H7 / X8 stamp

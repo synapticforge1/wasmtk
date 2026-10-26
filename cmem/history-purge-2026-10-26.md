@@ -54,7 +54,8 @@ The stash was re-registered (`stash@{0}`, rewritten). A re-scan of every local b
 non-personal hits above.
 
 **Not in our control:** JSR's provenance for v3.0.0 and every earlier version names the OLD commits
-(immutable); GitHub serves old commits by hash until its own garbage collection, and a full purge
+(v3.0.0's was `e6159331b6f`, now `4708daa4e93`) — 🗓️ **the owner is handling JSR (2026-10-26: "I
+will fix the jsr")**; record the outcome here when it is done; GitHub serves old commits by hash until its own garbage collection, and a full purge
 is a GitHub Support request (the owner's; the 2026-10-23 draft in the gitignored `cmem/local/`
 covers the same request). Other clones made before 2026-10-26 hold the old history: never push
 from one; re-clone.
