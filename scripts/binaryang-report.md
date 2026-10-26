@@ -8,7 +8,7 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-26: `wasmtk wasmbundle` now runs on your `bundle()`
+## SENT 2026-10-26 (via the workspace ledger, C12) — 2026-10-26: `wasmtk wasmbundle` now runs on your `bundle()`
 
 **Short version:** we ran your 2.2.0 `wasm-bundle` over the inputs of every wasmtk test that
 bundles; it is right wherever wasmtk's own bundler was right, and right in five places ours was
@@ -65,7 +65,12 @@ read as a zero header at address 0. In a bundle, address 0 belongs to the FIRST 
 image is not wasic's and has non-zero bytes there, a wasic module's empty arrays read them. We
 have not seen it in a real input; we mention it because neither bundler can tell.
 
-## DRAFT (not yet sent) — 2026-10-23: 1.15.0, then 1.16.1, pinned; the gate holds as on 1.13.0
+## SENT 2026-10-26 (via the workspace ledger, C12) — 2026-10-23: 1.15.0, then 1.16.1, pinned; the gate holds as on 1.13.0
+
+**Sent late, so first what changed since it was written:** we pinned **2.2.0** on 2026-10-24 and
+nothing moved (golden 566 byte-identical, wast 64,506 / 0 / 16, guard 0, `go_asyncify` 12 / 12,
+cross-check on baseline). The `delegate` finding below still stands on 2.2.0 (the pin in our wast
+gate still reads 1).
 
 **Short version:** we bumped wasmtk's pin from 1.13.0 to **1.15.0** (all three specifiers) and ran
 the full gate, then the same day to **1.16.1**. Everything is green, nothing is carried as
