@@ -3,8 +3,11 @@
 > **2026-10-26: refreshed with the owner's plain-numbers direction —
 > [number-model-and-runtime-plan.md](number-model-and-runtime-plan.md).** P0 is DONE (the harness
 > is `scripts/migr/`: `wasi_host.ts`, `corpus_matrix.ts`, `survey.ts`; baseline there). The
-> universal-wasm-loader precondition is met (1.1.1). **M2 and M4 are REOPENED** (wasMath goes away
-> with the hints). The order now puts the number build together with P6. Facts below are dated
+> universal-wasm-loader precondition is met (1.1.1). **M2 and M4 were reopened and DECIDED again
+> the same day** (owner, 2026-10-26): M2 stands (Bun is the TypeScript reference); M4 is REPLACED
+> by the oracle rule — transcendental `Math` is checked against a correctly rounded oracle, never
+> an engine, and an engine disagreeing on a `Math` line is an engine ulp
+> (number-model-and-runtime-plan.md § "Parity on the wasm side"). The order now puts the number build together with P6. Facts below are dated
 > 2026-10-13 unless marked.
 
 **Status: scoped, nothing started.** Source: binaryang's `cmem/jsr-deno-exit-guide.md` (read
@@ -109,7 +112,9 @@ compatibility yes". Then, the same day: **M3 and M4 as recommended**, and **M2: 
   trailing comma) and the nested array over three.** The values are the same; only the layout
   differs. If Bun becomes the reference, either wasic follows Bun, or those lines are compared
   modulo layout.
-- **M4. DECIDED (owner, 2026-10-13): corpus lines that compare a transcendental `Math.*` value
+- **M4 — SUPERSEDED 2026-10-26** (wasMath goes away with the hints; replaced by the oracle rule:
+  number-model-and-runtime-plan.md § "Parity on the wasm side"). As decided 2026-10-13:
+  **corpus lines that compare a transcendental `Math.*` value
   between TypeScript and wasm move to wasMath's `f64.*`**, which runs the same correctly rounded
   library in every runtime, so they agree by construction. Measured: `38_MathEdgeCasesL3` and
   `67_TrigCorrectlyRounded` differ on Bun (`Math.tan(-1e22)`: V8 and wasm `…988`, JavaScriptCore
