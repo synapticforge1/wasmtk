@@ -673,7 +673,9 @@ export function mergeWasmWat(
       const ps = sig?.params ?? [];
       forwarders.push(
         `(func $${prefix}_${exportName} ${ps.map((t, i) => `(param $p${i} ${t})`).join(" ")}` +
-          `${sig?.result ? ` (result ${sig.result})` : ""} ${ps.map((_, i) => `local.get $p${i}`).join(" ")}` +
+          `${sig?.result ? ` (result ${sig.result})` : ""} ${
+            ps.map((_, i) => `local.get $p${i}`).join(" ")
+          }` +
           ` call ${funcName.get(idx)})`,
       );
     }
@@ -753,7 +755,10 @@ export function mergeWasmWat(
     };
     return text
       .replace(/\b(throw|catch)\s+(\d+)\b/g, (_m, op: string, n: string) => `${op} ${one(n)}`)
-      .replace(/\((catch(?:_ref)?)\s+(\d+)(\s)/g, (_m, op: string, n: string, sp: string) => `(${op} ${one(n)}${sp}`);
+      .replace(
+        /\((catch(?:_ref)?)\s+(\d+)(\s)/g,
+        (_m, op: string, n: string, sp: string) => `(${op} ${one(n)}${sp}`,
+      );
   }
 
   // This module's own static-data address extent [dataLo, dataHi), derived from its

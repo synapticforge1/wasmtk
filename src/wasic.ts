@@ -132,8 +132,8 @@ import {
   floatStringIndexDiagnostic,
   implicitTruncDiagnostic,
   intDivisionDiagnostic,
-  type WmHelper,
   WM_WAT,
+  type WmHelper,
 } from "./wasmath_lower.ts";
 import { bindDefaultParam } from "./default_params.ts";
 import {
@@ -155,15 +155,15 @@ import {
   SCRATCH_BASE,
   setConsoleDiagnosticSink,
   setEnumStrVarResolver,
-  setObjectInspectResolver,
-  setI32SlotResolver,
   setExprFallbackResolver,
   setFuncTableLookup,
+  setI32SlotResolver,
   setInstanceofResolver,
   setLogicalResolver,
   setMathHelperNeededCallback,
-  setNullPrintResolver,
   setNullishResolver,
+  setNullPrintResolver,
+  setObjectInspectResolver,
   setStrCmpNeededCallback,
   setStringArrayAllocator,
   setStringExprResolver,
@@ -1303,9 +1303,21 @@ const WASIC_BINARY_OPS = [
 /** sw119 (the owner's rule 4 of 2026-10-19, on by default 2026-10-24): `+ - *` of i32s give
  *  JavaScript's result, and a value that does not fit an i32 slot throws a RangeError naming the
  *  operator. The wasMath operation each one names for deliberate wrapping: */
-const I32_FIT_NAMES: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "++": "inc", "--": "dec" };
+const I32_FIT_NAMES: Record<string, string> = {
+  "+": "add",
+  "-": "sub",
+  "*": "mul",
+  "++": "inc",
+  "--": "dec",
+};
 /** The wasMath operation that wraps instead, named in the error. */
-const I32_WRAP_NAMES: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "++": "add", "--": "sub" };
+const I32_WRAP_NAMES: Record<string, string> = {
+  "+": "add",
+  "-": "sub",
+  "*": "mul",
+  "++": "add",
+  "--": "sub",
+};
 
 /** sw44 (2026-10-06): the Error family a `throw` can carry, by kind number. 0 is "not an Error"
  *  (a thrown string, number or boolean). `$__exn_kind` holds the kind of the exception in flight;
@@ -1656,7 +1668,11 @@ function netSquareBracketDepth(s: string): number {
  * the top level, sw105 in a function; 2026-10-19). Code that does not shadow is returned unchanged.
  * `outer`: names already in scope (a function's parameters). `seq` numbers the renames.
  */
-function renameShadowingDecls(lines: string[], outer: Iterable<string>, seq: { n: number }): string[] {
+function renameShadowingDecls(
+  lines: string[],
+  outer: Iterable<string>,
+  seq: { n: number },
+): string[] {
   const scopes: Map<string, string>[] = [new Map([...outer].map((n) => [n, n]))];
   const resolve = (n: string): string | undefined => {
     for (let k = scopes.length - 1; k >= 0; k--) {
@@ -2414,11 +2430,13 @@ class WasicTranspiler {
   // the controlStack depth at its `try`. A `return` runs every one; a `break` / `continue` runs the
   // ones entered after its target loop (sw106, 2026-10-19: they jumped past `finally`).
   // `esc`: the label of the block around that try statement whose handler re-throws OUTWARD.
-  private finallyStack: Array<{ wat: string; controlDepth: number; esc: string; used: boolean }> = [];
+  private finallyStack: Array<{ wat: string; controlDepth: number; esc: string; used: boolean }> =
+    [];
   private finSeq = 0;
   // f64 `x.toString(radix)` (sw93): the helper's NaN / Infinity texts, allocated at first use
-  private f64RadixTexts: { nan: [number, number]; inf: [number, number]; ninf: [number, number] } | null =
-    null;
+  private f64RadixTexts:
+    | { nan: [number, number]; inf: [number, number]; ninf: [number, number] }
+    | null = null;
 
   // sw119: the `$__i32_fit_<op>` helpers used, each with its message
   private i32FitUsed = new Map<string, string>();
@@ -2429,7 +2447,9 @@ class WasicTranspiler {
 
   private useI32Fit(op: string): void {
     if (this.i32FitUsed.has(op)) return;
-    const msg = `the result of '${op}' does not fit an i32 (wasMath's i32.${I32_WRAP_NAMES[op]} wraps it)`;
+    const msg = `the result of '${op}' does not fit an i32 (wasMath's i32.${
+      I32_WRAP_NAMES[op]
+    } wraps it)`;
     if (this.mode === "library") {
       // a LIBRARY throws (a program it is merged into may catch it); its message is built when
       // thrown (i32FitThrowWat)
@@ -2473,8 +2493,12 @@ class WasicTranspiler {
       for (let k = 7; k >= 0; k--) word = (word << 8n) | BigInt(bytes[at + k] ?? 0);
       stores.push(`(i64.store offset=${at} (local.get $m) (i64.const ${BigInt.asIntN(64, word)}))`);
     }
-    return `${kind}\n        (local.set $m (call $__malloc (i32.const ${Math.ceil(bytes.length / 8) * 8})))` +
-      `\n        ${stores.join("\n        ")}\n        (throw $__exn_tag (local.get $m) (i32.const ${bytes.length}))`;
+    return `${kind}\n        (local.set $m (call $__malloc (i32.const ${
+      Math.ceil(bytes.length / 8) * 8
+    })))` +
+      `\n        ${
+        stores.join("\n        ")
+      }\n        (throw $__exn_tag (local.get $m) (i32.const ${bytes.length}))`;
   }
 
   /** `v ++` / `v --` of an i32 (sw119): the new value, or a RangeError at the type's limit. */
@@ -2493,7 +2517,10 @@ class WasicTranspiler {
     } catch {
       wat = "";
     }
-    if (this.diagnostics.length > mark || !wat.trim() || wat.includes("(;?") || wat.includes("(unreachable)")) {
+    if (
+      this.diagnostics.length > mark || !wat.trim() || wat.includes("(;?") ||
+      wat.includes("(unreachable)")
+    ) {
       this.diagnostics.length = mark;
       return undefined;
     }
@@ -2532,7 +2559,8 @@ class WasicTranspiler {
       (then
         ${this.i32FitThrowWat(msg)}))
     (i32.trunc_f64_s (local.get $v))
-  )`).join("\n");
+  )`
+    ).join("\n");
   }
 
   private useF64Radix(): void {
@@ -2552,7 +2580,8 @@ class WasicTranspiler {
    */
   private f64RadixHelperWat(): string {
     const t = this.f64RadixTexts!;
-    const ch = (d: string) => `(select (i32.add ${d} (i32.const 48)) (i32.add ${d} (i32.const 87)) (i32.lt_u ${d} (i32.const 10)))`;
+    const ch = (d: string) =>
+      `(select (i32.add ${d} (i32.const 48)) (i32.add ${d} (i32.const 87)) (i32.lt_u ${d} (i32.const 10)))`;
     return `
   ;; ── f64 → string in a radix (2..36), as V8 (sw93, 2026-10-19) ──
   (func $__f64_to_str_radix (param $v f64) (param $radix i32) (result i32 i32)
@@ -2561,9 +2590,15 @@ class WasicTranspiler {
     (local $digit i32) (local $c i32) (local $rem f64)
     (if (i32.or (i32.lt_s (local.get $radix) (i32.const 2)) (i32.gt_s (local.get $radix) (i32.const 36)))
       (then (local.set $radix (i32.const 10))))
-    (if (f64.ne (local.get $v) (local.get $v)) (then (return (i32.const ${t.nan[0]}) (i32.const ${t.nan[1]}))))
-    (if (f64.eq (local.get $v) (f64.const inf)) (then (return (i32.const ${t.inf[0]}) (i32.const ${t.inf[1]}))))
-    (if (f64.eq (local.get $v) (f64.const -inf)) (then (return (i32.const ${t.ninf[0]}) (i32.const ${t.ninf[1]}))))
+    (if (f64.ne (local.get $v) (local.get $v)) (then (return (i32.const ${t.nan[0]}) (i32.const ${
+      t.nan[1]
+    }))))
+    (if (f64.eq (local.get $v) (f64.const inf)) (then (return (i32.const ${t.inf[0]}) (i32.const ${
+      t.inf[1]
+    }))))
+    (if (f64.eq (local.get $v) (f64.const -inf)) (then (return (i32.const ${
+      t.ninf[0]
+    }) (i32.const ${t.ninf[1]}))))
     (local.set $r (f64.convert_i32_s (local.get $radix)))
     (local.set $buf (call $__malloc (i32.const 2200)))
     (local.set $ic (i32.const 1100))
@@ -2604,7 +2639,9 @@ class WasicTranspiler {
                         (if (i32.lt_s (i32.add (local.get $digit) (i32.const 1)) (local.get $radix))
                           (then
                             (local.set $digit (i32.add (local.get $digit) (i32.const 1)))
-                            (i32.store8 (i32.add (local.get $buf) (local.get $fc)) ${ch("(local.get $digit)")})
+                            (i32.store8 (i32.add (local.get $buf) (local.get $fc)) ${
+      ch("(local.get $digit)")
+    })
                             (local.set $fc (i32.add (local.get $fc) (i32.const 1)))
                             (br $rdone)))
                         (br $rloop)))
@@ -2916,7 +2953,9 @@ class WasicTranspiler {
         // (liftStartBodyArrows); the type is in bodyFuncTypes. Unstripped, the TYPE's `=>` was
         // found first and the arrow was never lifted, so the declaration emitted nothing and a
         // call through `g` reached table slot 0 (sw72 / ld22, 2026-10-15).
-        if (/^(?:const|let|var)\s+\w+\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=\s*(?:async\s+)?\(/.test(line)) {
+        if (
+          /^(?:const|let|var)\s+\w+\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=\s*(?:async\s+)?\(/.test(line)
+        ) {
           line = line.replace(/^((?:const|let|var)\s+\w+)\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=/, "$1 =");
         }
         // Loop until stable — handles multiple arrows on one line (e.g. object literal returns)
@@ -2962,7 +3001,9 @@ class WasicTranspiler {
       // `const op: (x: i32) => i32 = dbl` / `= c ? tri : dbl` keeps its annotation: it is a
       // table index called through call_indirect, which the annotation registers. Stripped, `op`
       // was an f64 local and `op(5)` an unknown function (ld01, 2026-10-15).
-      const fnInit = line.match(/^(?:const|let|var)\s+\w+\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=\s*(.+?)\s*;?$/)?.[1];
+      const fnInit = line.match(
+        /^(?:const|let|var)\s+\w+\s*:\s*\([^)]*\)\s*=>\s*\w+\s*=\s*(.+?)\s*;?$/,
+      )?.[1];
       if (fnInit) {
         const tern = fnInit.match(/^.+\?\s*(\w+)\s*:\s*(\w+)$/);
         if (plainFn(fnInit) || (tern && plainFn(tern[1]) && plainFn(tern[2]))) return line;
@@ -3003,7 +3044,9 @@ class WasicTranspiler {
         else if (r[k] === "(" && --d === 0) break;
       }
       const head = r.slice(0, k).match(/^([\s\S]*)\.(\w+)$/);
-      if (!head || !/^(?:filter|map|slice|sort|reverse|concat|fill)$/.test(head[2])) return undefined;
+      if (!head || !/^(?:filter|map|slice|sort|reverse|concat|fill)$/.test(head[2])) {
+        return undefined;
+      }
       r = head[1].trim();
     }
     if (!/^\w+$/.test(r)) return undefined;
@@ -3011,7 +3054,11 @@ class WasicTranspiler {
     const declared = new Set<string>();
     if (fromParam) declared.add(fromParam);
     else {
-      for (const m of this.src.matchAll(new RegExp(`\\b(?:const|let|var)\\s+${r}\\s*:\\s*(\\w+)\\[\\]\\s*=`, "g"))) {
+      for (
+        const m of this.src.matchAll(
+          new RegExp(`\\b(?:const|let|var)\\s+${r}\\s*:\\s*(\\w+)\\[\\]\\s*=`, "g"),
+        )
+      ) {
         declared.add(m[1] === "number" ? "f64" : mapType(m[1]) as string);
       }
     }
@@ -3074,7 +3121,9 @@ class WasicTranspiler {
     // (ld77, 2026-10-22).
     {
       const declColon = line.match(/^(?:var|let|const)\s+[\w$]+\s*:/);
-      if (line[beforeParens] === ":" && declColon && beforeParens === declColon[0].length - 1) return line;
+      if (line[beforeParens] === ":" && declColon && beforeParens === declColon[0].length - 1) {
+        return line;
+      }
     }
 
     // For `=` (assignment arrow): extract the target variable name.
@@ -3780,7 +3829,16 @@ class WasicTranspiler {
         };
       }
       const is2DArray = arr2DElemMatch ? true : undefined;
-      return { name, type: resolvedType, arrayElemType, is2DArray, arrayStructElemType, structType, isAny, isU64 };
+      return {
+        name,
+        type: resolvedType,
+        arrayElemType,
+        is2DArray,
+        arrayStructElemType,
+        structType,
+        isAny,
+        isU64,
+      };
     });
   }
 
@@ -3954,7 +4012,9 @@ class WasicTranspiler {
             }
           }
           bodyLines.push(joined.trim());
-        } else if (/^return\s+\([^)]*\)\s*(?::\s*[\w\[\]|]+\s*)?=>\s*\{/.test(l) && braceDepthOf(l) > 0) {
+        } else if (
+          /^return\s+\([^)]*\)\s*(?::\s*[\w\[\]|]+\s*)?=>\s*\{/.test(l) && braceDepthOf(l) > 0
+        ) {
           // A multi-line returned BLOCK arrow, `return () => {` … `};`: one line, newlines kept
           // for parseReturnArrow, as `return function` below. Its body and `};` were left as the
           // factory's own statements, "Unsupported statement: };" (ld20, 2026-10-15).
@@ -4041,7 +4101,8 @@ class WasicTranspiler {
             // (`const g: () => i32 = () => …`): the local holds the closure pointer, as an inline
             // arrow's factory call does. Only inline arrows were fields, so `rd.g()` was refused
             // (ld22, 2026-10-15).
-            const fnLocalRe = /^(?:var|let|const)\s+(\w+)\s*:\s*\(([^)]*)\)\s*=>\s*([\w\[\]|]+)\s*=/;
+            const fnLocalRe =
+              /^(?:var|let|const)\s+(\w+)\s*:\s*\(([^)]*)\)\s*=>\s*([\w\[\]|]+)\s*=/;
             const fnLocals = new Map<string, { params: WatType[]; result: WatType | null }>();
             for (const bl of bodyLines) {
               const fm = bl.match(fnLocalRe);
@@ -4121,7 +4182,11 @@ class WasicTranspiler {
                     if (pn && mParams[pi]) scope.set(pn, mParams[pi]);
                   });
                   // The arrow body's own typed locals (`const r: f64 = …; return r;`).
-                  for (const [, vn, vt] of ownBody.matchAll(/\b(?:var|let|const)\s+(\w+)\s*:\s*(\w+)\s*=/g)) {
+                  for (
+                    const [, vn, vt] of ownBody.matchAll(
+                      /\b(?:var|let|const)\s+(\w+)\s*:\s*(\w+)\s*=/g,
+                    )
+                  ) {
                     scope.set(vn, mapType(vt) as WatType);
                   }
                   mResult = this.closureResultType(retExpr, scope);
@@ -4259,7 +4324,9 @@ class WasicTranspiler {
         // copy and `n` stayed 0 (ld96, 2026-10-22). Its line is whole here (joinMultiLineArrowArgs).
         {
           const boxable = (t: string | undefined) => t === "i32" || t === "bool" || t === "f64";
-          const locals2 = new Set<string>(factoryParams.filter((p) => boxable(p.type)).map((p) => p.name));
+          const locals2 = new Set<string>(
+            factoryParams.filter((p) => boxable(p.type)).map((p) => p.name),
+          );
           for (const bl of bodyLines) {
             const vm = bl.match(/^(?:var|let|const)\s+(\w+)\s*:\s*(\w+)\s*=/);
             if (vm && boxable(mapType(vm[2]!))) locals2.add(vm[1]!);
@@ -4268,7 +4335,9 @@ class WasicTranspiler {
           for (const bl of bodyLines) {
             if (/^return\s*\{/.test(bl)) continue; // the object literal above
             const ai = firstCodeArrowIdx(bl);
-            if (ai === -1 || /^(?:var|let|const)\s+\w+\s*(?::[^=]*)?=\s*(?:async\s+)?\(/.test(bl)) continue;
+            if (ai === -1 || /^(?:var|let|const)\s+\w+\s*(?::[^=]*)?=\s*(?:async\s+)?\(/.test(bl)) {
+              continue;
+            }
             const arrowBody = bl.slice(ai + 2);
             for (
               const mm of arrowBody.matchAll(
@@ -4377,7 +4446,9 @@ class WasicTranspiler {
       const rawBody = body.slice(bodyStart + 1, ci - 1);
       innerBodyLines = rawBody.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
       // A one-line body, `return () => { c++; return c; }`, is several statements (ld20).
-      if (innerBodyLines.length === 1) innerBodyLines = WasicTranspiler.splitStmts(innerBodyLines[0]);
+      if (innerBodyLines.length === 1) {
+        innerBodyLines = WasicTranspiler.splitStmts(innerBodyLines[0]);
+      }
       // An unannotated block arrow returns what its `return` returns, as the expression form
       // infers (it was typed void, an invalid module: ld20). The body's own typed locals count.
       if (result === null) {
@@ -4858,7 +4929,9 @@ class WasicTranspiler {
           remaining.push(line); // complex init (function call, etc.) — leave in startBodyLines
           continue;
         }
-        const type = (isBoolLit ? "bool" : typeStr
+        const type = (isBoolLit
+          ? "bool"
+          : typeStr
           ? mapType(typeStr)
           : inferInitType(initExpr, new Map(), this.enumValues, this.functions)) as WatType;
         if (!type || type === "string") {
@@ -4868,7 +4941,9 @@ class WasicTranspiler {
         this.moduleGlobals.set(name, { type, mutable: keyword !== "const", initExpr });
         // A string-enum-typed module variable carries the tag: remember its enum, as the _start
         // pre-scan does for the line this promotion drops; it printed `1` for `DOWN` (sw108).
-        if (typeStr && this.stringEnumNames.has(typeStr)) this.stringEnumVars.set(name, typeStr);
+        if (typeStr && this.stringEnumNames.has(typeStr)) {
+          this.stringEnumVars.set(name, typeStr);
+        }
         continue;
       }
       remaining.push(line);
@@ -4970,7 +5045,9 @@ class WasicTranspiler {
           ptr: -2,
           length: 0,
           dynamic: isDynamic,
-          ...(synName ? { structTypeName: synName } : { isFuncPtrArr: this.parseFuncTypeSig(mFA[2].trim()) }),
+          ...(synName
+            ? { structTypeName: synName }
+            : { isFuncPtrArr: this.parseFuncTypeSig(mFA[2].trim()) }),
         });
         continue;
       }
@@ -5073,7 +5150,14 @@ class WasicTranspiler {
    * Type arguments must be written: `new Box(7)` of a generic class is refused, by name.
    */
   private expandGenericClasses(src: string): string {
-    type Tmpl = { name: string; params: string[]; headRest: string; body: string; start: number; end: number };
+    type Tmpl = {
+      name: string;
+      params: string[];
+      headRest: string;
+      body: string;
+      start: number;
+      end: number;
+    };
     const mask = buildStringLiteralMask(src);
     const tmpls: Tmpl[] = [];
     const re = /(?:export\s+)?(?:abstract\s+)?class\s+([A-Z]\w*)\s*<([^<>{]+)>([^{]*)\{/g;
@@ -5089,7 +5173,9 @@ class WasicTranspiler {
       }
       tmpls.push({
         name: m[1]!,
-        params: m[2]!.split(",").map((s) => s.trim().split(/\s+extends\s+/)[0]!.trim()).filter(Boolean),
+        params: m[2]!.split(",").map((s) => s.trim().split(/\s+extends\s+/)[0]!.trim()).filter(
+          Boolean,
+        ),
         headRest: m[3]!,
         body: src.slice(m.index + m[0].length, i - 1),
         start: m.index,
@@ -5115,7 +5201,10 @@ class WasicTranspiler {
               head = head.replace(rx, args[k] ?? "i32");
               body = body.replace(rx, args[k] ?? "i32");
             });
-            concrete.set(cname, { tmpl: t, text: `class ${cname}${rewrite(head)}{${rewrite(body)}}` });
+            concrete.set(cname, {
+              tmpl: t,
+              text: `class ${cname}${rewrite(head)}{${rewrite(body)}}`,
+            });
           }
           return cname;
         });
@@ -5131,7 +5220,9 @@ class WasicTranspiler {
     }
     out = rewrite(out + src.slice(last));
     for (const t of tmpls) {
-      const copies = [...concrete.values()].filter((c) => c.tmpl === t).map((c) => c.text).join("\n");
+      const copies = [...concrete.values()].filter((c) => c.tmpl === t).map((c) => c.text).join(
+        "\n",
+      );
       out = out.replace(`/*__GENCLASS_${t.name}__*/`, copies);
       // a bare use of the generic class has no type to substitute
       if (new RegExp(`\\bnew\\s+${t.name}\\s*\\(|:\\s*${t.name}\\b(?!\\s*<)`).test(out)) {
@@ -6215,7 +6306,9 @@ class WasicTranspiler {
     let off = end;
     let placed = false;
     for (const f of fields) {
-      if (!f.nullable || f.nullFlagOffset !== undefined || f.tupleTypeName || f.structType) continue;
+      if (!f.nullable || f.nullFlagOffset !== undefined || f.tupleTypeName || f.structType) {
+        continue;
+      }
       if (!["i32", "bool", "i64", "f32", "f64"].includes(f.type)) continue;
       if (off % 4 !== 0) off = Math.ceil(off / 4) * 4;
       f.nullFlagOffset = off;
@@ -6372,7 +6465,10 @@ class WasicTranspiler {
                 const tInit = line.slice(fmTup[0].length).match(/^\s*=\s*([\s\S]+?)\s*;?\s*$/)?.[1];
                 if (tInit !== undefined) { // sw131: `bounds: [i32, i32] = [0, 9]` ran nothing
                   (this.instanceFieldInits.get(className) ??
-                    this.instanceFieldInits.set(className, []).get(className)!).push([fmTup[1], tInit]);
+                    this.instanceFieldInits.set(className, []).get(className)!).push([
+                      fmTup[1],
+                      tInit,
+                    ]);
                 }
                 fieldDepth += opens - closes;
                 continue;
@@ -6573,7 +6669,9 @@ class WasicTranspiler {
     //   - a DERIVED class with no constructor gets one that calls the nearest ancestor's with the
     //     same arguments (sw132: `new D(4)` never ran B's constructor, so `d.x` was 0, not 40).
     for (const [cls, cd] of this.classDefs) {
-      const initLines = (this.instanceFieldInits.get(cls) ?? []).map(([f, v]) => `this.${f} = ${v};`);
+      const initLines = (this.instanceFieldInits.get(cls) ?? []).map(([f, v]) =>
+        `this.${f} = ${v};`
+      );
       const ctorName = `${cls}_constructor`;
       const own = this.functions.find((f) => f.name === ctorName);
       if (own) {
@@ -6596,7 +6694,10 @@ class WasicTranspiler {
         params: [{ name: "__self", type: "i32" as WatType }, ...params],
         result: null,
         exported: false,
-        bodyLines: [...(ancCtor ? [`super(${params.map((p) => p.name).join(", ")});`] : []), ...initLines],
+        bodyLines: [
+          ...(ancCtor ? [`super(${params.map((p) => p.name).join(", ")});`] : []),
+          ...initLines,
+        ],
         className: cls,
       });
       cd.methods.push({ name: "constructor", isStatic: false, isConstructor: true });
@@ -6648,7 +6749,9 @@ class WasicTranspiler {
     if (!ai?.is2D || ai.elemType !== "string") return null;
     const r = this.emitArrayIndex(m[2]!.trim(), locals);
     const c = this.emitArrayIndex(m[3]!.trim(), locals);
-    const row = `(i32.load (i32.add (i32.add ${this.arrGetWat(m[1]!)} (i32.const 8)) (i32.shl ${r} (i32.const 2))))`;
+    const row = `(i32.load (i32.add (i32.add ${
+      this.arrGetWat(m[1]!)
+    } (i32.const 8)) (i32.shl ${r} (i32.const 2))))`;
     return `(i32.add (i32.add ${row} (i32.const 8)) (i32.shl ${c} (i32.const 3)))`;
   }
 
@@ -7017,7 +7120,9 @@ class WasicTranspiler {
         if (f.nullable) return `a nullable field (${at})`;
         if (f.tupleTypeName) return `a tuple field (${at})`;
         if (!f.tsType) return `a field of unknown type (${at})`;
-        if (isClass && !this.classAssignsField(s, f.name)) return `a field it never assigns (${at})`;
+        if (isClass && !this.classAssignsField(s, f.name)) {
+          return `a field it never assigns (${at})`;
+        }
         const inner = this.inspectRefusal(f.tsType, [...stack, ts]);
         if (inner) return inner;
       }
@@ -7026,7 +7131,8 @@ class WasicTranspiler {
       const names = def.fields.map((f) => f.name);
       const set = new Set(names);
       const reordered = this.objectLiteralKeyOrders().some((keys) =>
-        keys.length === names.length && keys.every((k) => set.has(k)) && keys.some((k, i) => k !== names[i])
+        keys.length === names.length && keys.every((k) => set.has(k)) &&
+        keys.some((k, i) => k !== names[i])
       );
       if (reordered) return `an object literal whose keys are not in ${ts}'s declared order`;
     }
@@ -7046,7 +7152,9 @@ class WasicTranspiler {
     if (ts.endsWith("[]")) {
       const el = ts.slice(0, -2).trim();
       const ek = WasicTranspiler.inspScalarKind(el) ?? (this.isNumericEnumType(el) ? 0 : undefined);
-      if (ek !== undefined) return `(call $__insp_arr_scalar (i32.load ${addr}) (i32.const ${ek}) ${ind} ${lvl})`;
+      if (ek !== undefined) {
+        return `(call $__insp_arr_scalar (i32.load ${addr}) (i32.const ${ek}) ${ind} ${lvl})`;
+      }
     }
     return `(call ${this.inspWriterFor(ts)} (i32.load ${addr}) ${ind} ${lvl})`;
   }
@@ -7072,13 +7180,20 @@ class WasicTranspiler {
     const lvl = `(i32.add (local.get $lvl) (i32.const 1))`;
     const puts = def.fields.map((f, i) => {
       const key = `${f.name}: `;
-      const value = this.inspValueWat(f.tsType!, `(i32.add (local.get $p) (i32.const ${f.offset}))`, ind, lvl);
+      const value = this.inspValueWat(
+        f.tsType!,
+        `(i32.add (local.get $p) (i32.const ${f.offset}))`,
+        ind,
+        lvl,
+      );
       return `    (call $__insp_put (local.get $t) (i32.const ${i})
       (call $__insp_kv (i32.const ${this.inspText(key)}) (i32.const ${utf8(key)}) ${value}))`;
     });
     return `${head}
     (if (i32.gt_s (local.get $lvl) (i32.const 4))
-      (then (return (call $__insp_lit (i32.const ${this.inspText(abbrev)}) (i32.const ${utf8(abbrev)})))))
+      (then (return (call $__insp_lit (i32.const ${this.inspText(abbrev)}) (i32.const ${
+      utf8(abbrev)
+    })))))
     (global.set $__insp_cur (local.get $lvl))
     (local.set $t (call $__malloc (i32.const ${def.fields.length * 8})))
 ${puts.join("\n")}
@@ -7196,7 +7311,9 @@ ${arms.join("\n")}
       // a call returning a struct or a struct array (Phase 13b printed only the first: its
       // strings as pointers, its booleans as 1)
       const call = !t.includes(").") ? t.match(/^(\w+)\s*\(([\s\S]*)\)$/) : null;
-      const retTs = call ? this.functions.find((f) => f.name === call[1])?.resultTsName?.trim() : undefined;
+      const retTs = call
+        ? this.functions.find((f) => f.name === call[1])?.resultTsName?.trim()
+        : undefined;
       if (retTs && this.structDefs.has(retTs.replace(/\[\]$/, "").trim())) {
         ts = retTs;
         wat = this.emitExpr(t, locals, "i32");
@@ -7219,20 +7336,34 @@ ${arms.join("\n")}
       return { ptrWat: "(i32.const 0)", lenWat: "(i32.const 0)" };
     };
     // the writer call of one target, at indent ind and depth lvl, or a refusal's message
-    const writerCall = (x: { ts: string; wat: string; what: string }, src: string, ind: number, lvl: number) => {
+    const writerCall = (
+      x: { ts: string; wat: string; what: string },
+      src: string,
+      ind: number,
+      lvl: number,
+    ) => {
       const why = this.inspectRefusal(x.ts, []);
       if (why) {
-        return { msg: `printing a whole ${x.what} holding ${why} is not supported yet; print its fields (${src})` };
+        return {
+          msg:
+            `printing a whole ${x.what} holding ${why} is not supported yet; print its fields (${src})`,
+        };
       }
-      return { call: `(call ${this.inspWriterFor(x.ts)} ${x.wat} (i32.const ${ind}) (i32.const ${lvl}))` };
+      return {
+        call: `(call ${this.inspWriterFor(x.ts)} ${x.wat} (i32.const ${ind}) (i32.const ${lvl}))`,
+      };
     };
     let text: string;
     if (t.startsWith("[") && findMatchingBracketAware(t, 0) === t.length - 1) {
       const elems = this.splitArgs(t.slice(1, -1)).map((e) => e.trim()).filter((e) => e !== "");
-      const targets = elems.map((e) => /^\w+$/.test(e) && !this.arrayVars.has(e) ? this.inspectTarget(e, locals) : undefined);
+      const targets = elems.map((e) =>
+        /^\w+$/.test(e) && !this.arrayVars.has(e) ? this.inspectTarget(e, locals) : undefined
+      );
       if (!targets.some((x) => x)) return undefined;
       if (!targets.every((x) => x)) {
-        return refused(`printing an array literal mixing objects and other values is not supported yet (${t})`);
+        return refused(
+          `printing an array literal mixing objects and other values is not supported yet (${t})`,
+        );
       }
       // each element at indent 2, depth 1, into a table laid out as an array at depth 0
       const puts: string[] = [];
@@ -7596,7 +7727,12 @@ ${arms.join("\n")}
       // refused: `{ s: c ? null : "lo" }`, sw120); an omitted one is the null string (0, 0)
       if (field.type === "string") {
         stmts.push(
-          this.emitStringFieldStore(`(local.get $__rt_struct_ptr)`, field.offset, rawFields[field.name] ?? "null", locals),
+          this.emitStringFieldStore(
+            `(local.get $__rt_struct_ptr)`,
+            field.offset,
+            rawFields[field.name] ?? "null",
+            locals,
+          ),
         );
         continue;
       }
@@ -7985,7 +8121,14 @@ ${arms.join("\n")}
       }
       // a STRING element, `[string, f64]` (ld76, 2026-10-22: emitted as a number, refused)
       if (field.type === "string") {
-        stmts.push(this.emitStringFieldStore(`(local.get $${basePtr})`, baseOffset + field.offset, elem, locals));
+        stmts.push(
+          this.emitStringFieldStore(
+            `(local.get $${basePtr})`,
+            baseOffset + field.offset,
+            elem,
+            locals,
+          ),
+        );
         continue;
       }
       const storeOp = memStoreOp(field.type);
@@ -7995,7 +8138,9 @@ ${arms.join("\n")}
       );
       if (flagWat) {
         stmts.push(
-          `(i32.store offset=${baseOffset + field.nullFlagOffset!} (local.get $${basePtr}) ${flagWat})`,
+          `(i32.store offset=${
+            baseOffset + field.nullFlagOffset!
+          } (local.get $${basePtr}) ${flagWat})`,
         );
       }
     }
@@ -8011,7 +8156,9 @@ ${arms.join("\n")}
     locals: Map<string, WatType>,
   ): string[] {
     // a string field is a (ptr, len) pair (sw120: its run-time store was emitted as a number)
-    if (field.type === "string") return [this.emitStringFieldStore(baseWat, field.offset, expr, locals)];
+    if (field.type === "string") {
+      return [this.emitStringFieldStore(baseWat, field.offset, expr, locals)];
+    }
     const { valWat, flagWat } = this.fieldInit(field, expr, locals);
     const out = [`(${memStoreOp(field.type)} offset=${field.offset} ${baseWat} ${valWat})`];
     if (flagWat) out.push(`(i32.store offset=${field.nullFlagOffset!} ${baseWat} ${flagWat})`);
@@ -8239,7 +8386,9 @@ ${arms.join("\n")}
       // A pointer list (struct elements) is the numbers allocStructData returned.
       const v = plainArrayLiteral(elem, elemType);
       if (v === undefined) {
-        throw new Error(`wasic: internal: static array element '${elem.trim()}' is not a plain ${elemType} literal`);
+        throw new Error(
+          `wasic: internal: static array element '${elem.trim()}' is not a plain ${elemType} literal`,
+        );
       }
       if (elemType === "f64") {
         encoded += encodeF64LE(Number(v));
@@ -8300,7 +8449,8 @@ ${arms.join("\n")}
       isFuncPtrArr?: unknown;
     } | undefined,
   ): boolean {
-    return !!ai && ai.ptr === -1 && !ai.dynamic && !ai.is2D && !ai.isStringArr && !ai.structTypeName &&
+    return !!ai && ai.ptr === -1 && !ai.dynamic && !ai.is2D && !ai.isStringArr &&
+      !ai.structTypeName &&
       !ai.isFuncPtrArr && ["i32", "i64", "f32", "f64"].includes(ai.elemType as string);
   }
 
@@ -8396,14 +8546,22 @@ ${arms.join("\n")}
           continue;
         }
       }
-      stmts.push(`(${storeOp} offset=${byteOffset} ${getWat} ${this.arrayElemWat(raw, info.elemType, locals)})`);
+      stmts.push(
+        `(${storeOp} offset=${byteOffset} ${getWat} ${
+          this.arrayElemWat(raw, info.elemType, locals)
+        })`,
+      );
     }
     return stmts.join("\n      ");
   }
 
   /** One array-literal element's value: a constant for a plain literal, else the expression
    *  evaluated as the element type (sw69: every element was `parseFloat(raw) || 0`). */
-  private arrayElemWat(raw: string, elemType: WatType, locals: Map<string, WatType> | undefined): string {
+  private arrayElemWat(
+    raw: string,
+    elemType: WatType,
+    locals: Map<string, WatType> | undefined,
+  ): string {
     const v = plainArrayLiteral(raw, elemType);
     if (v !== undefined) {
       if (elemType === "f64" || elemType === "f32") {
@@ -8465,7 +8623,9 @@ ${arms.join("\n")}
             : null;
           if (!pl) {
             this.diagnostics.push(
-              `unsupported: the string[][] '${varName}' element '${raw.slice(0, 40)}' is not a string literal or variable`,
+              `unsupported: the string[][] '${varName}' element '${
+                raw.slice(0, 40)
+              }' is not a string literal or variable`,
             );
             continue;
           }
@@ -8496,7 +8656,10 @@ ${arms.join("\n")}
     const getWat = this.arrGetWat(varName); // the global for a module 2D array (ld41)
     const stmts = [
       `(local.set $__from_n ${lenWat})`,
-      this.arrSetWat(varName, `(call $__malloc (i32.add (i32.const 8) (i32.shl (local.get $__from_n) (i32.const 2))))`),
+      this.arrSetWat(
+        varName,
+        `(call $__malloc (i32.add (i32.const 8) (i32.shl (local.get $__from_n) (i32.const 2))))`,
+      ),
       `(i32.store ${getWat} (local.get $__from_n))`,
       `(i32.store offset=4 ${getWat} (local.get $__from_n))`,
       `(local.set $__from_i (i32.const 0))`,
@@ -8719,7 +8882,11 @@ ${arms.join("\n")}
     // printed as a boolean it read `true` (sw49). Refused here; a console.log argument of its
     // own prints it right (logicalForConsole).
     const lg = type === "bool" ? splitTopLogical(expr) : null;
-    if (lg && (this.inferExprType(lg.lhs, locals) === "bool") !== (this.inferExprType(lg.rhs, locals) === "bool")) {
+    if (
+      lg &&
+      (this.inferExprType(lg.lhs, locals) === "bool") !==
+        (this.inferExprType(lg.rhs, locals) === "bool")
+    ) {
       this.diagnostics.push(
         `'${expr.slice(0, 60)}' mixes a boolean and a number in a string; ` +
           `convert each side explicitly (e.g. a conditional)`,
@@ -8883,7 +9050,9 @@ ${arms.join("\n")}
           // expression"): built first into its own numbered pair, so it cannot overwrite the pair
           // this template is being built into (which may itself be a temp).
           if (e.startsWith("`") && e.endsWith("`")) {
-            const [nP, nL] = splitTwoWatExprs(this.emitStringArg(e, locals, `__str_nest_${this.strNestCounter++}`));
+            const [nP, nL] = splitTwoWatExprs(
+              this.emitStringArg(e, locals, `__str_nest_${this.strNestCounter++}`),
+            );
             emitTmplConcat(nP, nL);
             continue;
           }
@@ -9136,10 +9305,14 @@ ${arms.join("\n")}
     // first argument, the result comes back through the same globals. It was "Unsupported string
     // assignment" (ld74, 2026-10-22).
     {
-      const mc = initExpr.endsWith(")") ? this.splitLastMethodCall(initExpr.replace(/;$/, "")) : null;
+      const mc = initExpr.endsWith(")")
+        ? this.splitLastMethodCall(initExpr.replace(/;$/, ""))
+        : null;
       const cls = mc ? this.classOfExpr(mc.receiver) : undefined;
       const fnName = cls ? this.resolveMethodFunc(cls, mc!.method) : null;
-      const strFn = fnName ? this.functions.find((f) => f.name === fnName && f.result === "string") : undefined;
+      const strFn = fnName
+        ? this.functions.find((f) => f.name === fnName && f.result === "string")
+        : undefined;
       if (mc && strFn && parenDepthNeverNegative(mc.args)) {
         const argList = mc.args.trim() ? this.splitArgs(mc.args.trim()) : [];
         const watArgs = argList.map((a, i) => {
@@ -9449,7 +9622,10 @@ ${arms.join("\n")}
     if (toStrMatch) {
       const srcName = toStrMatch[1];
       const srcType = locals.get(srcName) ?? this.moduleGlobals.get(srcName)?.type;
-      if (srcType === "i32" || srcType === "f64" || srcType === "f32" || srcType === "i64" || srcType === "bool") {
+      if (
+        srcType === "i32" || srcType === "f64" || srcType === "f32" || srcType === "i64" ||
+        srcType === "bool"
+      ) {
         return this.emitStringAssignInner(varName, `String(${srcName})`, locals);
       }
     }
@@ -9879,7 +10055,12 @@ ${arms.join("\n")}
   /** The WAT for omitted argument `i` of `fn`: its default, earlier parameters bound to the
    *  call's arguments (bindDefaultParam; ld78, 2026-10-22). A side-effecting argument the default
    *  would repeat is refused. */
-  private emitDefaultArg(fn: FuncDef, args: string[], i: number, locals: Map<string, WatType>): string {
+  private emitDefaultArg(
+    fn: FuncDef,
+    args: string[],
+    i: number,
+    locals: Map<string, WatType>,
+  ): string {
     const bound = bindDefaultParam(fn.params, args, i);
     if (bound.unsafe) {
       this.diagnostics.push(
@@ -9891,7 +10072,11 @@ ${arms.join("\n")}
   }
 
   /** A `for` header's init, one statement per declarator (ld78). */
-  private emitForInit(initPart: string, locals: Map<string, WatType>, funcResult: WatType | null): string {
+  private emitForInit(
+    initPart: string,
+    locals: Map<string, WatType>,
+    funcResult: WatType | null,
+  ): string {
     return this.splitForInit(initPart)
       .map((d) => this.emitStatement(d.replace(/;$/, "") + ";", locals, funcResult))
       .filter((w) => w.trim())
@@ -9944,7 +10129,11 @@ ${arms.join("\n")}
     const src = after.match(/^=\s*([\s\S]+?)\s*;?$/)![1]!.trim();
     if (/^\w+$/.test(src)) {
       const sv = this.structVars.get(src)!;
-      return { def, baseWat: sv.ptr < 0 ? `(local.get $${src})` : `(i32.const ${sv.ptr})`, pre: "" };
+      return {
+        def,
+        baseWat: sv.ptr < 0 ? `(local.get $${src})` : `(i32.const ${sv.ptr})`,
+        pre: "",
+      };
     }
     return {
       def,
@@ -9957,7 +10146,13 @@ ${arms.join("\n")}
   private incDecParts(
     expr: string,
     locals: Map<string, WatType>,
-  ): { name: string; op: "++" | "--"; pre: boolean; t: "i32" | "i64" | "f32" | "f64"; isLocal: boolean } | null {
+  ): {
+    name: string;
+    op: "++" | "--";
+    pre: boolean;
+    t: "i32" | "i64" | "f32" | "f64";
+    isLocal: boolean;
+  } | null {
     const e = expr.trim();
     const preM = e.match(/^(\+\+|--)\s*([A-Za-z_$][\w$]*)$/);
     const postM = preM ? null : e.match(/^([A-Za-z_$][\w$]*)\s*(\+\+|--)$/);
@@ -9973,7 +10168,10 @@ ${arms.join("\n")}
 
   /** `x.toFixed(d)` of a NUMBER (not a string, not a class value with its own `toFixed`): the
    *  receiver and the digits expression, else null (ld38, 2026-10-22). */
-  private toFixedParts(expr: string, locals: Map<string, WatType>): { recv: string; digits: string } | null {
+  private toFixedParts(
+    expr: string,
+    locals: Map<string, WatType>,
+  ): { recv: string; digits: string } | null {
     const m = expr.trim().match(/^([\s\S]+)\.toFixed\s*\(([^()]*)\)$/);
     if (!m || !parenDepthNeverNegative(m[1]!)) return null;
     const recv = m[1]!.trim();
@@ -9994,16 +10192,21 @@ ${arms.join("\n")}
     {
       const plus = this.findBinaryOp(e, "+");
       if (
-        plus > 0 && this.findBinaryOp(e, "-") < plus && !hasTopLevelBoolOp(e) && !this.splitTernaryTop(e) &&
+        plus > 0 && this.findBinaryOp(e, "-") < plus && !hasTopLevelBoolOp(e) &&
+        !this.splitTernaryTop(e) &&
         this.findBinaryOp(e, "??") === -1 &&
-        (this.isStringExpr(e.slice(0, plus), locals) || this.isStringExpr(e.slice(plus + 1), locals))
+        (this.isStringExpr(e.slice(0, plus), locals) ||
+          this.isStringExpr(e.slice(plus + 1), locals))
       ) return true;
     }
     if (e.startsWith("`") && e.endsWith("`")) return true;
     if (/^\w+$/.test(e)) return locals.get(e) === "string" || this.moduleStringConsts.has(e);
     // A string struct FIELD (`p.s`, `ps[i].s`, `a.b.s`): a ternary over two was refused in a
     // declaration and was "" in a template (2026-10-19, with sw98)
-    if (/^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(e) && this.fieldOfExpr(e, locals)?.type === "string") {
+    if (
+      /^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(e) &&
+      this.fieldOfExpr(e, locals)?.type === "string"
+    ) {
       return true;
     }
     // ...and a tuple's string element, `mix[0]` (ld76)
@@ -10011,7 +10214,9 @@ ${arms.join("\n")}
     // a conditional whose two branches are strings (`${c ? p.s : p.t}` printed the pointer)
     {
       const tern = this.splitTernaryTop(e);
-      if (tern && this.isStringExpr(tern[1], locals) && this.isStringExpr(tern[2], locals)) return true;
+      if (tern && this.isStringExpr(tern[1], locals) && this.isStringExpr(tern[2], locals)) {
+        return true;
+      }
     }
     // String array element: arr[idx] where arr is a string array
     const bracketStrM = e.match(/^(\w+)\[/);
@@ -10099,7 +10304,9 @@ ${arms.join("\n")}
    *  was built of i32 words, so the callee read garbage (sw128, 2026-10-22). */
   private literalArgType(p: FuncParam | undefined, arg: string, paramType: WatType): WatType {
     const e = p?.arrayElemType;
-    return e && !p?.is2DArray && arg.trim().startsWith("[") && (e === "f64" || e === "i64") ? e : paramType;
+    return e && !p?.is2DArray && arg.trim().startsWith("[") && (e === "f64" || e === "i64")
+      ? e
+      : paramType;
   }
 
   /** The inner function of a capturing callback, `__anon_N__factory(caps)` (ld96); else undefined. */
@@ -10121,7 +10328,12 @@ ${arms.join("\n")}
     return this.closureCallback(fnName) ? "_cl" : "";
   }
 
-  private cbHelperKey(method: string, elemType: WatType, fnName: string, result: WatType | null): string {
+  private cbHelperKey(
+    method: string,
+    elemType: WatType,
+    fnName: string,
+    result: WatType | null,
+  ): string {
     const fn = this.functions.find((f) => f.name === fnName);
     const n = fn ? fn.params.length - (fn.closureCaptures?.length ?? 0) : 1;
     // No helper passes a (ptr, len) element: a `string[]` callback was an invalid call_indirect
@@ -10143,15 +10355,21 @@ ${arms.join("\n")}
     if (cl) {
       // a closure's trampoline passes one word per parameter, so not a string's two
       const caps = cl.closureCaptures ?? [];
-      if (elemType === "string" || cl.params.some((p) => caps.includes(p.name) && p.type === "string")) {
+      if (
+        elemType === "string" || cl.params.some((p) => caps.includes(p.name) && p.type === "string")
+      ) {
         this.diagnostics.push(
           `'${method}' callback: an arrow that captures a variable, over a string[] or capturing a ` +
             `string, is not supported; use for…of`,
         );
       }
-      const n2 = cl.params.filter((p) => !caps.includes(p.name) && p.name !== "__closure_ptr").length;
+      const n2 = cl.params.filter((p) =>
+        !caps.includes(p.name) && p.name !== "__closure_ptr"
+      ).length;
       if (n2 >= 3) {
-        this.diagnostics.push(`'${method}' callback: a third parameter (the array itself) is not supported.`);
+        this.diagnostics.push(
+          `'${method}' callback: a third parameter (the array itself) is not supported.`,
+        );
       }
       this.getOrCreateFuncType(n2 >= 2 ? [elemType, "i32"] : [elemType], result);
       return `${method}_${elemType}${n2 >= 2 ? "_ix" : ""}_cl`;
@@ -10170,7 +10388,8 @@ ${arms.join("\n")}
    *  is not i32 (`(x, y): f64 => x - y` was called through an `(f64, f64) -> i32` type: a
    *  signature-mismatch trap, ld49, 2026-10-20). Registers the call_indirect type. */
   private sortCmpKey(elemType: WatType, fnName: string): string {
-    const r = (this.closureCallback(fnName) ?? this.functions.find((f) => f.name === fnName))?.result;
+    const r = (this.closureCallback(fnName) ?? this.functions.find((f) => f.name === fnName))
+      ?.result;
     const res: WatType = r === "f64" || r === "f32" || r === "i64" ? r : "i32";
     this.getOrCreateFuncType([elemType, elemType], res);
     return res === "i32" ? `sortcmp_${elemType}` : `sortcmp_${elemType}_${res}`;
@@ -10184,8 +10403,14 @@ ${arms.join("\n")}
     if (/^new\s/.test(e) || this.isStringExpr(e, locals)) return false;
     if (this.inferExprType(e, locals) !== "i32") return false;
     if (/^\w+$/.test(e)) {
-      return ![this.structVars, this.classVars, this.arrayVars, this.typedArrayVars, this.closureTypedVars,
-        this.interfaceVars].some((m) => m.has(e));
+      return ![
+        this.structVars,
+        this.classVars,
+        this.arrayVars,
+        this.typedArrayVars,
+        this.closureTypedVars,
+        this.interfaceVars,
+      ].some((m) => m.has(e));
     }
     const elem = e.match(/^(\w+)\s*\[[^\[\]]*\]$/)?.[1];
     if (elem) {
@@ -10257,7 +10482,13 @@ ${arms.join("\n")}
         : null;
       if (fm && ref) {
         const probe = "__fa_infer";
-        this.arrayVars.set(probe, { elemType: ref.elem, ptr: -2, length: 0, dynamic: true, isStringArr: ref.isStr });
+        this.arrayVars.set(probe, {
+          elemType: ref.elem,
+          ptr: -2,
+          length: 0,
+          dynamic: true,
+          isStringArr: ref.isStr,
+        });
         const had = locals.has(probe);
         locals.set(probe, "i32");
         try {
@@ -10271,13 +10502,21 @@ ${arms.join("\n")}
     { // an array's predicates are booleans: `xs.includes(1)`, `some`, `every` (2026-10-23, with
       // ld108: through a field's alias `b.items.includes(1)` printed `1`)
       const ap = e.match(/^(\w+)\.(includes|some|every)\s*\(([\s\S]*)\)$/);
-      if (ap && parenDepthNeverNegative(ap[3]!) && (this.arrayVars.has(ap[1]!) || this.isModuleGlobalArr(ap[1]!))) {
+      if (
+        ap && parenDepthNeverNegative(ap[3]!) &&
+        (this.arrayVars.has(ap[1]!) || this.isModuleGlobalArr(ap[1]!))
+      ) {
         return "bool";
       }
     }
     { // `.length` of an array method's new array (ld105): an i32, whatever the elements are
-      const al = e.match(/^(\w+)\.(filter|map|slice|concat|reverse|sort|fill|flat|flatMap)\s*\(([\s\S]*)\)\.length$/);
-      if (al && parenDepthNeverNegative(al[3]!) && (this.arrayVars.has(al[1]!) || this.isModuleGlobalArr(al[1]!))) {
+      const al = e.match(
+        /^(\w+)\.(filter|map|slice|concat|reverse|sort|fill|flat|flatMap)\s*\(([\s\S]*)\)\.length$/,
+      );
+      if (
+        al && parenDepthNeverNegative(al[3]!) &&
+        (this.arrayVars.has(al[1]!) || this.isModuleGlobalArr(al[1]!))
+      ) {
         return "i32";
       }
     }
@@ -10306,8 +10545,12 @@ ${arms.join("\n")}
     // printed an f64 sum through the i32 printer, an invalid module (ld61, 2026-10-20)
     {
       const redM = e.match(/^(\w+)\.reduce(?:Right)?\s*\(([\s\S]*)\)$/);
-      const redI = redM && parenDepthNeverNegative(redM[2]!) ? this.arrayVars.get(redM[1]!) : undefined;
-      if (redI && !redI.isStringArr && ["i32", "i64", "f64", "f32"].includes(redI.elemType)) return redI.elemType;
+      const redI = redM && parenDepthNeverNegative(redM[2]!)
+        ? this.arrayVars.get(redM[1]!)
+        : undefined;
+      if (redI && !redI.isStringArr && ["i32", "i64", "f64", "f32"].includes(redI.elemType)) {
+        return redI.elemType;
+      }
     }
     // A tuple element `t[N]` → its field's type (`${mix[0]}` of a `[string, f64]` printed the
     // string's pointer, found with ld76, 2026-10-22)
@@ -10319,7 +10562,9 @@ ${arms.join("\n")}
     const bracketId = e.match(/^(\w+)\[/)?.[1];
     // An element's `.length` (a row, a string element) is an i32, not the element type (ld55,
     // 2026-10-20: `m[0].length` of an f64[][] was typed f64)
-    if (bracketId && this.arrayVars.has(bracketId) && /^\w+(?:\s*\[[^\[\]]*\])+\.length$/.test(e)) return "i32";
+    if (bracketId && this.arrayVars.has(bracketId) && /^\w+(?:\s*\[[^\[\]]*\])+\.length$/.test(e)) {
+      return "i32";
+    }
     if (bracketId && this.arrayVars.has(bracketId)) {
       const arrI = this.arrayVars.get(bracketId)!;
       if (arrI.isStringArr || arrI.elemType === "string") return "string";
@@ -10621,7 +10866,9 @@ ${prefixed}
     // the quiet probe's failure is handled here, not a failure of the caller's result
     this.quietStringFailures = qsfMark;
     // not a string-building form: emitStringPtrLen's own diagnostic says what it is
-    if (!(t.startsWith("`") || this.isStringExpr(t, locals))) return this.emitStringPtrLen(t, locals);
+    if (!(t.startsWith("`") || this.isStringExpr(t, locals))) {
+      return this.emitStringPtrLen(t, locals);
+    }
     return `(block (result i32) ${this.emitStringAssign(temp, t, locals)} ` +
       `(local.get $${temp}_ptr)) (local.get $${temp}_len)`;
   }
@@ -10679,13 +10926,14 @@ ${prefixed}
       const isNullLit = (b: string) => b.trim() === "null" || b.trim() === "undefined";
       const strOrNull = (b: string) => isNullLit(b) || this.isStringExpr(b, locals);
       if (
-        tern && strOrNull(tern[1]) && strOrNull(tern[2]) && !(isNullLit(tern[1]) && isNullLit(tern[2]))
+        tern && strOrNull(tern[1]) && strOrNull(tern[2]) &&
+        !(isNullLit(tern[1]) && isNullLit(tern[2]))
       ) {
         const branch = (b: string) =>
           isNullLit(b) ? "(i32.const 0) (i32.const 0)" : this.emitStringPtrLen(b, locals);
-        return `(if (result i32 i32) ${this.emitCond(tern[0], locals)} (then ${branch(tern[1])}) (else ${
-          branch(tern[2])
-        }))`;
+        return `(if (result i32 i32) ${this.emitCond(tern[0], locals)} (then ${
+          branch(tern[1])
+        }) (else ${branch(tern[2])}))`;
       }
     }
     // `n.toString()` of a number or boolean is `String(n)` (ld08's value form: as an argument or in
@@ -10720,7 +10968,8 @@ ${prefixed}
               ? this.nullableVarInnerType.get(arg)
               : this.fieldOfExpr(arg, locals)?.type) ?? "i32",
           );
-          const val = t === "f64" ? `(call $__f64_to_new_str ${this.emitExpr(arg, locals, "f64")})`
+          const val = t === "f64"
+            ? `(call $__f64_to_new_str ${this.emitExpr(arg, locals, "f64")})`
             : this.inferExprType(arg, locals) === "bool"
             ? `(call $__bool_to_new_str ${this.emitExpr(arg, locals, "i32")})`
             : `(call $__i32_to_new_str ${this.emitExpr(arg, locals, "i32")})`;
@@ -10792,10 +11041,14 @@ ${prefixed}
     {
       const tm = expr.match(/^(\w+)\[(\d+)\]$/);
       const sv = tm ? this.structVars.get(tm[1]!) : undefined;
-      const f = tm && sv && sv.def.fields.every((x) => /^_\d+$/.test(x.name)) ? sv.def.fields[+tm[2]!] : undefined;
+      const f = tm && sv && sv.def.fields.every((x) => /^_\d+$/.test(x.name))
+        ? sv.def.fields[+tm[2]!]
+        : undefined;
       if (sv && f?.type === "string") {
         const baseWat = sv.ptr < 0 ? `(local.get $${tm![1]})` : `(i32.const ${sv.ptr})`;
-        return `(i32.load offset=${f.offset} ${baseWat}) (i32.load offset=${f.offset + 4} ${baseWat})`;
+        return `(i32.load offset=${f.offset} ${baseWat}) (i32.load offset=${
+          f.offset + 4
+        } ${baseWat})`;
       }
     }
     // Struct string field: p.fieldName where p is a struct/class var with a string-typed field
@@ -10891,7 +11144,9 @@ ${prefixed}
       const [, arrN, idxRaw] = strArrBracket;
       const arrInfoSA = this.arrayVars.get(arrN);
       // (one index of a 2D string array is a ROW, not text: ld94)
-      if (arrInfoSA && !arrInfoSA.is2D && (arrInfoSA.isStringArr || arrInfoSA.elemType === "string")) {
+      if (
+        arrInfoSA && !arrInfoSA.is2D && (arrInfoSA.isStringArr || arrInfoSA.elemType === "string")
+      ) {
         const idxWat = this.emitArrayIndex(idxRaw.trim(), locals);
         const baseWat = (arrInfoSA.ptr === -1 || arrInfoSA.ptr === -2 || arrInfoSA.dynamic)
           ? this.arrGetWat(arrN)
@@ -10930,7 +11185,9 @@ ${prefixed}
     // 2026-10-22: refused)
     {
       const subM = expr.match(/^(.+)\.substring\s*\(([\s\S]*)\)$/);
-      const subRecv = subM && parenDepthNeverNegative(subM[2]!) ? this.stringReceiverParts(subM[1]!, locals) : null;
+      const subRecv = subM && parenDepthNeverNegative(subM[2]!)
+        ? this.stringReceiverParts(subM[1]!, locals)
+        : null;
       if (subM && subRecv) {
         this.needsStringOpHelpers = true;
         this.needsStrSubstring = true;
@@ -11131,15 +11388,21 @@ ${prefixed}
       const mc = expr.endsWith(")") ? this.splitLastMethodCall(expr) : null;
       const cls = mc ? this.classOfExpr(mc.receiver) : undefined;
       const fnName = cls ? this.resolveMethodFunc(cls, mc!.method) : null;
-      const strFn = fnName ? this.functions.find((f) => f.name === fnName && f.result === "string") : undefined;
+      const strFn = fnName
+        ? this.functions.find((f) => f.name === fnName && f.result === "string")
+        : undefined;
       if (mc && strFn && parenDepthNeverNegative(mc.args)) {
         const argList = mc.args.trim() ? this.splitArgs(mc.args.trim()) : [];
         const watArgs = argList.map((a, i) => {
           const p = strFn.params[i + 1];
-          return p?.type === "string" ? this.emitStringArg(a, locals) : this.emitExpr(a.trim(), locals, p?.type ?? "i32");
+          return p?.type === "string"
+            ? this.emitStringArg(a, locals)
+            : this.emitExpr(a.trim(), locals, p?.type ?? "i32");
         });
         const recvWat = this.emitExpr(mc.receiver, locals, "i32");
-        return `(call $${fnName} ${[recvWat, ...watArgs].join(" ")}) (global.get $__str_ret_ptr) (global.get $__str_ret_len)`;
+        return `(call $${fnName} ${
+          [recvWat, ...watArgs].join(" ")
+        }) (global.get $__str_ret_ptr) (global.get $__str_ret_len)`;
       }
     }
     // Sentinel: this string form is unsupported. Callers that recover gracefully wrap the call in
@@ -11303,7 +11566,9 @@ ${prefixed}
     // (ld54–ld57, 2026-10-20). f64 → i32 is not guessed here (truncation is the caller's choice).
     // Only a NUMBER: a string's, struct's or row's i32 is a pointer (`Number(s)` printed `260`;
     // `const t: { a: i32 } = recs[1]` asks for f64 and stores the pointer).
-    if (have === "i32" && want === "f64" && this.isI32Number(raw, locals)) return `(f64.convert_i32_s ${wat})`;
+    if (have === "i32" && want === "f64" && this.isI32Number(raw, locals)) {
+      return `(f64.convert_i32_s ${wat})`;
+    }
     if (!have || have === want || (have !== "f32" && want !== "f32")) return wat;
     const CONV: Record<string, string> = {
       "f32>f64": "f64.promote_f32",
@@ -11383,7 +11648,9 @@ ${prefixed}
     // `g(2.5, 4)` through a function variable went to the i32 printer: an invalid module (ld98,
     // found with ld78, 2026-10-22).
     if (op === "call_indirect") {
-      return num(wat.trimStart().match(/^\(call_indirect\s+\(type\s+\$ftype_[\w]*?_?r_(\w+)\)/)?.[1]);
+      return num(
+        wat.trimStart().match(/^\(call_indirect\s+\(type\s+\$ftype_[\w]*?_?r_(\w+)\)/)?.[1],
+      );
     }
     const typed = op.match(/^(i32|i64|f32|f64)\.(\w+)/);
     // A comparison yields i32 (`f32.lt`); the WHOLE name, so `f32.neg` / `f64.nearest` stay float.
@@ -11417,16 +11684,22 @@ ${prefixed}
         const { name, op, pre, t, isLocal } = inc;
         const get = isLocal ? `(local.get $${name})` : `(global.get $${name})`;
         // an i32's step is checked at the type's limit (sw119)
-        const nv = t === "i32" ? this.i32Step(op, get) : `(${t}.${op === "++" ? "add" : "sub"} ${get} (${t}.const 1))`;
+        const nv = t === "i32"
+          ? this.i32Step(op, get)
+          : `(${t}.${op === "++" ? "add" : "sub"} ${get} (${t}.const 1))`;
         const set = isLocal ? `(local.set $${name} ${nv})` : `(global.set $${name} ${nv})`;
-        if (pre) return isLocal ? `(local.tee $${name} ${nv})` : `(block (result ${t}) ${set} ${get})`;
+        if (pre) {
+          return isLocal ? `(local.tee $${name} ${nv})` : `(block (result ${t}) ${set} ${get})`;
+        }
         return `(block (result ${t}) ${get} ${set})`;
       }
     }
     // ld64: nullPrintRewrite's test of a nullable string local, `null` = the 0 pointer
     {
       const strNull = expr.match(/^__strnull\((\w+)\)$/);
-      if (strNull && locals.get(strNull[1]!) === "string") return `(i32.eqz (local.get $${strNull[1]}_ptr))`;
+      if (strNull && locals.get(strNull[1]!) === "string") {
+        return `(i32.eqz (local.get $${strNull[1]}_ptr))`;
+      }
     }
     // `.length` of a string-valued CALL (`s.toUpperCase().length`): the string's len, through the
     // shared $__str_op pair. It was refused here, and in console.log a sum with it printed `2` for
@@ -11445,16 +11718,21 @@ ${prefixed}
         ? lenM0
         : null;
       let recv = lenM?.[1] ?? "";
-      while (recv.startsWith("(") && recv.endsWith(")") && parenDepthNeverNegative(recv.slice(1, -1))) {
+      while (
+        recv.startsWith("(") && recv.endsWith(")") && parenDepthNeverNegative(recv.slice(1, -1))
+      ) {
         recv = recv.slice(1, -1).trim();
       }
       if (lenM && parenDepthNeverNegative(lenM[1]!) && this.isStringExpr(recv, locals)) {
-        const asNum = (w: string) => defaultType === "f64" || defaultType === "f32" ? `(f64.convert_i32_s ${w})` : w;
+        const asNum = (w: string) =>
+          defaultType === "f64" || defaultType === "f32" ? `(f64.convert_i32_s ${w})` : w;
         const pl = this.quietEmit(() => this.emitStringPtrLen(recv, locals));
         locals.set("__str_op_ptr", "i32");
         locals.set("__str_op_len", "i32");
         if (pl !== "(i32.const 0) (i32.const 0)") {
-          return asNum(`(block (result i32) ${pl} (local.set $__str_op_len) (drop) (local.get $__str_op_len))`);
+          return asNum(
+            `(block (result i32) ${pl} (local.set $__str_op_len) (drop) (local.get $__str_op_len))`,
+          );
         }
         const mark = this.diagnostics.length;
         const assign = this.quietEmit(() => this.emitStringAssign("__str_op", recv, locals));
@@ -11738,7 +12016,10 @@ ${prefixed}
             })`;
             this.d3Reported.add(w);
             this.diagnostics.push(
-              implicitTruncDiagnostic(this.d3Stmt || expr, `'as ${tt}' on an 'any': unbox with 'as f64'`),
+              implicitTruncDiagnostic(
+                this.d3Stmt || expr,
+                `'as ${tt}' on an 'any': unbox with 'as f64'`,
+              ),
             );
             return w;
           }
@@ -11854,7 +12135,9 @@ ${prefixed}
     // receiver, so a string's `s.slice(1).length` is not taken; and not over an arrow still in
     // the text (one inside a template's `${…}` is never lifted): that keeps its own refusal.
     {
-      const al = expr.match(/^(\w+)\.(filter|map|slice|concat|reverse|sort|fill|flat|flatMap)\s*\(([\s\S]*)\)\.length$/);
+      const al = expr.match(
+        /^(\w+)\.(filter|map|slice|concat|reverse|sort|fill|flat|flatMap)\s*\(([\s\S]*)\)\.length$/,
+      );
       if (
         al && parenDepthNeverNegative(al[3]!) && !al[3]!.includes("=>") &&
         (this.arrayVars.has(al[1]!) || this.isModuleGlobalArr(al[1]!))
@@ -11877,7 +12160,9 @@ ${prefixed}
       const crf = this.callResultField(expr, locals);
       if (crf && crf.field.type !== "string" && !crf.field.tupleTypeName) {
         const ptr = this.emitExpr(crf.call, locals, "i32");
-        const load = `(${memLoadOp(crf.field.type)} (i32.add ${ptr} (i32.const ${crf.field.offset})))`;
+        const load = `(${
+          memLoadOp(crf.field.type)
+        } (i32.add ${ptr} (i32.const ${crf.field.offset})))`;
         const have = watBaseType(crf.field.type), want = watBaseType(defaultType as WatType);
         if (want === "f64" && have === "i32") return `(f64.convert_i32_s ${load})`;
         return load;
@@ -11890,7 +12175,9 @@ ${prefixed}
       if (sa) {
         const lenWat = `(i32.load (i32.load ${sa.slot}))`; // length at offset 0 of the array header
         // `.length` is i32; coerce to f64 when the context (e.g. a `number` loop var comparison) wants it.
-        return watBaseType(defaultType as WatType) === "f64" ? `(f64.convert_i32_s ${lenWat})` : lenWat;
+        return watBaseType(defaultType as WatType) === "f64"
+          ? `(f64.convert_i32_s ${lenWat})`
+          : lenWat;
       }
       const siM = expr.match(/^(\w+)\.(\w+)\[([^\]]+)\]$/);
       const si = siM ? this.arrayFieldRef(siM[1], siM[2], locals) : null;
@@ -11992,12 +12279,17 @@ ${prefixed}
     // `from` defaults to the length (JavaScript's +Infinity, clamped).
     {
       const sl = expr.match(/^(\w+)\.lastIndexOf\s*\(([\s\S]+)\)$/);
-      if (sl && parenDepthNeverNegative(sl[2]!) && (locals.get(sl[1]!) === "string" || this.moduleStringConsts.has(sl[1]!))) {
+      if (
+        sl && parenDepthNeverNegative(sl[2]!) &&
+        (locals.get(sl[1]!) === "string" || this.moduleStringConsts.has(sl[1]!))
+      ) {
         this.needsStrLastIndexOf = true;
         const recv = this.stringReceiverParts(sl[1]!, locals)!;
         const la = this.splitArgs(sl[2]!.trim());
         const fromWat = la[1] ? this.emitExpr(la[1].trim(), locals, "i32") : recv.len;
-        const wat = `(call $__str_lastindexof ${recv.ptr} ${recv.len} ${this.emitStringPtrLen(la[0]!.trim(), locals)} ${fromWat})`;
+        const wat = `(call $__str_lastindexof ${recv.ptr} ${recv.len} ${
+          this.emitStringPtrLen(la[0]!.trim(), locals)
+        } ${fromWat})`;
         return defaultType === "f64" || defaultType === "f32" ? `(f64.convert_i32_s ${wat})` : wat;
       }
     }
@@ -12388,7 +12680,9 @@ ${prefixed}
         const args = sp[2]!.trim() ? this.splitArgs(sp[2]!.trim()).map((a) => a.trim()) : [];
         if (args.slice(0, 2).some((a) => /\w\s*\(|\+\+|--|[^=!<>]=(?!=)/.test(a))) {
           this.diagnostics.push(
-            `'${expr.slice(0, 60)}': splice as a value with a side-effecting start or count is not ` +
+            `'${
+              expr.slice(0, 60)
+            }': splice as a value with a side-effecting start or count is not ` +
               `supported (they are evaluated twice); compute them first.`,
           );
           return "(i32.const 0)";
@@ -12399,7 +12693,8 @@ ${prefixed}
         const arrW = this.arrGetWat(sp[1]!);
         const L = `(i32.load ${arrW})`;
         const A = args[0] ? this.emitExpr(args[0], locals, "i32") : "(i32.const 0)";
-        const S = `(select (select (i32.add ${L} ${A}) (i32.const 0) (i32.gt_s (i32.add ${L} ${A}) (i32.const 0))) ` +
+        const S =
+          `(select (select (i32.add ${L} ${A}) (i32.const 0) (i32.gt_s (i32.add ${L} ${A}) (i32.const 0))) ` +
           `(select ${A} ${L} (i32.lt_s ${A} ${L})) (i32.lt_s ${A} (i32.const 0)))`;
         const rest = `(i32.sub ${L} (local.get $__splice_s))`;
         let cnt = rest;
@@ -12449,13 +12744,18 @@ ${prefixed}
       if (arrInfo && (arrInfo.dynamic || this.isNumericArrayParam(arrInfo))) {
         const elemType = arrInfo.elemType as WatType;
         // string arrays search by TEXT (sw107)
-        if ((method === "indexOf" || method === "includes") && (arrInfo.isStringArr || elemType === "string")) {
+        if (
+          (method === "indexOf" || method === "includes") &&
+          (arrInfo.isStringArr || elemType === "string")
+        ) {
           this.dynArrHelpers.add("indexof_string");
           this.needsStringHelpers = true; // $__str_cmp; read before the dynarr helpers are emitted
           const pl = this.quietEmit(() => this.emitStringPtrLen(argsStr, locals));
           if (pl === "(i32.const 0) (i32.const 0)" && argsStr !== '""' && argsStr !== "''") {
             this.diagnostics.push(
-              `'${arrName}.${method}(${argsStr.slice(0, 40)})': search a string array with a string ` +
+              `'${arrName}.${method}(${
+                argsStr.slice(0, 40)
+              })': search a string array with a string ` +
                 `variable or literal.`,
             );
             return "(i32.const -1)";
@@ -12476,7 +12776,9 @@ ${prefixed}
           this.dynArrHelpers.add(key);
           const la = this.splitArgs(argsStr);
           const valWat = this.emitExpr(la[0]!.trim(), locals, elemType);
-          const fromWat = la[1] ? this.emitExpr(la[1].trim(), locals, "i32") : "(i32.const 2147483647)";
+          const fromWat = la[1]
+            ? this.emitExpr(la[1].trim(), locals, "i32")
+            : "(i32.const 2147483647)";
           return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${valWat} ${fromWat})`;
         }
         if (method === "includes") {
@@ -12614,9 +12916,7 @@ ${prefixed}
             return `(call $__dynarr_reduce1_${elemType}${cl} ${this.arrGetWat(arrName)} ${fnIdx})`;
           }
           const initWat = this.emitExpr(args[1].trim(), locals, elemType);
-          return `(call $__dynarr_${key} ${
-            this.arrGetWat(arrName)
-          } ${fnIdx} ${initWat})`;
+          return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${fnIdx} ${initWat})`;
         }
         return `(call $__dynarr_${key} ${this.arrGetWat(arrName)} ${fnIdx})`;
       }
@@ -12646,14 +12946,20 @@ ${prefixed}
         // reads all happen before the outer level sets it.
         if (
           !CHAIN_METHODS[chainParsed.method] &&
-          /^(?:indexOf|lastIndexOf|includes|find|reduce|every|some|findIndex|at)$/.test(chainParsed.method)
+          /^(?:indexOf|lastIndexOf|includes|find|reduce|every|some|findIndex|at)$/.test(
+            chainParsed.method,
+          )
         ) {
           const elemType = this.inferChainElemType(chainParsed.receiver, locals) as WatType | null;
           if (elemType && elemType !== "string") {
             const innerWat = this.emitExpr(chainParsed.receiver, locals, "i32");
             const saved = this.arrayVars.get("__chain_arr");
             this.arrayVars.set("__chain_arr", { elemType, ptr: -1, length: 0, dynamic: true });
-            const outer = this.emitExpr(`__chain_arr.${chainParsed.method}(${chainParsed.args})`, locals, defaultType);
+            const outer = this.emitExpr(
+              `__chain_arr.${chainParsed.method}(${chainParsed.args})`,
+              locals,
+              defaultType,
+            );
             if (saved) this.arrayVars.set("__chain_arr", saved);
             else this.arrayVars.delete("__chain_arr");
             // the element for reduce / find / at (the helpers' calls carry no type watResultType
@@ -12705,7 +13011,13 @@ ${prefixed}
         // the base's (or was refused, abstract), whatever `this` was (ld74, ld79, 2026-10-22).
         if (this.needsTagDispatch(this.currentMethodClass!, methodName)) {
           const args = argsStr ? this.splitArgs(argsStr) : [];
-          return this.emitTagDispatch(this.currentMethodClass!, methodName, `(local.get $__self)`, args, locals);
+          return this.emitTagDispatch(
+            this.currentMethodClass!,
+            methodName,
+            `(local.get $__self)`,
+            args,
+            locals,
+          );
         }
         // Phase 47: walk inheritance chain to find overriding or inherited method
         const funcName = this.resolveMethodFunc(this.currentMethodClass!, methodName) ??
@@ -12940,7 +13252,9 @@ ${prefixed}
         for (const a of args) {
           if (this.inferExprType(a, locals) === "i64") {
             this.diagnostics.push(
-              `Math.${mathFn}: a bigint argument is a TypeError in JavaScript (${a.trim().slice(0, 40)}); use wasMath's i64 / u64`,
+              `Math.${mathFn}: a bigint argument is a TypeError in JavaScript (${
+                a.trim().slice(0, 40)
+              }); use wasMath's i64 / u64`,
             );
           }
         }
@@ -13227,7 +13541,9 @@ ${prefixed}
             const ctorArgs = expr.slice(openIdx + 1, ctorEnd).trim();
             const ctorEmitted = (ctorArgs ? this.splitArgs(ctorArgs) : []).map((a, i) => {
               const pt = ctorFn?.params[i + 1]?.type ?? ("i32" as WatType);
-              return pt === "string" ? this.emitStringPtrLen(a, locals) : this.emitExpr(a, locals, pt); // ld101
+              return pt === "string"
+                ? this.emitStringPtrLen(a, locals)
+                : this.emitExpr(a, locals, pt); // ld101
             });
             const ctorCall = ctorFn
               ? `(call $${ctorName} (i32.const ${ptr}) ${ctorEmitted.join(" ")})`.trim()
@@ -13296,7 +13612,9 @@ ${prefixed}
     // `const f: Op = ops[i]; f(…)` reads it (ld95, 2026-10-22; it was "Unsupported expression")
     {
       const fe = expr.match(/^(\w+)\[([^\[\]]+)\]\s*\(([\s\S]*)\)$/);
-      const sig = fe ? (this.arrayVars.get(fe[1]!) ?? this.moduleArrayVars.get(fe[1]!))?.isFuncPtrArr : undefined;
+      const sig = fe
+        ? (this.arrayVars.get(fe[1]!) ?? this.moduleArrayVars.get(fe[1]!))?.isFuncPtrArr
+        : undefined;
       if (fe && sig && parenDepthNeverNegative(fe[3]!)) {
         const typeName = this.getOrCreateFuncType(sig.params, sig.result);
         const args = fe[3]!.trim() ? this.splitArgs(fe[3]!.trim()) : [];
@@ -13305,7 +13623,9 @@ ${prefixed}
           return pt === "string" ? this.emitStringPtrLen(a, locals) : this.emitExpr(a, locals, pt);
         });
         const idxW = this.emitArrayIndex(fe[2]!, locals);
-        const slot = `(i32.load (i32.add (i32.add ${this.arrGetWat(fe[1]!)} (i32.const 8)) (i32.shl ${idxW} (i32.const 2))))`;
+        const slot = `(i32.load (i32.add (i32.add ${
+          this.arrGetWat(fe[1]!)
+        } (i32.const 8)) (i32.shl ${idxW} (i32.const 2))))`;
         return `(call_indirect (type ${typeName}) ${[...argW, slot].join(" ")})`;
       }
     }
@@ -13322,7 +13642,9 @@ ${prefixed}
         if (fn && fn.result !== "string") {
           const recvWat = this.emitExpr(chained.receiver, locals, "i32");
           const cArgs = chained.args.trim() ? this.splitArgs(chained.args.trim()) : [];
-          const emitted = cArgs.map((a, i) => this.emitExpr(a, locals, fn.params[i + 1]?.type ?? defaultType));
+          const emitted = cArgs.map((a, i) =>
+            this.emitExpr(a, locals, fn.params[i + 1]?.type ?? defaultType)
+          );
           return `(call $${funcName} ${recvWat} ${emitted.join(" ")})`.trim();
         }
       }
@@ -13443,9 +13765,7 @@ ${prefixed}
         // Pass all normal args (none expected in pure spread call) then the array ptr
         const normalCount = fn.params.length - 1;
         const normalEmitted = fn.params.slice(0, normalCount).map((p: FuncParam, pi: number) =>
-          p.defaultValue !== undefined
-            ? this.emitDefaultArg(fn, [], pi, locals)
-            : `(i32.const 0)`
+          p.defaultValue !== undefined ? this.emitDefaultArg(fn, [], pi, locals) : `(i32.const 0)`
         );
         const arrGet4 = this.moduleGlobals.has(arrName)
           ? `(global.get $${arrName})`
@@ -13701,7 +14021,11 @@ ${prefixed}
           defaultType,
         );
       }
-      return this.convertWat(`(i32.xor ${this.emitToInt32(inner, locals)} (i32.const -1))`, "i32", defaultType);
+      return this.convertWat(
+        `(i32.xor ${this.emitToInt32(inner, locals)} (i32.const -1))`,
+        "i32",
+        defaultType,
+      );
     }
 
     // Unary - on a non-literal (e.g. -x, -(a+b))
@@ -13738,7 +14062,9 @@ ${prefixed}
           watBaseType(this.inferExprType(rhs, locals)) === "i64"
         ) {
           this.mathHelpers.add("i64_pow");
-          const w = `(call $__i64_pow ${this.emitExpr(lhs, locals, "i64")} ${this.emitExpr(rhs, locals, "i64")})`;
+          const w = `(call $__i64_pow ${this.emitExpr(lhs, locals, "i64")} ${
+            this.emitExpr(rhs, locals, "i64")
+          })`;
           return this.convertWat(w, "i64", defaultType);
         }
         this.needsMathLib38 = true;
@@ -13770,7 +14096,8 @@ ${prefixed}
           if (it === "i32" || it === "i64" || it === "f64") {
             this.logicalScratch.add(it);
             const g = `$__lor_${it}`;
-            const w = `(block (result ${it}) (global.set ${g} ${this.emitExpr(lhsQQ, locals, it)}) ` +
+            const w =
+              `(block (result ${it}) (global.set ${g} ${this.emitExpr(lhsQQ, locals, it)}) ` +
               `(if (result ${it}) (global.get $__nullable_ret_flag) (then (global.get ${g})) ` +
               `(else ${this.emitExpr(rhsQQ, locals, it)})))`;
             return this.convertWat(w, it, defaultType);
@@ -13987,7 +14314,13 @@ ${prefixed}
           const lt = this.inferExprType(lhs, locals);
           const rt = this.inferExprType(rhs, locals);
           const vt = lt === "bool" || rt === "bool" ? null : logicalValueType(lt, rt);
-          if (vt) return this.convertWat(this.emitLogicalValue(op, lhs, rhs, vt, locals), vt, defaultType);
+          if (vt) {
+            return this.convertWat(
+              this.emitLogicalValue(op, lhs, rhs, vt, locals),
+              vt,
+              defaultType,
+            );
+          }
           const scWat = this.emitLogicalBool(op, lhs, rhs, locals);
           // Result is i32 0/1; promote if the surrounding context expects a wider type.
           const ctxBase = watBaseType(defaultType as WatType);
@@ -14018,7 +14351,8 @@ ${prefixed}
           if (locals.get(varName) === "string") {
             this.needsStrNullish = true;
             this.needsStringExtHelpers = true;
-            const ptrCk = `(call $__str_is_nullish (local.get $${varName}_ptr) (local.get $${varName}_len))`;
+            const ptrCk =
+              `(call $__str_is_nullish (local.get $${varName}_ptr) (local.get $${varName}_len))`;
             return (op === "===" || op === "==") ? ptrCk : `(i32.eqz ${ptrCk})`;
           }
           // Pointer types (i32): fall through to normal i32.eq/ne which compares with 0
@@ -14044,7 +14378,8 @@ ${prefixed}
             !/^(undefined|null)$/.test(lhs.trim())) ||
           // ...and a string LITERAL on the left, `"abc" > "ab"` (ld77, 2026-10-22: the literal was
           // emitted as a number, "Unsupported expression")
-          (STRING_CMP_OPS.has(op) && /^["'`]/.test(lhs.trim()) && !/^(undefined|null)$/.test(rhs.trim()));
+          (STRING_CMP_OPS.has(op) && /^["'`]/.test(lhs.trim()) &&
+            !/^(undefined|null)$/.test(rhs.trim()));
         const _lhsLeadId = !lhs.includes(".") ? lhs.match(/^(\w+)/)?.[1] : undefined;
         // For function calls, extract the leading function name even when args contain dots.
         // E.g. "intMin(tests[i].a, tests[i].b)" → _lhsFnName = "intMin" → result type f64
@@ -14099,7 +14434,9 @@ ${prefixed}
           if (big(lhs) || big(rhs)) {
             if (op === ">>>") {
               this.diagnostics.push(
-                `'${expr.trim().slice(0, 60)}': '>>>' on a bigint is a TypeError in JavaScript; use '>>', or wasMath's i64.shrU`,
+                `'${
+                  expr.trim().slice(0, 60)
+                }': '>>>' on a bigint is a TypeError in JavaScript; use '>>', or wasMath's i64.shrU`,
               );
             }
             const L = this.emitExpr(lhs, locals, "i64"), R = this.emitExpr(rhs, locals, "i64");
@@ -14116,14 +14453,16 @@ ${prefixed}
         // so `(n as f64) === 13` compared as i32 over an f64, an invalid module (dynrt-design.md's
         // "inline `(x as f64) === lit`" gap; D3 made `as f64` the way to unbox an `any`).
         const _lhsCastM = lhs.match(/^\(?\s*[\w.]+\s+as\s+(\w+)\s*\)?$/);
-        const _lhsCastType: WatType | null = _lhsCastM && /^(i32|i64|f32|f64|number|bigint|bool|boolean)$/.test(_lhsCastM[1])
-          ? mapType(_lhsCastM[1] === "number" ? "f64" : _lhsCastM[1])
-          : null;
+        const _lhsCastType: WatType | null =
+          _lhsCastM && /^(i32|i64|f32|f64|number|bigint|bool|boolean)$/.test(_lhsCastM[1])
+            ? mapType(_lhsCastM[1] === "number" ? "f64" : _lhsCastM[1])
+            : null;
         // An equality between BOOLEANS is an i32 compare, whatever leads the left side:
         // `x < 1 === ok` took f64 from `x` over two i32 results, an invalid module (ld23,
         // 2026-10-15; the console twin is isBoolOperand).
         // Not `a || b` / `a && b`: of two numbers that is a number (sw49).
-        const _isBoolSide = (s: string) => this.inferExprType(s, locals) === "bool" && !splitTopLogical(s);
+        const _isBoolSide = (s: string) =>
+          this.inferExprType(s, locals) === "bool" && !splitTopLogical(s);
         const _boolEquality = (op === "===" || op === "!==" || op === "==" || op === "!=") &&
           (_isBoolSide(lhs) || _isBoolSide(rhs));
         // A PARENTHESISED left operand has its contents' type: `(z / 2) === (z / 2.5)` fell back to
@@ -14132,51 +14471,64 @@ ${prefixed}
         let _lhsParenType: WatType | null = null;
         {
           let inner = lhs.trim();
-          while (inner.startsWith("(") && inner.endsWith(")") && parenDepthNeverNegative(inner.slice(1, -1))) {
+          while (
+            inner.startsWith("(") && inner.endsWith(")") &&
+            parenDepthNeverNegative(inner.slice(1, -1))
+          ) {
             inner = inner.slice(1, -1).trim();
           }
           // A KNOWN float / bigint inside only: inferExprType's fallback is f64, which made
           // `((z + 5) % 7) + 6` of i32s float arithmetic (caught by the date bundle's golden).
           if (inner !== lhs.trim() && !_lhsCastType) {
-            const ids = [...inner.matchAll(/(?<![\w.$])([A-Za-z_$][\w$]*)(?![\w$(])/g)].map((m) => m[1]!);
-            const declOf = (n: string) => watBaseType((locals.get(n) ?? this.moduleGlobals.get(n)?.type) as WatType);
-            if (/(?:^|[^\w.])\d+\.\d/.test(inner) || ids.some((n) => /^f(64|32)$/.test(declOf(n) ?? ""))) {
+            const ids = [...inner.matchAll(/(?<![\w.$])([A-Za-z_$][\w$]*)(?![\w$(])/g)].map((m) =>
+              m[1]!
+            );
+            const declOf = (n: string) =>
+              watBaseType((locals.get(n) ?? this.moduleGlobals.get(n)?.type) as WatType);
+            if (
+              /(?:^|[^\w.])\d+\.\d/.test(inner) ||
+              ids.some((n) => /^f(64|32)$/.test(declOf(n) ?? ""))
+            ) {
               _lhsParenType = "f64";
             } else if (/(?:^|[^\w.])\d+n\b/.test(inner) || ids.some((n) => declOf(n) === "i64")) {
               _lhsParenType = "i64";
             }
           }
         }
-        const lhsType: WatType = alwaysI32 || _boolEquality ? "i32" : (_lhsIsStrSlice ? "string" : (_lhsCastType ?? _lhsParenType ?? _dotFieldType ??
-          (/^\w+$/.test(lhs) && locals.has(lhs)
-            ? locals.get(lhs)!
-            : /^\w+$/.test(lhs) && this.moduleGlobals.has(lhs)
-            ? this.moduleGlobals.get(lhs)!.type
-            // Array element access arr[idx]: use element type, not pointer type
-            : _lhsLeadId && lhs.includes("[") && this.arrayVars.has(_lhsLeadId)
-            ? (this.arrayVars.get(_lhsLeadId)!.isStringArr ||
-                this.arrayVars.get(_lhsLeadId)!.elemType === "string"
-              ? "string"
-              : this.arrayVars.get(_lhsLeadId)!.elemType)
-            // TypedArray element access ta[idx] (gap fix 2026-06-30): use the element type so a
-            // Float64Array element compares/arithmetics as f64 — else it fell through to the pointer's
-            // i32 type → `fa[i] === fa[j]` emitted i32.eq over f64.loads (silently truncated: 1.5===1.9→true).
-            : _lhsLeadId && lhs.includes("[") && this.typedArrayVars.has(_lhsLeadId)
-            ? (this.typedArrayVars.get(_lhsLeadId)!.elemType as WatType)
-            // Fix 5: closure-typed variable call (e.g. r1()) → use the closure's return type, not the i32 pointer type
-            : _lhsFnName && this.closureTypedVars.has(_lhsFnName)
-            ? (this.closureTypedVars.get(_lhsFnName)!.result ?? "f64") as WatType
-            : _lhsLeadId && locals.has(_lhsLeadId)
-            ? locals.get(_lhsLeadId)!
-            : _lhsLeadId && this.moduleGlobals.has(_lhsLeadId)
-            ? this.moduleGlobals.get(_lhsLeadId)!.type
-            : _lhsFnResult ?? defaultType)));
+        const lhsType: WatType = alwaysI32 || _boolEquality
+          ? "i32"
+          : (_lhsIsStrSlice ? "string" : (_lhsCastType ?? _lhsParenType ?? _dotFieldType ??
+            (/^\w+$/.test(lhs) && locals.has(lhs)
+              ? locals.get(lhs)!
+              : /^\w+$/.test(lhs) && this.moduleGlobals.has(lhs)
+              ? this.moduleGlobals.get(lhs)!.type
+              // Array element access arr[idx]: use element type, not pointer type
+              : _lhsLeadId && lhs.includes("[") && this.arrayVars.has(_lhsLeadId)
+              ? (this.arrayVars.get(_lhsLeadId)!.isStringArr ||
+                  this.arrayVars.get(_lhsLeadId)!.elemType === "string"
+                ? "string"
+                : this.arrayVars.get(_lhsLeadId)!.elemType)
+              // TypedArray element access ta[idx] (gap fix 2026-06-30): use the element type so a
+              // Float64Array element compares/arithmetics as f64 — else it fell through to the pointer's
+              // i32 type → `fa[i] === fa[j]` emitted i32.eq over f64.loads (silently truncated: 1.5===1.9→true).
+              : _lhsLeadId && lhs.includes("[") && this.typedArrayVars.has(_lhsLeadId)
+              ? (this.typedArrayVars.get(_lhsLeadId)!.elemType as WatType)
+              // Fix 5: closure-typed variable call (e.g. r1()) → use the closure's return type, not the i32 pointer type
+              : _lhsFnName && this.closureTypedVars.has(_lhsFnName)
+              ? (this.closureTypedVars.get(_lhsFnName)!.result ?? "f64") as WatType
+              : _lhsLeadId && locals.has(_lhsLeadId)
+              ? locals.get(_lhsLeadId)!
+              : _lhsLeadId && this.moduleGlobals.has(_lhsLeadId)
+              ? this.moduleGlobals.get(_lhsLeadId)!.type
+              : _lhsFnResult ?? defaultType)));
 
         // String comparison: route through $__str_cmp instead of string.eq / string.lt, etc.
         if (lhsType === "string" && STRING_CMP_OPS.has(op)) {
           // A string against `undefined` / `null`: no text, or an out-of-range `s[i]`'s
           // "undefined" (sw71, 2026-10-15). Compared as text, `s[10] === undefined` was false.
-          const nullishSide = [lhs, rhs].findIndex((x) => x.trim() === "undefined" || x.trim() === "null");
+          const nullishSide = [lhs, rhs].findIndex((x) =>
+            x.trim() === "undefined" || x.trim() === "null"
+          );
           if (nullishSide !== -1 && /^(===|==|!==|!=)$/.test(op)) {
             const other = nullishSide === 0 ? rhs : lhs;
             this.needsStrNullish = true;
@@ -14190,8 +14542,12 @@ ${prefixed}
           const lhsLit1 = lhs.match(/^["'](.*)["']$/);
           const rhsSubM = rhs.match(/^(\w+)\[([^\]]+)\]$/);
           // a float index refused here too (the owner's rule; checkStringIndex)
-          if (lhsSubM && locals.get(lhsSubM[1]) === "string") this.checkStringIndex(lhs, lhsSubM[2], locals);
-          if (rhsSubM && locals.get(rhsSubM[1]) === "string") this.checkStringIndex(rhs, rhsSubM[2], locals);
+          if (lhsSubM && locals.get(lhsSubM[1]) === "string") {
+            this.checkStringIndex(lhs, lhsSubM[2], locals);
+          }
+          if (rhsSubM && locals.get(rhsSubM[1]) === "string") {
+            this.checkStringIndex(rhs, rhsSubM[2], locals);
+          }
           if (
             lhsSubM && locals.get(lhsSubM[1]) === "string" && rhsLit1 && rhsLit1[1].length === 1
           ) {
@@ -14254,7 +14610,8 @@ ${prefixed}
         // `ia[1] + fa[1]` was i32.add and truncated the float (sw101, 2026-10-19). Declared types
         // only, so inferExprType's f64 fallback still does not count.
         const rhsDeclFloat = (/^\w+\[[^\]]+\]$/.test(rhsT) &&
-          (this.typedArrayVars.has(rhsT.match(/^\w+/)![0]) || this.arrayVars.has(rhsT.match(/^\w+/)![0])) &&
+          (this.typedArrayVars.has(rhsT.match(/^\w+/)![0]) ||
+            this.arrayVars.has(rhsT.match(/^\w+/)![0])) &&
           (rhsBase === "f64" || rhsBase === "f32")) ||
           (/^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(rhsT) &&
             /^f(64|32)$/.test(this.fieldOfExpr(rhsT, locals)?.type ?? ""));
@@ -14309,7 +14666,14 @@ ${prefixed}
         // sw119: a COMPARISON of i32s where a side is a `+ - *` chain compares JavaScript's exact
         // values: `big + 1 > 0` of an i32 max is true (wrapped it was false; checked it would throw)
         const F64_CMP: Record<string, string> = {
-          "<": "lt", ">": "gt", "<=": "le", ">=": "ge", "==": "eq", "===": "eq", "!=": "ne", "!==": "ne",
+          "<": "lt",
+          ">": "gt",
+          "<=": "le",
+          ">=": "ge",
+          "==": "eq",
+          "===": "eq",
+          "!=": "ne",
+          "!==": "ne",
         };
         if (
           baseType === "i32" && !alwaysI32 && F64_CMP[op] && !this.i32ChainPending &&
@@ -14637,7 +15001,9 @@ ${prefixed}
     if (e === "undefined") return `(i32.const 2)`;
     // A nullable STRING local is null when it holds no text (a string assignment never sets its
     // `__null`; `c === undefined` of `s.at(10)` was false, ld53, 2026-10-20)
-    if (/^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string" && locals.get(e) === "string") {
+    if (
+      /^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string" && locals.get(e) === "string"
+    ) {
       this.needsStrNullish = true;
       this.needsStringExtHelpers = true;
       return `(call $__str_is_nullish (local.get $${e}_ptr) (local.get $${e}_len))`;
@@ -14649,7 +15015,9 @@ ${prefixed}
     }
     // A STRING field is null when its pointer is 0 (sw120: `null` is stored as (0, 0))
     {
-      const f = /^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(e) ? this.fieldOfExpr(e, locals) : undefined;
+      const f = /^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)+$/.test(e)
+        ? this.fieldOfExpr(e, locals)
+        : undefined;
       if (f?.type === "string") {
         const pl = this.quietEmit(() => this.emitStringPtrLen(e, locals));
         if (pl !== "(i32.const 0) (i32.const 0)") return `(i32.eqz ${splitTwoWatExprs(pl)[0]})`;
@@ -14658,7 +15026,11 @@ ${prefixed}
     const oob = this.arrOobTestWat(e, locals);
     if (oob !== undefined) {
       // an out-of-range read is undefined: kind 2
-      return oob === "(i32.const 0)" ? oob : oob === "(i32.const 1)" ? `(i32.const 2)` : `(i32.shl ${oob} (i32.const 1))`;
+      return oob === "(i32.const 0)"
+        ? oob
+        : oob === "(i32.const 1)"
+        ? `(i32.const 2)`
+        : `(i32.shl ${oob} (i32.const 1))`;
     }
     return this.nullFlagLoad(e, locals);
   }
@@ -14739,12 +15111,17 @@ ${prefixed}
     if (!/^(?:this|\w+)(?:\[[^\]]+\])?(?:\.\w+)*$/.test(e) || e === "null" || e === "undefined") {
       return undefined;
     }
-    const t = /^\w+$/.test(e) ? this.nullableVarInnerType.get(e) : this.fieldOfExpr(e, locals)?.type;
+    const t = /^\w+$/.test(e)
+      ? this.nullableVarInnerType.get(e)
+      : this.fieldOfExpr(e, locals)?.type;
     // a nullable string LOCAL is null when its pointer is 0 (ld64); an out-of-range `s.at(i)`'s
     // "undefined" text is not null here, it prints as itself
-    if (t === "string" && /^\w+$/.test(e) && locals.get(e) === "string") return `(i32.eqz (local.get $${e}_ptr))`;
+    if (t === "string" && /^\w+$/.test(e) && locals.get(e) === "string") {
+      return `(i32.eqz (local.get $${e}_ptr))`;
+    }
     // a `string | null` FIELD prints `null` too (sw120: its null is the 0 pointer, printed "")
-    const nullableStrField = t === "string" && !/^\w+$/.test(e) && this.fieldOfExpr(e, locals)?.nullable;
+    const nullableStrField = t === "string" && !/^\w+$/.test(e) &&
+      this.fieldOfExpr(e, locals)?.nullable;
     if (t !== "i32" && t !== "f64" && t !== "bool" && !nullableStrField) return undefined;
     return this.nullTestWat(e, locals);
   }
@@ -14781,7 +15158,9 @@ ${prefixed}
       return `(${e} === undefined) ? "undefined" : ${shown}`;
     }
     // a nullable STRING prints its text (the template printed its pointer as a number: ld64)
-    if (/^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string") return `__strnull(${e}) ? "null" : ${e}`;
+    if (/^\w+$/.test(e) && this.nullableVarInnerType.get(e) === "string") {
+      return `__strnull(${e}) ? "null" : ${e}`;
+    }
     // a value that knows its kind prints `undefined` for undefined (it printed `null`, sw123);
     // a field's flag word only says "nullish" and prints `null`, as before
     const t = this.nullTestWat(e, locals);
@@ -14862,15 +15241,30 @@ ${prefixed}
     const t = watBaseType(to === "never" ? "i32" : to);
     if (t === from) return w;
     if (from === "i32") {
-      return t === "f64" ? `(f64.convert_i32_s ${w})` : t === "i64" ? `(i64.extend_i32_s ${w})`
-        : t === "f32" ? `(f32.convert_i32_s ${w})` : w;
+      return t === "f64"
+        ? `(f64.convert_i32_s ${w})`
+        : t === "i64"
+        ? `(i64.extend_i32_s ${w})`
+        : t === "f32"
+        ? `(f32.convert_i32_s ${w})`
+        : w;
     }
     if (from === "f64") {
-      return t === "i32" ? `(i32.trunc_f64_s ${w})` : t === "i64" ? `(i64.trunc_f64_s ${w})`
-        : t === "f32" ? `(f32.demote_f64 ${w})` : w;
+      return t === "i32"
+        ? `(i32.trunc_f64_s ${w})`
+        : t === "i64"
+        ? `(i64.trunc_f64_s ${w})`
+        : t === "f32"
+        ? `(f32.demote_f64 ${w})`
+        : w;
     }
-    return t === "i32" ? `(i32.wrap_i64 ${w})` : t === "f64" ? `(f64.convert_i64_s ${w})`
-      : t === "f32" ? `(f32.convert_i64_s ${w})` : w;
+    return t === "i32"
+      ? `(i32.wrap_i64 ${w})`
+      : t === "f64"
+      ? `(f64.convert_i64_s ${w})`
+      : t === "f32"
+      ? `(f32.convert_i64_s ${w})`
+      : w;
   }
 
   /** True if `expr` has a binary operator at top level (outside brackets and literals). A unary
@@ -15041,7 +15435,9 @@ ${prefixed}
     if ((tgtBase === "i32" || tgtBase === "i64") && (srcBase === "f64" || srcBase === "f32")) {
       const w = `(${tgtBase}.trunc_${srcBase}_s ${innerWat})`;
       this.d3Reported.add(w);
-      this.diagnostics.push(implicitTruncDiagnostic(this.d3Stmt || inner, `'as ${tgtBase}' on a float`));
+      this.diagnostics.push(
+        implicitTruncDiagnostic(this.d3Stmt || inner, `'as ${tgtBase}' on a float`),
+      );
       return w;
     }
     if (tgtBase === "i32" && srcBase === "f64") return `(i32.trunc_f64_s ${innerWat})`;
@@ -15119,7 +15515,9 @@ ${prefixed}
       if (/^return\b/.test(line) && this.finallyStack.length > 0) {
         if (funcResult === "string" && this.finallyCrossed(-1).includes("$__str_ret_")) {
           this.diagnostics.push(
-            `'${line.trim().slice(0, 60)}': a string returned through a finally that itself calls a ` +
+            `'${
+              line.trim().slice(0, 60)
+            }': a string returned through a finally that itself calls a ` +
               `string-returning function is not supported (the finally would overwrite the ` +
               `returned string). Store the result in a variable and return it after the try.`,
           );
@@ -15192,7 +15590,10 @@ ${prefixed}
             const wm = parent.arg.match(/^\$__wm_([a-z0-9]+)_(\w+)$/);
             const userName = parent.arg && (!!wm || !/^\$(__|mathlib_|dynrt_)/.test(parent.arg));
             const shown = wm ? `${wm[1]}.${wm[2]}` : parent.arg.slice(1);
-            if ((parent.head === "local.set" || parent.head === "local.tee" || parent.head === "global.set") && userName) {
+            if (
+              (parent.head === "local.set" || parent.head === "local.tee" ||
+                parent.head === "global.set") && userName
+            ) {
               report(text, `stored into '${shown}'`);
             } else if (parent.head === "return") {
               report(text, "returned from an integer function");
@@ -15238,7 +15639,9 @@ ${prefixed}
     ];
     const pl = this.quietEmit(() => this.emitStringPtrLen(r, locals));
     if (pl !== "(i32.const 0) (i32.const 0)" || r === '""' || r === "''") {
-      return [pl, `(local.set $__str_op_len)`, `(local.set $__str_op_ptr)`, ...stores].join("\n      ");
+      return [pl, `(local.set $__str_op_len)`, `(local.set $__str_op_ptr)`, ...stores].join(
+        "\n      ",
+      );
     }
     // a concatenation or a template: emitStringAssign builds those, into the same $__str_op pair
     return [this.emitStringAssign("__str_op", r, locals), ...stores].join("\n      ");
@@ -15268,7 +15671,9 @@ ${prefixed}
         } finally {
           this.inNullFieldStore = false;
         }
-        return `${valStmt}\n      ${flagLoad.replace(/^\(i32\.load/, "(i32.store").slice(0, -1)} ${flagWat})`;
+        return `${valStmt}\n      ${
+          flagLoad.replace(/^\(i32\.load/, "(i32.store").slice(0, -1)
+        } ${flagWat})`;
       }
     }
     // GC Part 2: `__free(ptr, size);` intrinsic — return a block to the free list (used by the GC + tests).
@@ -15429,7 +15834,9 @@ ${prefixed}
         if (tern && (tern[1].trim().startsWith("[") || tern[2].trim().startsWith("["))) {
           return `(if ${this.emitCond(tern[0], locals)} (then ${
             this.emitStatementCore(`return ${tern[1].trim()};`, locals, funcResult)
-          }) (else ${this.emitStatementCore(`return ${tern[2].trim()};`, locals, funcResult)}))\n      (unreachable)`;
+          }) (else ${
+            this.emitStatementCore(`return ${tern[2].trim()};`, locals, funcResult)
+          }))\n      (unreachable)`;
         }
       }
       // Phase 13 (#13 async): inside a promise-returning async fn, `return expr` resolves the
@@ -15477,7 +15884,9 @@ ${prefixed}
         // A nullable SOURCE (a nullable local / global, a flagged field) passes its own null on:
         // the result flag is 1 for a value, so it is NOT the source's null (sw51).
         const srcNull = this.nullTestWat(expr, locals);
-        return `(global.set $__nullable_ret_flag ${srcNull ? `(i32.eqz ${srcNull})` : "(i32.const 1)"})\n      (return ${retWat})`;
+        return `(global.set $__nullable_ret_flag ${
+          srcNull ? `(i32.eqz ${srcNull})` : "(i32.const 1)"
+        })\n      (return ${retWat})`;
       }
       // return { key: val, ... } — interface/struct object literal: malloc struct and store fields
       if (expr.startsWith("{") && this.currentFuncResultTsName) {
@@ -15588,7 +15997,8 @@ ${prefixed}
                         );
                         if (nflag) {
                           stmts.push(
-                            `(i32.store offset=${nfield.nullFlagOffset!} (local.get $__nested_ptr) ${nflag})`,
+                            `(i32.store offset=${nfield
+                              .nullFlagOffset!} (local.get $__nested_ptr) ${nflag})`,
                           );
                         }
                       }
@@ -15795,7 +16205,8 @@ ${prefixed}
         // A choice of functions, `c ? tri : dbl`: each branch is a function's table index, which
         // emitExpr gives a function NAME used as a value (ld01, 2026-10-15).
         const fnTern = this.splitTernaryTop(fullInitExpr);
-        const isFnName = (s: string) => /^\w+$/.test(s.trim()) && this.functions.some((f) => f.name === s.trim());
+        const isFnName = (s: string) =>
+          /^\w+$/.test(s.trim()) && this.functions.some((f) => f.name === s.trim());
         if (fnTern && isFnName(fnTern[1]) && isFnName(fnTern[2])) {
           return `(local.set $${funcTypeDecl[1]} ${this.emitExpr(fullInitExpr, locals, "i32")})`;
         }
@@ -15807,7 +16218,9 @@ ${prefixed}
         // Any other initialiser was DROPPED: the local stayed 0, and a call through it reached
         // table slot 0, whatever function that was (sw72, 2026-10-15).
         this.diagnostics.push(
-          `Unsupported function-typed initialiser: ${line.trim().slice(0, 80)} (init: ${fullInitExpr.slice(0, 60)})`,
+          `Unsupported function-typed initialiser: ${line.trim().slice(0, 80)} (init: ${
+            fullInitExpr.slice(0, 60)
+          })`,
         );
       }
       return "";
@@ -15955,7 +16368,10 @@ ${prefixed}
       // Not a literal: the pointer of the array the right side names or returns (`= m`,
       // `= rows`, `= mk()`). It was laid out as a literal with no rows (ld11, ld12, sw31).
       if (info?.is2D && !info.rows) {
-        return this.arrSetWat(arr2DLetMatch[1], this.emitExpr(arr2DLetMatch[2]!.trim(), locals, "i32"));
+        return this.arrSetWat(
+          arr2DLetMatch[1],
+          this.emitExpr(arr2DLetMatch[2]!.trim(), locals, "i32"),
+        );
       }
     }
 
@@ -16136,7 +16552,9 @@ ${prefixed}
       const ds = closeIdx !== -1 ? this.destructSource(after, locals) : null;
       if (ds) {
         const pattern = line.slice(openIdx, closeIdx + 1);
-        return [ds.pre, ...this.emitDestructurePattern(pattern, ds.baseWat, ds.def, locals)].filter(Boolean)
+        return [ds.pre, ...this.emitDestructurePattern(pattern, ds.baseWat, ds.def, locals)].filter(
+          Boolean,
+        )
           .join("\n      ");
       }
     }
@@ -16165,7 +16583,9 @@ ${prefixed}
         if (runtimeInits) {
           for (const [fieldName, exprStr] of Object.entries(runtimeInits)) {
             const field = sv.def.fields.find((f) => f.name === fieldName);
-            if (field) stmts.push(...this.fieldStore(field, exprStr, `(i32.const ${sv.ptr})`, locals));
+            if (field) {
+              stmts.push(...this.fieldStore(field, exprStr, `(i32.const ${sv.ptr})`, locals));
+            }
           }
         }
         return stmts.join("\n      ");
@@ -16215,7 +16635,9 @@ ${prefixed}
       const ds = closeIdx !== -1 ? this.destructSource(after, locals) : null;
       if (ds) {
         const pattern = line.slice(openIdx, closeIdx + 1);
-        return [ds.pre, ...this.emitDestructurePattern(pattern, ds.baseWat, ds.def, locals)].filter(Boolean)
+        return [ds.pre, ...this.emitDestructurePattern(pattern, ds.baseWat, ds.def, locals)].filter(
+          Boolean,
+        )
           .join("\n      ");
       }
       if (closeIdx !== -1 && eqM) {
@@ -16317,7 +16739,9 @@ ${prefixed}
             return this.emitStringAssign(nlVarName, nlInitExpr, locals);
           }
           // Value type: clear value, set null flag (2 for undefined, sw123)
-          return `(local.set $${nlVarName}__null (i32.const ${nlInitExpr === "undefined" ? 2 : 1}))`;
+          return `(local.set $${nlVarName}__null (i32.const ${
+            nlInitExpr === "undefined" ? 2 : 1
+          }))`;
         }
         if (nlInner === "string") {
           locals.set(nlVarName, "string");
@@ -16385,9 +16809,9 @@ ${prefixed}
       if (this.currentSharedMutableCaptures.has(varName)) {
         const bt = this.boxType(varName);
         const initWat = this.emitExpr(initExpr, locals, bt);
-        return `(local.set $${varName} (call $__malloc (i32.const ${bt === "f64" ? 8 : 4})))\n      ${
-          this.boxStore(varName, initWat)
-        }`;
+        return `(local.set $${varName} (call $__malloc (i32.const ${
+          bt === "f64" ? 8 : 4
+        })))\n      ${this.boxStore(varName, initWat)}`;
       }
       return `(local.set $${varName} ${this.emitExpr(initExpr, locals, varType)})`;
     }
@@ -16484,7 +16908,11 @@ ${prefixed}
       // sw119: `x += e` of an i32 is `x = x + (e)`, so it gives JavaScript's result and the store
       // into x is checked like any other
       if (opType === "i32" && !alwaysI32 && /^[+\-*]=$/.test(op)) {
-        return this.emitStatementCore(`${varName} = ${varName} ${op[0]} (${rhs});`, locals, funcResult);
+        return this.emitStatementCore(
+          `${varName} = ${varName} ${op[0]} (${rhs});`,
+          locals,
+          funcResult,
+        );
       }
       const getWatVar = isGlobal ? `(global.get $${varName})` : `(local.get $${varName})`;
       const rhsWat = this.emitExpr(rhs, locals, opType);
@@ -16574,7 +17002,12 @@ ${prefixed}
         // a string field stores both words (ld101); the struct-field store handles every
         // string form (a concat, a template) through its $__str_op pair
         if (field.type === "string") {
-          return this.emitStringFieldStore(`(local.get $__self)`, field.offset, thisWriteMatch[2].trim(), locals);
+          return this.emitStringFieldStore(
+            `(local.get $__self)`,
+            field.offset,
+            thisWriteMatch[2].trim(),
+            locals,
+          );
         }
         const storeOp = memStoreOp(field.type);
         const valWat = this.emitExpr(thisWriteMatch[2], locals, field.type);
@@ -16626,13 +17059,17 @@ ${prefixed}
       const body = line.replace(/;\s*$/, "").trim();
       const post = body.match(new RegExp(`^(${LV})\\s*(\\+\\+|--)$`));
       const pre = body.match(new RegExp(`^(\\+\\+|--)\\s*(${LV})$`));
-      const comp = body.match(new RegExp(`^(${LV})\\s*(\\*\\*|>>>|<<|>>|[+\\-*/%&|^])=(?!=)\\s*([\\s\\S]+)$`));
+      const comp = body.match(
+        new RegExp(`^(${LV})\\s*(\\*\\*|>>>|<<|>>|[+\\-*/%&|^])=(?!=)\\s*([\\s\\S]+)$`),
+      );
       const target = post?.[1] ?? pre?.[2] ?? comp?.[1];
       if (target) {
         const idx = [...target.matchAll(/\[([^\[\]]+)\]/g)].map((m) => m[1]!);
         if (idx.some((x) => /\w\s*\(|\+\+|--|[^=!<>]=(?!=)/.test(x))) {
           this.diagnostics.push(
-            `'${body.slice(0, 60)}': a compound assignment to an element whose index has a side effect is ` +
+            `'${
+              body.slice(0, 60)
+            }': a compound assignment to an element whose index has a side effect is ` +
               `not supported (the index would be evaluated twice); compute the index first.`,
           );
           return "";
@@ -16640,9 +17077,13 @@ ${prefixed}
         // the right side in parentheses only when it has an operator of its own (string
         // concatenation does not take a parenthesised literal: `ss[1] += "!"`)
         const r = comp ? comp[3]!.trim() : "";
-        const rWrapped = comp && (this.hasTopLevelBinaryOp(r) || this.splitTernaryTop(r)) ? `(${r})` : r;
-        const rhs = post ? `${target} ${post[2] === "++" ? "+" : "-"} 1`
-          : pre ? `${target} ${pre[1] === "++" ? "+" : "-"} 1`
+        const rWrapped = comp && (this.hasTopLevelBinaryOp(r) || this.splitTernaryTop(r))
+          ? `(${r})`
+          : r;
+        const rhs = post
+          ? `${target} ${post[2] === "++" ? "+" : "-"} 1`
+          : pre
+          ? `${target} ${pre[1] === "++" ? "+" : "-"} 1`
           : `${target} ${comp![2]} ${rWrapped}`;
         return this.emitStatement(`${target} = ${rhs};`, locals, funcResult);
       }
@@ -16728,8 +17169,9 @@ ${prefixed}
       if (outerInfo?.dynamic && outerInfo.is2D) {
         const idxWat = this.emitExpr(subscriptPushStmt[2], locals, "i32");
         const valWat = this.emitExpr(subscriptPushStmt[4], locals, outerInfo.elemType);
-        const addrWat =
-          `(i32.add (i32.add ${this.arrGetWat(outerName)} (i32.const 8)) (i32.shl ${idxWat} (i32.const 2)))`;
+        const addrWat = `(i32.add (i32.add ${
+          this.arrGetWat(outerName)
+        } (i32.const 8)) (i32.shl ${idxWat} (i32.const 2)))`;
         this.dynArrHelpers.add(`push_${outerInfo.elemType}`);
         // Load inner ptr, push (returns possibly-grown ptr), store back — address evaluated twice
         // but it's pure arithmetic so safe.
@@ -16761,7 +17203,9 @@ ${prefixed}
     // holds the array pointer; a push may reallocate, so the new pointer is stored back.
     {
       const fa = line.match(/^(\w+)\.(\w+)\.(push|pop|shift|unshift)\s*\(([\s\S]*)\)\s*;?$/);
-      const ref = fa && parenDepthNeverNegative(fa[4]!) ? this.arrayFieldRef(fa[1]!, fa[2]!, locals) : null;
+      const ref = fa && parenDepthNeverNegative(fa[4]!)
+        ? this.arrayFieldRef(fa[1]!, fa[2]!, locals)
+        : null;
       if (fa && ref) {
         const method = fa[3]!, argsStr = fa[4]!.trim();
         const arr = `(i32.load ${ref.slot})`;
@@ -16876,7 +17320,9 @@ ${prefixed}
             } else {
               valWat = this.emitExpr(item, locals, outerElem);
             }
-            const st = outerElem === "f64" ? "f64.store" : outerElem === "i64"
+            const st = outerElem === "f64"
+              ? "f64.store"
+              : outerElem === "i64"
               ? "i64.store"
               : outerElem === "f32"
               ? "f32.store"
@@ -17016,14 +17462,12 @@ ${prefixed}
         // every callback but reduce's may take the index as a second parameter (ld75); this
         // registers the callback funtype too
         const cl = this.clSuffix(fnName); // a capturing reduce callback (ld96)
-        const key = methodLc === "reduce"
-          ? `${methodLc}_${elemType}${cl}`
-          : this.cbHelperKey(
-            methodLc,
-            elemType,
-            fnName,
-            methodLc === "foreach" ? null : methodLc === "map" ? elemType : "i32",
-          );
+        const key = methodLc === "reduce" ? `${methodLc}_${elemType}${cl}` : this.cbHelperKey(
+          methodLc,
+          elemType,
+          fnName,
+          methodLc === "foreach" ? null : methodLc === "map" ? elemType : "i32",
+        );
         if (methodLc !== "reduce" || args[1]?.trim()) this.dynArrHelpers.add(key); // sw89: reduce1_T
         if (methodLc === "find") this.needsNullableResultFlag = true; // sw90
         if (methodLc === "foreach") {
@@ -17193,7 +17637,9 @@ ${prefixed}
             const [p2, l2] = splitTwoWatExprs(pl2);
             return `(i32.store ${a2} ${p2})\n      (i32.store offset=4 ${a2} ${l2})`;
           }
-          this.diagnostics.push(`unsupported: a string[][] element store of '${rhs2.slice(0, 40)}'`);
+          this.diagnostics.push(
+            `unsupported: a string[][] element store of '${rhs2.slice(0, 40)}'`,
+          );
           return "";
         }
         if (arrInfo.is2D && arrWriteMatch[2].includes("][")) {
@@ -17223,7 +17669,8 @@ ${prefixed}
           const ptrLen = this.quietEmit(() => this.emitStringPtrLen(rhsS, locals));
           const [ptrWat, lenWat] = splitTwoWatExprs(ptrLen);
           if (
-            (ptrLen !== "(i32.const 0) (i32.const 0)" || rhsS === '""' || rhsS === "''") && lenWat &&
+            (ptrLen !== "(i32.const 0) (i32.const 0)" || rhsS === '""' || rhsS === "''") &&
+            lenWat &&
             splitTwoWatExprs(lenWat)[1] === ""
           ) {
             return `(i32.store ${elemAddrWat} ${ptrWat})\n      (i32.store offset=4 ${elemAddrWat} ${lenWat})`;
@@ -17359,9 +17806,9 @@ ${prefixed}
         const sb = this.scratchBase;
         return [
           `    (i32.store (i32.const ${this.iovBase}) (i32.const ${sb}))`,
-          `    (i32.store (i32.const ${
-            this.iovBase + 4
-          }) (call $__print_2d_i32_arr ${this.arrGetWat(log2DArg)} (i32.const ${sb})))`,
+          `    (i32.store (i32.const ${this.iovBase + 4}) (call $__print_2d_i32_arr ${
+            this.arrGetWat(log2DArg)
+          } (i32.const ${sb})))`,
           `    (i32.store8 (i32.add (i32.const ${sb}) (i32.load (i32.const ${
             this.iovBase + 4
           }))) (i32.const 10))`,
@@ -17396,7 +17843,12 @@ ${prefixed}
           { kind: "literal", text: ") " },
           // elemType is the typed array's NAME: its element width (sw66; an Int8Array was read as
           // 4-byte i32s) and its "Name(n) " prefix's length, which the layout counts (sw67)
-          { kind: "arrptr", wat: ptrWat, elemType: taInfoLog.taType, nameLen: taInfoLog.taType.length },
+          {
+            kind: "arrptr",
+            wat: ptrWat,
+            elemType: taInfoLog.taType,
+            nameLen: taInfoLog.taType.length,
+          },
           { kind: "literal", text: "\n" },
         ];
         const { statements: taStmts, needsStrGather: taSG } = emitConsoleLog(
@@ -17467,14 +17919,18 @@ ${prefixed}
       }
       // Phase 24: nullable variable — print "null" when flag is set, else print value. Not a
       // string: it prints its text through nullPrintRewrite (it printed the pointer, ld64).
-      if (this.nullableVarInnerType.has(logSingleArg) && this.nullableVarInnerType.get(logSingleArg) !== "string") {
+      if (
+        this.nullableVarInnerType.has(logSingleArg) &&
+        this.nullableVarInnerType.get(logSingleArg) !== "string"
+      ) {
         const nlInner = this.nullableVarInnerType.get(logSingleArg)!;
         this.needsNumericHelpers = true;
         const [nullOffset, nullLen] = this.allocString("null\n");
         const [undOffset, undLen] = this.allocString("undefined\n"); // kind 2 (sw123)
-        const flagGet = locals.has(`${logSingleArg}__null`) || !this.moduleNullableGlobals.has(logSingleArg)
-          ? `(local.get $${logSingleArg}__null)`
-          : `(global.get $${logSingleArg}__null)`;
+        const flagGet =
+          locals.has(`${logSingleArg}__null`) || !this.moduleNullableGlobals.has(logSingleArg)
+            ? `(local.get $${logSingleArg}__null)`
+            : `(global.get $${logSingleArg}__null)`;
         const isUnd = `(i32.eq ${flagGet} (i32.const 2))`;
         const isF64 = nlInner === "f64";
         const normalSegs: LogSegment[] = isF64
@@ -17506,7 +17962,9 @@ ${prefixed}
           `    (if ${flagGet}`,
           `      (then`,
           `        (i32.store (i32.const ${this.iovBase}) (select (i32.const ${undOffset}) (i32.const ${nullOffset}) ${isUnd}))`,
-          `        (i32.store (i32.const ${this.iovBase + 4}) (select (i32.const ${undLen}) (i32.const ${nullLen}) ${isUnd}))`,
+          `        (i32.store (i32.const ${
+            this.iovBase + 4
+          }) (select (i32.const ${undLen}) (i32.const ${nullLen}) ${isUnd}))`,
           `        (drop (call $fd_write (i32.const 1) (i32.const ${this.iovBase}) (i32.const 1) (i32.const ${
             this.iovBase + 128
           })))`,
@@ -17772,7 +18230,10 @@ ${prefixed}
           const crf = this.callResultField(token, locals);
           if (crf && crf.field.type !== "string") {
             const ft = crf.field.type;
-            return { type: ft as string, wat: this.emitExpr(token, locals, watBaseType(ft) as WatType) };
+            return {
+              type: ft as string,
+              wat: this.emitExpr(token, locals, watBaseType(ft) as WatType),
+            };
           }
         }
         // Phase 47: arr[idx].method(args) — resolve the element class's method return type
@@ -17797,11 +18258,18 @@ ${prefixed}
         {
           const nm = token.match(/^new\s+([A-Z]\w*)\s*\(/);
           const close = nm ? findMatchingBracketAware(token, token.indexOf("(")) : -1;
-          const rest = close !== -1 ? token.slice(close + 1).match(/^\.(\w+)\s*\(([\s\S]*)\)$/) : null;
+          const rest = close !== -1
+            ? token.slice(close + 1).match(/^\.(\w+)\s*\(([\s\S]*)\)$/)
+            : null;
           if (nm && rest && parenDepthNeverNegative(rest[2]!) && this.classDefs.has(nm[1]!)) {
             const mfn = this.resolveMethodFunc(nm[1]!, rest[1]!);
             const r = mfn ? this.functions.find((f) => f.name === mfn)?.result : undefined;
-            if (r) return { type: r as string, wat: r === "i32" || r === "bool" ? result : this.emitExpr(token, locals, r) };
+            if (r) {
+              return {
+                type: r as string,
+                wat: r === "i32" || r === "bool" ? result : this.emitExpr(token, locals, r),
+              };
+            }
           }
         }
         const m2 = token.match(/^(?:this|\w+)\.(\w+)\s*\(/);
@@ -17871,11 +18339,16 @@ ${prefixed}
         // own: an f64 `arr.reduce(…)` went to the i32 printer as "i32", an invalid module (ld61,
         // 2026-10-20). Unknown stays i32, as before.
         const have = this.watResultType(result, locals);
-        return { type: have === "f64" || have === "f32" || have === "i64" ? have : "i32", wat: result };
+        return {
+          type: have === "f64" || have === "f32" || have === "i64" ? have : "i32",
+          wat: result,
+        };
       };
       // A boolean global stays "bool" so it prints `true` / `false`, as a boolean local does (ld42).
       const globalsMap: Map<string, string> = new Map(
-        [...this.moduleGlobals.entries()].map(([k, v]) => [k, v.type === "bool" ? "bool" : watBaseType(v.type)]),
+        [...this.moduleGlobals.entries()].map((
+          [k, v],
+        ) => [k, v.type === "bool" ? "bool" : watBaseType(v.type)]),
       );
       // Add module string consts encoded as "string:offset:len" so parseSingleArg can look them up
       for (const [k, [offset, len]] of this.moduleStringConsts) {
@@ -17964,7 +18437,9 @@ ${prefixed}
         // not a result: rejected, so console.log reports the argument instead of printing "" for
         // it (2026-10-23, `p.join(\`[${k}]\`, …)` printed "ab"; the dotCallLookup rule, sw08). A
         // whole token that failed (the (0, 0) pair) goes on to the template / concat build below.
-        if (this.quietStringFailures > qsfMark && w !== "(i32.const 0) (i32.const 0)") return undefined;
+        if (this.quietStringFailures > qsfMark && w !== "(i32.const 0) (i32.const 0)") {
+          return undefined;
+        }
         if (w === "(i32.const 0) (i32.const 0)") {
           // H12 sw02: emitStringPtrLen does not build a template or a concat; emitStringAssign
           // does. Build it into the $__str_op pair (declared for console ternaries).
@@ -18015,7 +18490,9 @@ ${prefixed}
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
-      setObjectInspectResolver((tok, locs) => this.inspectConsoleArg(tok, locs as Map<string, WatType>));
+      setObjectInspectResolver((tok, locs) =>
+        this.inspectConsoleArg(tok, locs as Map<string, WatType>)
+      );
       setI32SlotResolver((tok, locs) => this.i32SlotForConsole(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
@@ -18293,7 +18770,10 @@ ${prefixed}
           const crf = this.callResultField(token, locals);
           if (crf && crf.field.type !== "string") {
             const ft = crf.field.type;
-            return { type: ft as string, wat: this.emitExpr(token, locals, watBaseType(ft) as WatType) };
+            return {
+              type: ft as string,
+              wat: this.emitExpr(token, locals, watBaseType(ft) as WatType),
+            };
           }
         }
         // Phase 47: arr[idx].method(args) — resolve the element class's method return type
@@ -18318,11 +18798,18 @@ ${prefixed}
         {
           const nm = token.match(/^new\s+([A-Z]\w*)\s*\(/);
           const close = nm ? findMatchingBracketAware(token, token.indexOf("(")) : -1;
-          const rest = close !== -1 ? token.slice(close + 1).match(/^\.(\w+)\s*\(([\s\S]*)\)$/) : null;
+          const rest = close !== -1
+            ? token.slice(close + 1).match(/^\.(\w+)\s*\(([\s\S]*)\)$/)
+            : null;
           if (nm && rest && parenDepthNeverNegative(rest[2]!) && this.classDefs.has(nm[1]!)) {
             const mfn = this.resolveMethodFunc(nm[1]!, rest[1]!);
             const r = mfn ? this.functions.find((f) => f.name === mfn)?.result : undefined;
-            if (r) return { type: r as string, wat: r === "i32" || r === "bool" ? result : this.emitExpr(token, locals, r) };
+            if (r) {
+              return {
+                type: r as string,
+                wat: r === "i32" || r === "bool" ? result : this.emitExpr(token, locals, r),
+              };
+            }
           }
         }
         const m2 = token.match(/^(?:this|\w+)\.(\w+)\s*\(/);
@@ -18389,10 +18876,15 @@ ${prefixed}
         }
         // the WAT's own type (ld61; mirror of dotCallLookupFn)
         const haveErr = this.watResultType(result, locals);
-        return { type: haveErr === "f64" || haveErr === "f32" || haveErr === "i64" ? haveErr : "i32", wat: result };
+        return {
+          type: haveErr === "f64" || haveErr === "f32" || haveErr === "i64" ? haveErr : "i32",
+          wat: result,
+        };
       };
       const globalsMapErr: Map<string, string> = new Map(
-        [...this.moduleGlobals.entries()].map(([k, v]) => [k, v.type === "bool" ? "bool" : watBaseType(v.type)]),
+        [...this.moduleGlobals.entries()].map((
+          [k, v],
+        ) => [k, v.type === "bool" ? "bool" : watBaseType(v.type)]),
       );
       for (const [k, [offset, len]] of this.moduleStringConsts) {
         globalsMapErr.set(k, `string:${offset}:${len}`);
@@ -18479,7 +18971,9 @@ ${prefixed}
         // not a result: rejected, so console.log reports the argument instead of printing "" for
         // it (2026-10-23, `p.join(\`[${k}]\`, …)` printed "ab"; the dotCallLookup rule, sw08). A
         // whole token that failed (the (0, 0) pair) goes on to the template / concat build below.
-        if (this.quietStringFailures > qsfMark && w !== "(i32.const 0) (i32.const 0)") return undefined;
+        if (this.quietStringFailures > qsfMark && w !== "(i32.const 0) (i32.const 0)") {
+          return undefined;
+        }
         if (w === "(i32.const 0) (i32.const 0)") {
           // H12 sw02: emitStringPtrLen does not build a template or a concat; emitStringAssign
           // does. Build it into the $__str_op pair (declared for console ternaries).
@@ -18530,7 +19024,9 @@ ${prefixed}
       setLogicalResolver((tok, locs) => this.logicalForConsole(tok, locs as Map<string, WatType>));
       setNullPrintResolver((tok, locs) => this.nullPrintRewrite(tok, locs as Map<string, WatType>));
       setU64Resolver((tok, locs) => this.isU64Expr(tok, locs as Map<string, WatType>));
-      setObjectInspectResolver((tok, locs) => this.inspectConsoleArg(tok, locs as Map<string, WatType>));
+      setObjectInspectResolver((tok, locs) =>
+        this.inspectConsoleArg(tok, locs as Map<string, WatType>)
+      );
       setI32SlotResolver((tok, locs) => this.i32SlotForConsole(tok, locs as Map<string, WatType>));
       setNullishResolver((tok, locs) => {
         const nlLocals = locs as Map<string, WatType>;
@@ -18592,7 +19088,9 @@ ${prefixed}
     if (breakMatch) {
       const label = breakMatch[1];
       const want = label ? `$break_${label}` : null;
-      const idx = this.controlStack.findLastIndex((c) => want ? c.breakLabel === want : !!c.breakLabel);
+      const idx = this.controlStack.findLastIndex((c) =>
+        want ? c.breakLabel === want : !!c.breakLabel
+      );
       if (idx === -1 && !label) return `(;; break outside loop;)`;
       const br = `(br ${want ?? this.controlStack[idx].breakLabel})`;
       // the finally blocks between here and the target run first (sw106)
@@ -18637,7 +19135,9 @@ ${prefixed}
             : "i32.const 1";
           const cur = `(${loadOp} offset=${ccl.offset} (local.get $__closure_ptr))`;
           if (ccl.type === "i32") { // sw119
-            return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) ${this.i32Step("++", cur)})`;
+            return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) ${
+              this.i32Step("++", cur)
+            })`;
           }
           return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) (${addOp} ${cur} (${one})))`;
         }
@@ -18674,7 +19174,9 @@ ${prefixed}
             : "i32.const 1";
           const cur = `(${loadOp} offset=${ccl.offset} (local.get $__closure_ptr))`;
           if (ccl.type === "i32") { // sw119
-            return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) ${this.i32Step("--", cur)})`;
+            return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) ${
+              this.i32Step("--", cur)
+            })`;
           }
           return `(${storeOp} offset=${ccl.offset} (local.get $__closure_ptr) (${subOp} ${cur} (${one})))`;
         }
@@ -18719,8 +19221,11 @@ ${prefixed}
           `${this.currentMethodClass}_${methodName}`;
         const fn = this.functions.find((f) => f.name === funcName) ??
           this.functions.find((f) =>
-            f.name === this.resolveMethodFunc(this.findSubclasses(this.currentMethodClass!)
-              .find((s) => this.resolveMethodFunc(s, methodName)) ?? "", methodName)
+            f.name === this.resolveMethodFunc(
+              this.findSubclasses(this.currentMethodClass!)
+                .find((s) => this.resolveMethodFunc(s, methodName)) ?? "",
+              methodName,
+            )
           );
         if (fn) {
           const emittedArgs = args.flatMap((a, i) => {
@@ -18730,7 +19235,13 @@ ${prefixed}
           });
           // the instance's version of an overridden or abstract method (ld74, ld79)
           const call = this.needsTagDispatch(this.currentMethodClass, methodName)
-            ? this.emitTagDispatch(this.currentMethodClass, methodName, `(local.get $__self)`, args, locals)
+            ? this.emitTagDispatch(
+              this.currentMethodClass,
+              methodName,
+              `(local.get $__self)`,
+              args,
+              locals,
+            )
             : `(call $${funcName} (local.get $__self) ${emittedArgs.join(" ")})`.trim();
           const hasResult1 = fn.result !== null && fn.result !== "never" && fn.result !== "string";
           return hasResult1 ? `(drop ${call})` : call;
@@ -18742,11 +19253,14 @@ ${prefixed}
         // the instance's version of an overridden or abstract method (ld79, see the expression form)
         if (cv.ptr < 0 && this.needsTagDispatch(cv.className, methodName)) {
           const baseWat = cv.ptr < 0 ? `(local.get $${receiver})` : `(i32.const ${cv.ptr})`;
-          const impl = this.findSubclasses(cv.className).map((s) => this.resolveMethodFunc(s, methodName))
+          const impl = this.findSubclasses(cv.className).map((s) =>
+            this.resolveMethodFunc(s, methodName)
+          )
             .find((n) => n !== null);
           const implFn = impl ? this.functions.find((f) => f.name === impl) : undefined;
           const call = this.emitTagDispatch(cv.className, methodName, baseWat, args, locals);
-          const hasR = implFn && implFn.result !== null && implFn.result !== "never" && implFn.result !== "string";
+          const hasR = implFn && implFn.result !== null && implFn.result !== "never" &&
+            implFn.result !== "string";
           return hasR ? `(drop ${call})` : call;
         }
         // Phase 47: walk inheritance chain to find overriding or inherited method
@@ -18935,7 +19449,9 @@ ${prefixed}
       if (!parentName && this.classInheritance.has(this.currentMethodClass)) {
         if (!superCallMatch[1].trim()) return "";
         this.diagnostics.push(
-          `super(${superCallMatch[1].trim().slice(0, 40)}): no base class has a constructor to take the arguments`,
+          `super(${
+            superCallMatch[1].trim().slice(0, 40)
+          }): no base class has a constructor to take the arguments`,
         );
         return "";
       }
@@ -20094,7 +20610,12 @@ ${prefixed}
         }
         if (finEntry.used) {
           const escDone = `${finEntry.esc}_done`;
-          out.splice(escOpen, 0, `${indent}(block ${escDone}`, `${indent}(block ${finEntry.esc} (result exnref)`);
+          out.splice(
+            escOpen,
+            0,
+            `${indent}(block ${escDone}`,
+            `${indent}(block ${finEntry.esc} (result exnref)`,
+          );
           out.push(`${indent}(br ${escDone}))`, `${indent}(throw_ref))`);
         }
         continue;
@@ -20271,7 +20792,8 @@ ${prefixed}
     }
     // ld80 (2026-10-22): substring and lastIndexOf, emitted only where used
     if (this.needsStrSubstring) {
-      parts.push(`  ;; str.substring(a, b): both clamped to [0, len], swapped when a > b; then $__str_slice
+      parts.push(
+        `  ;; str.substring(a, b): both clamped to [0, len], swapped when a > b; then $__str_slice
   (func $__str_substring (param $ptr i32) (param $len i32) (param $a i32) (param $b i32) (result i32 i32)
     (local $t i32)
     (local.set $a (select (i32.const 0) (local.get $a) (i32.lt_s (local.get $a) (i32.const 0))))
@@ -20280,10 +20802,12 @@ ${prefixed}
     (local.set $b (select (local.get $len) (local.get $b) (i32.gt_s (local.get $b) (local.get $len))))
     (if (i32.gt_s (local.get $a) (local.get $b))
       (then (local.set $t (local.get $a)) (local.set $a (local.get $b)) (local.set $b (local.get $t))))
-    (call $__str_slice (local.get $ptr) (local.get $len) (local.get $a) (local.get $b)))`);
+    (call $__str_slice (local.get $ptr) (local.get $len) (local.get $a) (local.get $b)))`,
+      );
     }
     if (this.needsStrLastIndexOf) {
-      parts.push(`  ;; str.lastIndexOf(sub, from): the last match starting at or before from (clamped to
+      parts.push(
+        `  ;; str.lastIndexOf(sub, from): the last match starting at or before from (clamped to
   ;; [0, len]); an empty sub is found at from; -1 when none
   (func $__str_lastindexof (param $ptr i32) (param $len i32) (param $sptr i32) (param $slen i32)
       (param $from i32) (result i32)
@@ -20304,18 +20828,21 @@ ${prefixed}
         (br $cmp)))
       (local.set $k (i32.sub (local.get $k) (i32.const 1)))
       (br $scan)))
-    (i32.const -1))`);
+    (i32.const -1))`,
+      );
     }
     if (this.needsExnStr) parts.push(this.getExnStrWat());
     if (this.strOfHelpers.size > 0) parts.push(this.getStrOfWat());
     for (const t of this.boxHelpers) {
-      parts.push(`  ;; A heap cell holding $v, for a captured parameter a closure mutates (sw48, sw53).
+      parts.push(
+        `  ;; A heap cell holding $v, for a captured parameter a closure mutates (sw48, sw53).
   (func $__box_${t} (param $v ${t}) (result i32)
     (local $p i32)
     (local.set $p (call $__malloc (i32.const ${t === "f64" ? 8 : 4})))
     (${t}.store (local.get $p) (local.get $v))
     (local.get $p)
-  )`);
+  )`,
+      );
     }
     if (this.needsStringExtHelpers) parts.push(this.getStringExtHelperWat());
     // $__fd_write_all is gated on the SAME flag as the `$fd_write` import above, so the helper
@@ -20337,7 +20864,9 @@ ${prefixed}
     if (this.needsNumParsers) parts.push(this.emitNumParserHelpers(this.needsStrToNumber));
     // toFixed; the base big-integer helpers come with the parsers when those are present
     if (this.needsToFixed) {
-      parts.push((this.needsNumParsers ? "" : this.emitBigNumHelpers() + "\n\n") + this.emitToFixedHelper());
+      parts.push(
+        (this.needsNumParsers ? "" : this.emitBigNumHelpers() + "\n\n") + this.emitToFixedHelper(),
+      );
     }
     if (this.dynArrHelpers.size > 0) parts.push(this.emitDynArrHelpers());
     if (this.typedArrHelpers.size > 0) parts.push(this.emitTypedArrHelpers());
@@ -20738,9 +21267,11 @@ ${prefixed}
       f64Helpers.push(this.emitHypotHelper(Number(h.slice("f64_hypot".length))));
     }
     if (this.mathHelpers.has("i32_toint32")) {
-      f64Helpers.push(`  ;; JavaScript's ToInt32 on an f64 (Math.clz32 / Math.imul arguments, ld27; bitwise operands, ld29)
+      f64Helpers.push(
+        `  ;; JavaScript's ToInt32 on an f64 (Math.clz32 / Math.imul arguments, ld27; bitwise operands, ld29)
   (func $__i32_toint32 (param f64) (result i32)
-    ${WM_WAT.toint32.body})`);
+    ${WM_WAT.toint32.body})`,
+      );
     }
     // bigint operators (ld30, ld31): JavaScript's result wrapped to 64 bits. A shift count is
     // unbounded and may be negative (it shifts the other way), where `i64.shl` / `shr_s` take it
@@ -21128,7 +21659,8 @@ ${sum}
   /** The base big-integer helpers (`$__bn_*`: u32 limbs, least significant first), shared by
    *  `$__dec_to_f64` (sw122) and `$__f64_to_fixed` (ld38). */
   private emitBigNumHelpers(): string {
-    const ld = (base: string, idx: string) => `(i32.load (i32.add ${base} (i32.shl ${idx} (i32.const 2))))`;
+    const ld = (base: string, idx: string) =>
+      `(i32.load (i32.add ${base} (i32.shl ${idx} (i32.const 2))))`;
     return `  ;; ── decimal → f64, correctly rounded (sw122). Big integers: u32 limbs at $a, least
   ;; significant first, $len limbs with no zero top limb; each helper returns the new length. ──
   (func $__bn_norm (param $a i32) (param $len i32) (result i32)
@@ -21145,7 +21677,9 @@ ${sum}
     (block $d (loop $l
       (br_if $d (i32.ge_u (local.get $i) (local.get $len)))
       (local.set $t (i64.add
-        (i64.mul (i64.extend_i32_u ${ld("(local.get $a)", "(local.get $i)")}) (i64.extend_i32_u (local.get $m)))
+        (i64.mul (i64.extend_i32_u ${
+      ld("(local.get $a)", "(local.get $i)")
+    }) (i64.extend_i32_u (local.get $m)))
         (local.get $carry)))
       (i32.store (i32.add (local.get $a) (i32.shl (local.get $i) (i32.const 2))) (i32.wrap_i64 (local.get $t)))
       (local.set $carry (i64.shr_u (local.get $t) (i64.const 32)))
@@ -21167,7 +21701,9 @@ ${sum}
       (local.set $cur (if (result i32) (i32.lt_u (local.get $k) (local.get $len))
         (then ${ld("(local.get $a)", "(local.get $k)")}) (else (i32.const 0))))
       (local.set $prev (if (result i32) (local.get $k)
-        (then ${ld("(local.get $a)", "(i32.sub (local.get $k) (i32.const 1))")}) (else (i32.const 0))))
+        (then ${
+      ld("(local.get $a)", "(i32.sub (local.get $k) (i32.const 1))")
+    }) (else (i32.const 0))))
       (i32.store (i32.add (local.get $a) (i32.shl (i32.add (local.get $k) (local.get $limbs)) (i32.const 2)))
         (if (result i32) (i32.eqz (local.get $bits))
           (then (local.get $cur))
@@ -21189,7 +21725,9 @@ ${sum}
     (block $d (loop $l
       (br_if $d (i32.ge_u (local.get $k) (local.get $len)))
       (local.set $nx (if (result i32) (i32.lt_u (i32.add (local.get $k) (i32.const 1)) (local.get $len))
-        (then ${ld("(local.get $a)", "(i32.add (local.get $k) (i32.const 1))")}) (else (i32.const 0))))
+        (then ${
+      ld("(local.get $a)", "(i32.add (local.get $k) (i32.const 1))")
+    }) (else (i32.const 0))))
       (i32.store (i32.add (local.get $a) (i32.shl (local.get $k) (i32.const 2)))
         (i32.or (i32.shr_u ${ld("(local.get $a)", "(local.get $k)")} (i32.const 1))
           (i32.shl (local.get $nx) (i32.const 31))))
@@ -21241,10 +21779,13 @@ ${sum}
    * `$__bn_*` helpers plus a right shift and a division by a small number.
    */
   private emitToFixedHelper(): string {
-    const ld = (base: string, idx: string) => `(i32.load (i32.add ${base} (i32.shl ${idx} (i32.const 2))))`;
+    const ld = (base: string, idx: string) =>
+      `(i32.load (i32.add ${base} (i32.shl ${idx} (i32.const 2))))`;
     const at = (base: string, idx: string) => `(i32.add ${base} (i32.shl ${idx} (i32.const 2)))`;
     const [nanOff, nanLen] = this.allocString("NaN");
-    const free = this.mode === "library" ? "" : `\n    (call $__free (local.get $buf) (i32.const 384))`;
+    const free = this.mode === "library"
+      ? ""
+      : `\n    (call $__free (local.get $buf) (i32.const 384))`;
     return `  ;; a = a >> s
   (func $__bn_shr (param $a i32) (param $len i32) (param $s i32) (result i32)
     (local $limbs i32) (local $bits i32) (local $k i32) (local $lo i32) (local $hi i32) (local $n i32)
@@ -21256,7 +21797,9 @@ ${sum}
       (br_if $d (i32.ge_u (local.get $k) (local.get $n)))
       (local.set $lo ${ld("(local.get $a)", "(i32.add (local.get $k) (local.get $limbs))")})
       (local.set $hi (if (result i32) (i32.lt_u (i32.add (i32.add (local.get $k) (local.get $limbs)) (i32.const 1)) (local.get $len))
-        (then ${ld("(local.get $a)", "(i32.add (i32.add (local.get $k) (local.get $limbs)) (i32.const 1))")})
+        (then ${
+      ld("(local.get $a)", "(i32.add (i32.add (local.get $k) (local.get $limbs)) (i32.const 1))")
+    })
         (else (i32.const 0))))
       (i32.store ${at("(local.get $a)", "(local.get $k)")}
         (if (result i32) (i32.eqz (local.get $bits))
@@ -21273,8 +21816,12 @@ ${sum}
     (block $dd (loop $l
       (br_if $dd (i32.eqz (local.get $k)))
       (local.set $k (i32.sub (local.get $k) (i32.const 1)))
-      (local.set $cur (i64.or (i64.shl (local.get $r) (i64.const 32)) (i64.extend_i32_u ${ld("(local.get $a)", "(local.get $k)")})))
-      (i32.store ${at("(local.get $a)", "(local.get $k)")} (i32.wrap_i64 (i64.div_u (local.get $cur) (i64.extend_i32_u (local.get $d)))))
+      (local.set $cur (i64.or (i64.shl (local.get $r) (i64.const 32)) (i64.extend_i32_u ${
+      ld("(local.get $a)", "(local.get $k)")
+    })))
+      (i32.store ${
+      at("(local.get $a)", "(local.get $k)")
+    } (i32.wrap_i64 (i64.div_u (local.get $cur) (i64.extend_i32_u (local.get $d)))))
       (local.set $r (i64.rem_u (local.get $cur) (i64.extend_i32_u (local.get $d))))
       (br $l)))
     (i32.wrap_i64 (local.get $r)))
@@ -21321,7 +21868,9 @@ ${sum}
         (local.set $k (i32.sub (i32.const 0) (local.get $e)))
         (local.set $up (if (result i32)
             (i32.lt_u (i32.shr_u (i32.sub (local.get $k) (i32.const 1)) (i32.const 5)) (local.get $len))
-          (then (i32.and (i32.shr_u ${ld("(local.get $N)", "(i32.shr_u (i32.sub (local.get $k) (i32.const 1)) (i32.const 5))")}
+          (then (i32.and (i32.shr_u ${
+      ld("(local.get $N)", "(i32.shr_u (i32.sub (local.get $k) (i32.const 1)) (i32.const 5))")
+    }
             (i32.and (i32.sub (local.get $k) (i32.const 1)) (i32.const 31))) (i32.const 1)))
           (else (i32.const 0))))
         (local.set $len (call $__bn_shr (local.get $N) (local.get $len) (local.get $k)))
@@ -21681,8 +22230,10 @@ ${sum}
       if (method === "splice") growNeeded.add(elemType === "f64" ? "f64" : "i32");
     }
     if (this.dynArrHelpers.has("splice_i32") || this.dynArrHelpers.has("splice_f64")) {
-      parts.push(`  ;; splice's normalised start index, read by the caller to store the inserted items
-  (global $__splice_at (mut i32) (i32.const 0))`);
+      parts.push(
+        `  ;; splice's normalised start index, read by the caller to store the inserted items
+  (global $__splice_at (mut i32) (i32.const 0))`,
+      );
     }
 
     // Emit grow helpers first (push/unshift call them).
@@ -21743,28 +22294,41 @@ ${sum}
       // `<method>_<T>_ix`: the callback takes the index as well (ld75, see cbHelperKey)
       const cbIx = key.endsWith("_ix");
       const ixArg = cbIx ? " (local.get $i)" : "";
-      const cbType = (r: WatType | null) => this.getOrCreateFuncType(cbIx ? [elemType, "i32"] : [elemType], r);
+      const cbType = (r: WatType | null) =>
+        this.getOrCreateFuncType(cbIx ? [elemType, "i32"] : [elemType], r);
       const name = `$__dynarr_${key}`;
       // (after this key's branch below has pushed its helper)
-      if (isStrElem) closureHelpers.push(() => {
-        if (!parts[partsBefore]?.includes(`(func ${name} `)) return;
-        const one = "(i32.load (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3))))";
-        const addr = "(i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3)))";
-        parts[partsBefore] = parts[partsBefore]!.replaceAll(one, `(i32.load ${addr}) (i32.load offset=4 ${addr})`);
-      });
-      if (isCl) closureHelpers.push(() => {
-        if (!parts[partsBefore]?.includes(`(func ${name} `)) return;
-        parts[partsBefore] = parts[partsBefore]!
-          .replaceAll(`${name} `, `$__dynarr_${fullKey} `)
-          .replace(
-            /\(call_indirect \(type \$ftype_(\w+?)_r_(\w+)\)([\s\S]*?)\(local\.get \$fn\)\)/g,
-            (_m, ps: string, r: string, args: string) => {
-              const params = ps === "void" ? [] : ps.split("_") as WatType[];
-              const tt = this.getOrCreateFuncType(["i32" as WatType, ...params], r === "void" ? null : r as WatType);
-              return `(call_indirect (type ${tt}) (local.get $fn)${args}(i32.load (local.get $fn)))`;
-            },
+      if (isStrElem) {
+        closureHelpers.push(() => {
+          if (!parts[partsBefore]?.includes(`(func ${name} `)) return;
+          const one =
+            "(i32.load (i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3))))";
+          const addr =
+            "(i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl (local.get $i) (i32.const 3)))";
+          parts[partsBefore] = parts[partsBefore]!.replaceAll(
+            one,
+            `(i32.load ${addr}) (i32.load offset=4 ${addr})`,
           );
-      });
+        });
+      }
+      if (isCl) {
+        closureHelpers.push(() => {
+          if (!parts[partsBefore]?.includes(`(func ${name} `)) return;
+          parts[partsBefore] = parts[partsBefore]!
+            .replaceAll(`${name} `, `$__dynarr_${fullKey} `)
+            .replace(
+              /\(call_indirect \(type \$ftype_(\w+?)_r_(\w+)\)([\s\S]*?)\(local\.get \$fn\)\)/g,
+              (_m, ps: string, r: string, args: string) => {
+                const params = ps === "void" ? [] : ps.split("_") as WatType[];
+                const tt = this.getOrCreateFuncType(
+                  ["i32" as WatType, ...params],
+                  r === "void" ? null : r as WatType,
+                );
+                return `(call_indirect (type ${tt}) (local.get $fn)${args}(i32.load (local.get $fn)))`;
+              },
+            );
+        });
+      }
 
       if (method === "push" && key !== "push_string") {
         parts.push(
@@ -21807,7 +22371,9 @@ ${sum}
         // dropped or lands in a nullable variable.
         const last = method === "popn";
         parts.push(
-          `  ;; Dynamic array ${method}_${elemType}: ${last ? "pop" : "shift"} that does not trap on an empty array
+          `  ;; Dynamic array ${method}_${elemType}: ${
+            last ? "pop" : "shift"
+          } that does not trap on an empty array
   (func ${name} (param $arr i32) (result ${valType})
     (local $len i32) (local $val ${valType}) (local $i i32)
     (local.set $len (i32.load (local.get $arr)))
@@ -21900,7 +22466,8 @@ ${sum}
         // string[] indexOf / includes compare TEXT ($__str_cmp == 0); the i32 search compared a
         // slot's pointer word with the needle (sw107, 2026-10-19)
         this.needsStringHelpers = true;
-        parts.push(`  ;; Dynamic string array indexof_string: first index whose text equals (ptr, len), or -1.
+        parts.push(
+          `  ;; Dynamic string array indexof_string: first index whose text equals (ptr, len), or -1.
   (func $__dynarr_indexof_string (param $arr i32) (param $ptr i32) (param $len i32) (result i32)
     (local $i i32)
     (local $n i32)
@@ -21916,10 +22483,12 @@ ${sum}
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $lp)))
     (i32.const -1)
-  )`);
+  )`,
+        );
       } else if (method === "sameval") {
         // SameValueZero search for a float array (includes; sw94): equal, or both NaN
-        parts.push(`  ;; Dynamic array sameval_${elemType}: index of the first SameValueZero match, or -1.
+        parts.push(
+          `  ;; Dynamic array sameval_${elemType}: index of the first SameValueZero match, or -1.
   (func ${name} (param $arr i32) (param $val ${valType}) (result i32)
     (local $i i32)
     (local $len i32)
@@ -21938,9 +22507,11 @@ ${sum}
       )
     )
     (i32.const -1)
-  )`);
+  )`,
+        );
       } else if (method === "lastindexof") {
-        parts.push(`  ;; Dynamic array lastindexof_${elemType}: search back from $from (negative: from the end), or -1 (ld80)
+        parts.push(
+          `  ;; Dynamic array lastindexof_${elemType}: search back from $from (negative: from the end), or -1 (ld80)
   (func ${name} (param $arr i32) (param $val ${valType}) (param $from i32) (result i32)
     (local $i i32) (local $len i32)
     (local.set $len (i32.load (local.get $arr)))
@@ -21955,7 +22526,8 @@ ${sum}
         (then (return (local.get $i))))
       (local.set $i (i32.sub (local.get $i) (i32.const 1)))
       (br $lp)))
-    (i32.const -1))`);
+    (i32.const -1))`,
+        );
       } else if (method === "indexof") {
         const cmpOp = `${valType}.eq`;
         parts.push(`  ;; Dynamic array indexof_${elemType}: linear search, returns index or -1.
@@ -22387,7 +22959,9 @@ ${sum}
   (func $__numstr_gt_${elemType} (param $a ${valType}) (param $b ${valType}) (param $buf i32) (result i32)
     (local $la i32) (local $lb i32)
     (local.set $la (call ${toStr} ${toF("(local.get $a)")} (local.get $buf)))
-    (local.set $lb (call ${toStr} ${toF("(local.get $b)")} (i32.add (local.get $buf) (i32.const 32))))
+    (local.set $lb (call ${toStr} ${
+          toF("(local.get $b)")
+        } (i32.add (local.get $buf) (i32.const 32))))
     (i32.gt_s (call $__str_cmp (local.get $buf) (local.get $la)
       (i32.add (local.get $buf) (i32.const 32)) (local.get $lb)) (i32.const 0))
   )`);
@@ -22688,7 +23262,8 @@ ${sum}
         const st = w === 3 ? "f64.store" : "i32.store";
         const slot = (i: string) =>
           `(i32.add (i32.add (local.get $arr) (i32.const 8)) (i32.shl ${i} (i32.const ${w})))`;
-        parts.push(`  ;; Dynamic array ${key}: remove $count at $idx, open $nins slots there (JavaScript's splice).
+        parts.push(
+          `  ;; Dynamic array ${key}: remove $count at $idx, open $nins slots there (JavaScript's splice).
   (func $__dynarr_${key} (param $arr i32) (param $idx i32) (param $count i32) (param $nins i32) (result i32)
     (local $len i32)
     (local $newlen i32)
@@ -22707,7 +23282,9 @@ ${sum}
       (then
         (local.set $cap (select (i32.const 8) (i32.shl (local.get $cap) (i32.const 1)) (i32.eqz (local.get $cap))))
         (if (i32.lt_u (local.get $cap) (local.get $newlen)) (then (local.set $cap (local.get $newlen))))
-        (local.set $arr (call $__dynarr_grow_${w === 3 ? "f64" : "i32"} (local.get $arr) (local.get $cap)))))
+        (local.set $arr (call $__dynarr_grow_${
+            w === 3 ? "f64" : "i32"
+          } (local.get $arr) (local.get $cap)))))
     (if (i32.lt_u (local.get $nins) (local.get $count))
       (then
         ;; the tail moves LEFT: copy forwards
@@ -22715,7 +23292,9 @@ ${sum}
         (block $brk
           (loop $lp
             (br_if $brk (i32.ge_u (local.get $i) (local.get $len)))
-            (${st} ${slot("(i32.add (i32.sub (local.get $i) (local.get $count)) (local.get $nins))")}
+            (${st} ${
+            slot("(i32.add (i32.sub (local.get $i) (local.get $count)) (local.get $nins))")
+          }
               (${ld} ${slot("(local.get $i)")}))
             (local.set $i (i32.add (local.get $i) (i32.const 1)))
             (br $lp)))))
@@ -22727,13 +23306,16 @@ ${sum}
           (loop $lp2
             (br_if $brk2 (i32.le_u (local.get $i) (i32.add (local.get $idx) (local.get $count))))
             (local.set $i (i32.sub (local.get $i) (i32.const 1)))
-            (${st} ${slot("(i32.add (i32.sub (local.get $i) (local.get $count)) (local.get $nins))")}
+            (${st} ${
+            slot("(i32.add (i32.sub (local.get $i) (local.get $count)) (local.get $nins))")
+          }
               (${ld} ${slot("(local.get $i)")}))
             (br $lp2)))))
     (i32.store (local.get $arr) (local.get $newlen))
     (global.set $__splice_at (local.get $idx))
     (local.get $arr)
-  )`);
+  )`,
+        );
       } else if (key === "sort_string") {
         // Insertion sort for string arrays: compare pairs (ptr,len) lexicographically via $__str_cmp.
         this.needsStringHelpers = true;
@@ -23620,7 +24202,9 @@ ${sum}
       const h = fn.wasmathWat;
       const params = h.params.map((t, i) => `(param $p${i} ${t})`).join(" ");
       const result = `(result ${h.result === "bool" ? "i32" : h.result})`;
-      return `  (func $${fn.name} ${params} ${result}${h.locals ? `\n    ${h.locals}` : ""}\n    ${h.body}\n  )`;
+      return `  (func $${fn.name} ${params} ${result}${
+        h.locals ? `\n    ${h.locals}` : ""
+      }\n    ${h.body}\n  )`;
     }
 
     // Phase 5f: closure factory — emit heap-alloc body + trampoline, skip normal body emit
@@ -24417,8 +25001,9 @@ ${sum}
           this.nullableVarInnerType.set(nlVarName, nlInner);
           // a nullable STRING is its (ptr, len) pair; one `string` local left `$s_ptr` undeclared
           // (ld53, ld64, 2026-10-20)
-          if (nlInner === "string") declaredLocals.push([`${nlVarName}_ptr`, "i32"], [`${nlVarName}_len`, "i32"]);
-          else declaredLocals.push([nlVarName, nlInner]);
+          if (nlInner === "string") {
+            declaredLocals.push([`${nlVarName}_ptr`, "i32"], [`${nlVarName}_len`, "i32"]);
+          } else declaredLocals.push([nlVarName, nlInner]);
           declaredLocals.push([`${nlVarName}__null`, "i32"]);
           locals.set(nlVarName, nlInner);
           locals.set(`${nlVarName}__null`, "i32");
@@ -24511,7 +25096,8 @@ ${sum}
           }
           // …and a class instance a method returns (ld74; see the _start pre-scan)
           if (
-            typeStr && this.classDefs.has(typeStr) && initExpr.endsWith(")") && this.classOfExpr(initExpr) &&
+            typeStr && this.classDefs.has(typeStr) && initExpr.endsWith(")") &&
+            this.classOfExpr(initExpr) &&
             !locals.has(m[1])
           ) {
             this.classVars.set(m[1], { className: typeStr, ptr: -1 });
@@ -24853,7 +25439,9 @@ ${sum}
     try {
       body = boxedParams
         .map((p) =>
-          `    (local.set $${this.boxSlot(p.name)} (call $__box_${this.boxType(p.name)} (local.get $${p.name})))\n`
+          `    (local.set $${this.boxSlot(p.name)} (call $__box_${
+            this.boxType(p.name)
+          } (local.get $${p.name})))\n`
         )
         .join("") + this.emitBlock(fn.bodyLines, locals, blockResult);
     } finally {
@@ -24881,10 +25469,22 @@ ${sum}
       // (and $__destr_src, a destructured call's result, ld76; $__chain_arr, a chained receiver, ld78)
       // (and $__str_arg_*, a built string argument, ld106; $__rt_struct_ptr, a struct literal
       // pushed onto an array declared empty, ld113)
-      ...["__arr_tmp", "__arr_tmp2", "__obj_ret", "__str_push_ptr", "__str_push_len", "__str_arg_ptr", "__str_arg_len", "__destr_src",
-        "__splice_s", "__splice_rm", "__chain_arr", "__rt_struct_ptr"].filter((t) =>
-        new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)
-      ).map((t) => `    (local $${t} i32)`),
+      ...[
+        "__arr_tmp",
+        "__arr_tmp2",
+        "__obj_ret",
+        "__str_push_ptr",
+        "__str_push_len",
+        "__str_arg_ptr",
+        "__str_arg_len",
+        "__destr_src",
+        "__splice_s",
+        "__splice_rm",
+        "__chain_arr",
+        "__rt_struct_ptr",
+      ].filter((t) => new RegExp(`\\$${t}\\b`).test(body) && !seenLocals.has(t)).map((t) =>
+        `    (local $${t} i32)`
+      ),
     ].filter((d) => d !== "").join("\n");
     // console.log's argument temporaries (sw68), named by type: `$__clt_f64_1`
     const consoleTempDecls = consoleTempLocals(body, seenLocals).join("\n");
@@ -25710,7 +26310,7 @@ ${sum}
       else if (!isInt(a[2])) refuse(`it is assigned '${a[2].slice(0, 40)}'`);
     };
     // each update of a comma list on its own (`i += 2, j--`, ld78)
-    if (updPart) for (const u of this.splitArgs(updPart)) checkAssign(u.trim());
+    if (updPart) { for (const u of this.splitArgs(updPart)) checkAssign(u.trim()); }
     // Assignments to the counter in the body. `maskCode` preserves offsets, so each masked
     // statement's span is the same span in the raw line.
     const assigns = new RegExp(`(?:^|[^\\w$.])${name}\\s*(\\*\\*|[-+*/%])?=(?!=)`);
@@ -25755,8 +26355,9 @@ ${sum}
     // `(e as Error).message`: a cast of a NAME to a class / interface type before a member access is
     // only a type assertion; it was refused (ld80, 2026-10-22). Number casts (`(x as f64)`, lower
     // case) keep their conversion meaning.
-    this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
-      code.replace(/\(\s*([A-Za-z_$][\w$]*)\s+as\s+[A-Z][\w$]*\s*\)(?=\s*[.[])/g, "$1")
+    this.src = rewriteOutsideStringsAndComments(
+      this.src,
+      (code) => code.replace(/\(\s*([A-Za-z_$][\w$]*)\s+as\s+[A-Z][\w$]*\s*\)(?=\s*[.[])/g, "$1"),
     );
     // `abstract class A { abstract m(): T; … }` (ld74, 2026-10-22): an ordinary class whose abstract
     // members are declarations only. A call to one dispatches on the instance's class (see
@@ -25765,8 +26366,7 @@ ${sum}
       code
         .replace(/\babstract\s+class\b/g, "class")
         .replace(/^[ \t]*abstract\s+\w+\s*\([^)]*\)\s*(?::\s*[\w\[\]]+)?\s*;[ \t]*$/gm, "")
-        .replace(/^([ \t]*)abstract\s+(\w+\s*[?:])/gm, "$1$2")
-    );
+        .replace(/^([ \t]*)abstract\s+(\w+\s*[?:])/gm, "$1$2"));
     this.src = this.src.replace(/(?:export\s+)?type\s+\w+\s*=\s*keyof\s+\w+\s*;?/gm, "");
     // Phase 51.4: pass-through utility types (Partial/Readonly/Required/NonNullable) → inner type,
     // before parseStructs so the unwrapped type is seen everywhere (incl. interface field types).
@@ -25828,19 +26428,21 @@ ${sum}
     // parameter resolved the alias, so a call through it was "Unknown function 'f'" (ld78, 2026-10-22).
     {
       const aliasText = new Map<string, string>();
-      for (const m of this.src.matchAll(/type\s+(\w+)\s*=\s*(\([^)]*\)\s*=>\s*\w+)/g)) aliasText.set(m[1], m[2]);
+      for (const m of this.src.matchAll(/type\s+(\w+)\s*=\s*(\([^)]*\)\s*=>\s*\w+)/g)) {
+        aliasText.set(m[1], m[2]);
+      }
       if (aliasText.size > 0) {
         // …and an empty array of them, `const fns: Fn[] = []`, is Phase 44's `Array<(…) => T> = []`
         this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
           code.replace(
             /\b(const|let|var)(\s+\w+\s*):\s*(\w+)(?=\s*[=;\n])/g,
-            (whole, kw: string, name: string, t: string) => aliasText.has(t) ? `${kw}${name}: ${aliasText.get(t)}` : whole,
+            (whole, kw: string, name: string, t: string) =>
+              aliasText.has(t) ? `${kw}${name}: ${aliasText.get(t)}` : whole,
           ).replace(
             /\b(const|let|var)(\s+\w+\s*):\s*(\w+)\[\](?=\s*=\s*\[\s*\])/g,
             (whole, kw: string, name: string, t: string) =>
               aliasText.has(t) ? `${kw}${name}: Array<${aliasText.get(t)}>` : whole,
-          )
-        );
+          ));
       }
       // A LITERAL array of functions, `const ops: Op[] = [add, mul]` (or `Array<(…) => T>`): the
       // empty function array and one push per element, the form Phase 44 builds. It was no function
@@ -25848,16 +26450,26 @@ ${sum}
       this.src = rewriteOutsideStringsAndComments(this.src, (code) =>
         code.replace(
           /^([ \t]*)(const|let|var)\s+(\w+)\s*:\s*(?:(\w+)\[\]|Array<(\([^)]*\)\s*=>\s*\w+)>)\s*=\s*\[([^\[\]]+)\]\s*;?[ \t]*$/gm,
-          (whole, ind: string, kw: string, name: string, alias: string | undefined, inline: string | undefined, elems: string) => {
+          (
+            whole,
+            ind: string,
+            kw: string,
+            name: string,
+            alias: string | undefined,
+            inline: string | undefined,
+            elems: string,
+          ) => {
             const sig = inline ?? (alias ? aliasText.get(alias) : undefined);
             if (!sig) return whole;
             const items = elems.split(",").map((s) => s.trim()).filter(Boolean);
             if (!items.every((s) => /^\w+$/.test(s))) return whole; // function names only
-            return [`${ind}${kw} ${name}: Array<${sig}> = [];`, ...items.map((s) => `${ind}${name}.push(${s});`)]
+            return [
+              `${ind}${kw} ${name}: Array<${sig}> = [];`,
+              ...items.map((s) => `${ind}${name}.push(${s});`),
+            ]
               .join("\n");
           },
-        )
-      );
+        ));
     }
     // Phase 18 fix: replace Array.from({ length: N }, () => []) with __arr_from_2d__(N)
     // Must run BEFORE parseFunctions() so that collected bodyLines don't still contain
@@ -25960,7 +26572,9 @@ ${sum}
         // A function-typed variable, `const op: (x: i32) => i32 = dbl` (mirrors emitFunction's
         // pre-scan): an i32 table index, called through call_indirect. Top level had no such
         // clause, so it was an f64 local and `op(5)` a call to an undefined `$op` (ld01).
-        const funcTypedDeclS = line.match(/^(?:var|let|const)\s+(\w+)\s*:\s*(\([^)]*\)\s*=>\s*\w+)/);
+        const funcTypedDeclS = line.match(
+          /^(?:var|let|const)\s+(\w+)\s*:\s*(\([^)]*\)\s*=>\s*\w+)/,
+        );
         if (funcTypedDeclS) {
           this.funcTypeVars.set(funcTypedDeclS[1], this.parseFuncTypeSig(funcTypedDeclS[2]));
           startDeclaredLocals.push([funcTypedDeclS[1], "i32"]);
@@ -26071,8 +26685,9 @@ ${sum}
             if (bodyStr2 !== null) {
               const rawFields2 = parseDepth0Fields(bodyStr2);
               for (const [fieldKey2, valStr2] of Object.entries(rawFields2)) {
-                if (this.isStaticFieldValue(def2, fieldKey2, valStr2)) initFields2[fieldKey2] = valStr2;
-                else valueInits2[fieldKey2] = valStr2;
+                if (this.isStaticFieldValue(def2, fieldKey2, valStr2)) {
+                  initFields2[fieldKey2] = valStr2;
+                } else valueInits2[fieldKey2] = valStr2;
                 namedTokens2.add(fieldKey2);
               }
               const shorthandRe2 = /\b(\w+)\b(?!\s*:)/g;
@@ -26581,7 +27196,10 @@ ${sum}
               continue;
             }
             // …and a class instance a method returns, `const again: Counter = c.bump()` (ld74)
-            if (typeStr && this.classDefs.has(typeStr) && initExpr.endsWith(")") && this.classOfExpr(initExpr)) {
+            if (
+              typeStr && this.classDefs.has(typeStr) && initExpr.endsWith(")") &&
+              this.classOfExpr(initExpr)
+            ) {
               this.classVars.set(m[1], { className: typeStr, ptr: -1 });
               startLocals.set(m[1], "i32");
               startDeclaredLocals.push([m[1], "i32"]);
@@ -26816,12 +27434,28 @@ ${sum}
         declMap.set("__str_op_len", "i32");
       }
       // an array FIELD's alias for its other methods (ld108)
-      for (const n of new Set(bodyWat.match(/\$__fa_\d+\b|\$__str_nest_\d+_(?:ptr|len)\b/g) ?? [])) {
+      for (
+        const n of new Set(bodyWat.match(/\$__fa_\d+\b|\$__str_nest_\d+_(?:ptr|len)\b/g) ?? [])
+      ) {
         if (!declMap.has(n.slice(1))) declMap.set(n.slice(1), "i32"); // ld108 aliases, ld111 pairs
       }
       // an array literal built inline, `f([1, 2])`, a string push in a one-line loop (sw30, ld44;
       // see emitFunction); a struct literal pushed onto an array declared empty (ld113)
-      for (const t of ["__arr_tmp", "__arr_tmp2", "__str_push_ptr", "__str_push_len", "__str_arg_ptr", "__str_arg_len", "__destr_src", "__splice_s", "__splice_rm", "__chain_arr", "__rt_struct_ptr"]) {
+      for (
+        const t of [
+          "__arr_tmp",
+          "__arr_tmp2",
+          "__str_push_ptr",
+          "__str_push_len",
+          "__str_arg_ptr",
+          "__str_arg_len",
+          "__destr_src",
+          "__splice_s",
+          "__splice_rm",
+          "__chain_arr",
+          "__rt_struct_ptr",
+        ]
+      ) {
         if (new RegExp(`\\$${t}\\b`).test(bodyWat) && !declMap.has(t)) declMap.set(t, "i32");
       }
       // console.log's argument temporaries (sw68)
@@ -26870,7 +27504,9 @@ ${sum}
     // (1 = is-null, 0 = has-value) — the global-scope counterpart of the `$x__null` local.
     for (const [name, { initiallyNull, initiallyUndefined }] of this.moduleNullableGlobals) {
       moduleGlobalDecls.push(
-        `  (global $${name}__null (mut i32) (i32.const ${initiallyUndefined ? 2 : initiallyNull ? 1 : 0}))`,
+        `  (global $${name}__null (mut i32) (i32.const ${
+          initiallyUndefined ? 2 : initiallyNull ? 1 : 0
+        }))`,
       );
     }
     // Mutable module-level string globals: one (mut i32) for the ptr, one for the len.
@@ -26959,7 +27595,9 @@ ${sum}
       // (EXN_KINDS). Set before every throw; a catch copies it into its variable's `__kind` local.
       // A LIBRARY exports it, so a program it is merged into reads one kind (wasmmerge, sw119).
       this.needsExceptionTag
-        ? `  (global $__exn_kind${this.mode === "library" ? ` (export "__exn_kind")` : ""} (mut i32) (i32.const 0))`
+        ? `  (global $__exn_kind${
+          this.mode === "library" ? ` (export "__exn_kind")` : ""
+        } (mut i32) (i32.const 0))`
         : "",
       // `a && b` / `a || b` as an operand (sw49): the left value, held while its truthiness is tested.
       ...[...this.logicalScratch].map((t) => `  (global $__lor_${t} (mut ${t}) (${t}.const 0))`),
@@ -27112,7 +27750,8 @@ function mergeOneWasmImport(
  *  (a refused program, sw112's name collision) is the bundler's own message, not "Cannot read". */
 function bundleErrorText(tsPath: string, err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
-  return (err instanceof Error && err.name === "NotFound") || /No such file|cannot find|os error 2/i.test(msg)
+  return (err instanceof Error && err.name === "NotFound") ||
+      /No such file|cannot find|os error 2/i.test(msg)
     ? `Cannot read ${tsPath}: ${msg}`
     : msg;
 }
@@ -27232,7 +27871,11 @@ export async function compileWasiTs(
     // (read without debug names: the export says `(global N)`, the global carries `(;N;)`)
     const heapIdx = wat2.match(/\(export\s+"__heap_ptr"\s+\(global\s+(\d+)\)\)/)?.[1] ?? "0";
     const heapInit = parseInt(
-      wat2.match(new RegExp(`\\(global\\s+\\(;${heapIdx};\\)\\s+\\(mut i32\\)\\s+\\(?\\s*i32\\.const\\s+(\\d+)`))
+      wat2.match(
+        new RegExp(
+          `\\(global\\s+\\(;${heapIdx};\\)\\s+\\(mut i32\\)\\s+\\(?\\s*i32\\.const\\s+(\\d+)`,
+        ),
+      )
         ?.[1] ?? "0",
     );
     dataOffset += (Math.max(dataExtent(wat2).hi, heapInit) + 7) & ~7;
@@ -27540,7 +28183,9 @@ function suggestNextStepOnAbort(path: string, diagnostics: readonly string[]): v
   // integer division, a float stored into an integer, a bigint where JavaScript refuses one) carry
   // their own `help:` in the report, and the dynamic runtime is NOT the answer to them.
   const errorLike = diagnostics.filter((d) => classify(d) === "undefined-name");
-  const featureLike = diagnostics.filter((d) => !isSourceError(classify(d)) && !errorLike.includes(d));
+  const featureLike = diagnostics.filter((d) =>
+    !isSourceError(classify(d)) && !errorLike.includes(d)
+  );
 
   console.error("");
   if (errorLike.length > 0) {

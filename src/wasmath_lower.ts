@@ -158,41 +158,102 @@ export const WM_WAT: Record<string, WmHelper> = {
   i32_extend8: { params: ["i32"], result: "i32", body: un("i32.extend8_s") },
   i32_extend16: { params: ["i32"], result: "i32", body: un("i32.extend16_s") },
   i32_abs: {
-    params: ["i32"], result: "i32",
+    params: ["i32"],
+    result: "i32",
     body: `(select (i32.sub (i32.const 0) ${L0}) ${L0} (i32.lt_s ${L0} (i32.const 0)))`,
   },
   i32_min: { params: ["i32", "i32"], result: "i32", body: sel("i32", "lt_s") },
   i32_max: { params: ["i32", "i32"], result: "i32", body: sel("i32", "gt_s") },
   i32_sign: {
-    params: ["i32"], result: "i32",
+    params: ["i32"],
+    result: "i32",
     body: `(i32.sub (i32.gt_s ${L0} (i32.const 0)) (i32.lt_s ${L0} (i32.const 0)))`,
   },
   i32_pow: powLoop("i32"),
   i32_fromF64: { params: ["f64"], result: "i32", body: un("i32.trunc_f64_s") },
   i32_fromF64Sat: { params: ["f64"], result: "i32", body: un("i32.trunc_sat_f64_s") },
-  i32_fromF64Wrap: { params: ["f64"], result: "i32", body: `(call $__wm_toint32 ${L0})`, uses: ["toint32"] },
+  i32_fromF64Wrap: {
+    params: ["f64"],
+    result: "i32",
+    body: `(call $__wm_toint32 ${L0})`,
+    uses: ["toint32"],
+  },
   i32_fromF32: { params: ["f32"], result: "i32", body: un("i32.trunc_f32_s") },
   i32_fromF32Sat: { params: ["f32"], result: "i32", body: un("i32.trunc_sat_f32_s") },
   i32_fromI64: { params: ["i64"], result: "i32", body: un("i32.wrap_i64") },
 
   // ── u32 (carried as an exact f64) ──────────────────────────────────────────────────────────
   u32_from: { params: ["f64"], result: "f64", body: asU32(U0), uses: ["toint32"] },
-  u32_add: { params: ["f64", "f64"], result: "f64", body: asU32(`(i32.add ${U0} ${U1})`), uses: ["toint32"] },
-  u32_sub: { params: ["f64", "f64"], result: "f64", body: asU32(`(i32.sub ${U0} ${U1})`), uses: ["toint32"] },
-  u32_mul: { params: ["f64", "f64"], result: "f64", body: asU32(`(i32.mul ${U0} ${U1})`), uses: ["toint32"] },
-  u32_div: { params: ["f64", "f64"], result: "f64", body: asU32(`(i32.div_u ${U0} ${U1})`), uses: ["toint32"] },
-  u32_rem: { params: ["f64", "f64"], result: "f64", body: asU32(`(i32.rem_u ${U0} ${U1})`), uses: ["toint32"] },
-  u32_shr: { params: ["f64", "f64"], result: "f64", body: asU32(`(i32.shr_u ${U0} ${U1})`), uses: ["toint32"] },
-  u32_lt: { params: ["f64", "f64"], result: "bool", body: `(i32.lt_u ${U0} ${U1})`, uses: ["toint32"] },
-  u32_gt: { params: ["f64", "f64"], result: "bool", body: `(i32.gt_u ${U0} ${U1})`, uses: ["toint32"] },
-  u32_le: { params: ["f64", "f64"], result: "bool", body: `(i32.le_u ${U0} ${U1})`, uses: ["toint32"] },
-  u32_ge: { params: ["f64", "f64"], result: "bool", body: `(i32.ge_u ${U0} ${U1})`, uses: ["toint32"] },
+  u32_add: {
+    params: ["f64", "f64"],
+    result: "f64",
+    body: asU32(`(i32.add ${U0} ${U1})`),
+    uses: ["toint32"],
+  },
+  u32_sub: {
+    params: ["f64", "f64"],
+    result: "f64",
+    body: asU32(`(i32.sub ${U0} ${U1})`),
+    uses: ["toint32"],
+  },
+  u32_mul: {
+    params: ["f64", "f64"],
+    result: "f64",
+    body: asU32(`(i32.mul ${U0} ${U1})`),
+    uses: ["toint32"],
+  },
+  u32_div: {
+    params: ["f64", "f64"],
+    result: "f64",
+    body: asU32(`(i32.div_u ${U0} ${U1})`),
+    uses: ["toint32"],
+  },
+  u32_rem: {
+    params: ["f64", "f64"],
+    result: "f64",
+    body: asU32(`(i32.rem_u ${U0} ${U1})`),
+    uses: ["toint32"],
+  },
+  u32_shr: {
+    params: ["f64", "f64"],
+    result: "f64",
+    body: asU32(`(i32.shr_u ${U0} ${U1})`),
+    uses: ["toint32"],
+  },
+  u32_lt: {
+    params: ["f64", "f64"],
+    result: "bool",
+    body: `(i32.lt_u ${U0} ${U1})`,
+    uses: ["toint32"],
+  },
+  u32_gt: {
+    params: ["f64", "f64"],
+    result: "bool",
+    body: `(i32.gt_u ${U0} ${U1})`,
+    uses: ["toint32"],
+  },
+  u32_le: {
+    params: ["f64", "f64"],
+    result: "bool",
+    body: `(i32.le_u ${U0} ${U1})`,
+    uses: ["toint32"],
+  },
+  u32_ge: {
+    params: ["f64", "f64"],
+    result: "bool",
+    body: `(i32.ge_u ${U0} ${U1})`,
+    uses: ["toint32"],
+  },
   u32_min: {
-    params: ["f64", "f64"], result: "f64", uses: ["toint32"],
+    params: ["f64", "f64"],
+    result: "f64",
+    uses: ["toint32"],
     body: asU32(`(select ${U0} ${U1} (i32.lt_u ${U0} ${U1}))`),
   },
   u32_max: {
-    params: ["f64", "f64"], result: "f64", uses: ["toint32"],
+    params: ["f64", "f64"],
+    result: "f64",
+    uses: ["toint32"],
     body: asU32(`(select ${U0} ${U1} (i32.gt_u ${U0} ${U1}))`),
   },
   u32_toF64: { params: ["f64"], result: "f64", body: asU32(U0), uses: ["toint32"] },
@@ -222,18 +283,26 @@ export const WM_WAT: Record<string, WmHelper> = {
   i64_extend16: { params: ["i64"], result: "i64", body: un("i64.extend16_s") },
   i64_extend32: { params: ["i64"], result: "i64", body: un("i64.extend32_s") },
   i64_abs: {
-    params: ["i64"], result: "i64",
+    params: ["i64"],
+    result: "i64",
     body: `(select (i64.sub (i64.const 0) ${L0}) ${L0} (i64.lt_s ${L0} (i64.const 0)))`,
   },
   i64_min: { params: ["i64", "i64"], result: "i64", body: sel("i64", "lt_s") },
   i64_max: { params: ["i64", "i64"], result: "i64", body: sel("i64", "gt_s") },
   i64_sign: {
-    params: ["i64"], result: "i64",
-    body: `(i64.extend_i32_s (i32.sub (i64.gt_s ${L0} (i64.const 0)) (i64.lt_s ${L0} (i64.const 0))))`,
+    params: ["i64"],
+    result: "i64",
+    body:
+      `(i64.extend_i32_s (i32.sub (i64.gt_s ${L0} (i64.const 0)) (i64.lt_s ${L0} (i64.const 0))))`,
   },
   i64_pow: powLoop("i64"),
   i64_fromI32: { params: ["i32"], result: "i64", body: un("i64.extend_i32_s") },
-  i64_fromU32: { params: ["f64"], result: "i64", body: `(i64.extend_i32_u ${U0})`, uses: ["toint32"] },
+  i64_fromU32: {
+    params: ["f64"],
+    result: "i64",
+    body: `(i64.extend_i32_u ${U0})`,
+    uses: ["toint32"],
+  },
   i64_fromF64: { params: ["f64"], result: "i64", body: un("i64.trunc_f64_s") },
   i64_fromF64Sat: { params: ["f64"], result: "i64", body: un("i64.trunc_sat_f64_s") },
   i64_fromF32: { params: ["f32"], result: "i64", body: un("i64.trunc_f32_s") },
@@ -268,7 +337,12 @@ for (const t of ["f64", "f32"] as const) {
   WM_WAT[`${t}_bits`] = { params: [t], result: it, body: un(`${it}.reinterpret_${t}`) };
   WM_WAT[`${t}_fromBits`] = { params: [it], result: t, body: un(`${t}.reinterpret_${it}`) };
   WM_WAT[`${t}_fromI32`] = { params: ["i32"], result: t, body: un(`${t}.convert_i32_s`) };
-  WM_WAT[`${t}_fromU32`] = { params: ["f64"], result: t, body: `(${t}.convert_i32_u ${U0})`, uses: ["toint32"] };
+  WM_WAT[`${t}_fromU32`] = {
+    params: ["f64"],
+    result: t,
+    body: `(${t}.convert_i32_u ${U0})`,
+    uses: ["toint32"],
+  };
   WM_WAT[`${t}_fromI64`] = { params: ["i64"], result: t, body: un(`${t}.convert_i64_s`) };
   WM_WAT[`${t}_fromU64`] = { params: ["i64"], result: t, body: un(`${t}.convert_i64_u`) };
   WM_WAT[`${t}_toI32`] = { params: [t], result: "i32", body: un(`i32.trunc_${t}_s`) };
@@ -281,25 +355,77 @@ for (const t of ["f64", "f32"] as const) {
   WM_WAT[`${t}_toU64Sat`] = { params: [t], result: "i64", body: un(`i64.trunc_sat_${t}_u`) };
 }
 WM_WAT.f64_fromF32 = { params: ["f32"], result: "f64", body: un("f64.promote_f32") };
-WM_WAT.f64_toI32Wrap = { params: ["f64"], result: "i32", body: `(call $__wm_toint32 ${L0})`, uses: ["toint32"] };
+WM_WAT.f64_toI32Wrap = {
+  params: ["f64"],
+  result: "i32",
+  body: `(call $__wm_toint32 ${L0})`,
+  uses: ["toint32"],
+};
 WM_WAT.f32_from = { params: ["f64"], result: "f32", body: un("f32.demote_f64") };
 
 /** f64 members that ARE JavaScript's `Math` (functions and constants): rewritten to `Math.<x>`. */
 export const WM_F64_MATH = [
-  "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh", "asinh", "acosh",
-  "atanh", "exp", "expm1", "log", "log1p", "log2", "log10", "pow", "cbrt", "hypot", "round", "sign",
-  "E", "LN10", "LN2", "LOG10E", "LOG2E", "PI", "SQRT1_2", "SQRT2",
+  "sin",
+  "cos",
+  "tan",
+  "asin",
+  "acos",
+  "atan",
+  "atan2",
+  "sinh",
+  "cosh",
+  "tanh",
+  "asinh",
+  "acosh",
+  "atanh",
+  "exp",
+  "expm1",
+  "log",
+  "log1p",
+  "log2",
+  "log10",
+  "pow",
+  "cbrt",
+  "hypot",
+  "round",
+  "sign",
+  "E",
+  "LN10",
+  "LN2",
+  "LOG10E",
+  "LOG2E",
+  "PI",
+  "SQRT1_2",
+  "SQRT2",
 ];
 
 /** f32 `Math`-style members: their TypeScript helpers, exactly the TypeScript bodies. */
 const F32_UNARY = [
-  "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
-  "exp", "expm1", "log", "log1p", "log2", "log10", "cbrt",
+  "sin",
+  "cos",
+  "tan",
+  "asin",
+  "acos",
+  "atan",
+  "sinh",
+  "cosh",
+  "tanh",
+  "asinh",
+  "acosh",
+  "atanh",
+  "exp",
+  "expm1",
+  "log",
+  "log1p",
+  "log2",
+  "log10",
+  "cbrt",
 ];
 const F32_BINARY = ["atan2", "pow", "hypot"];
 export const WM_F32_TS: Record<string, string> = {};
 for (const m of F32_UNARY) {
-  WM_F32_TS[m] = `function __wm_f32_${m}(a: f64): f32 { return Math.fround(Math.${m}(Math.fround(a))); }`;
+  WM_F32_TS[m] =
+    `function __wm_f32_${m}(a: f64): f32 { return Math.fround(Math.${m}(Math.fround(a))); }`;
 }
 for (const m of F32_BINARY) {
   WM_F32_TS[m] =
@@ -314,8 +440,10 @@ export function wasMathRewrites(local: string, ns: string): Map<string, string> 
   for (const key of Object.keys(WM_WAT)) {
     if (key.startsWith(`${ns}_`)) out.set(`${local}.${key.slice(ns.length + 1)}`, `__wm_${key}`);
   }
-  if (ns === "f64") for (const m of WM_F64_MATH) out.set(`${local}.${m}`, `Math.${m}`);
-  if (ns === "f32") for (const m of Object.keys(WM_F32_TS)) out.set(`${local}.${m}`, `__wm_f32_${m}`);
+  if (ns === "f64") { for (const m of WM_F64_MATH) out.set(`${local}.${m}`, `Math.${m}`); }
+  if (ns === "f32") {
+    for (const m of Object.keys(WM_F32_TS)) out.set(`${local}.${m}`, `__wm_f32_${m}`);
+  }
   return out;
 }
 

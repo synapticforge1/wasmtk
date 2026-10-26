@@ -508,7 +508,9 @@ function exportCallArgs(
     const p = params[i].trim();
     if (p === "" || isNaN(Number(p))) return { error: `'${params[i]}' is not a number` };
     if (types[i] === "i64") {
-      if (!/^[+-]?\d+$/.test(p)) return { error: `'${params[i]}' is not an integer (parameter ${i + 1} is i64)` };
+      if (!/^[+-]?\d+$/.test(p)) {
+        return { error: `'${params[i]}' is not an integer (parameter ${i + 1} is i64)` };
+      }
       args.push(BigInt(p));
     } else {
       args.push(Number(p));

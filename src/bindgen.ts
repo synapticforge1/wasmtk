@@ -379,11 +379,15 @@ function genLoadModule(parsed: ParsedWit, runtime: "deno" | "node" | "bun"): str
     lines.push(`  } else if (/^(?:https?|data|blob):/i.test(String(source))) {`);
     lines.push(`    raw = await (await fetch(String(source))).arrayBuffer();`);
     lines.push(`  } else {`);
-    lines.push(`    raw = await Deno.readFile(source instanceof URL || /^file:/i.test(source) ? new URL(source) : source);`);
+    lines.push(
+      `    raw = await Deno.readFile(source instanceof URL || /^file:/i.test(source) ? new URL(source) : source);`,
+    );
     lines.push(`  }`);
   }
 
-  lines.push(`  const { instance } = await WebAssembly.instantiate(raw, importObj as unknown as WebAssembly.Imports);`);
+  lines.push(
+    `  const { instance } = await WebAssembly.instantiate(raw, importObj as unknown as WebAssembly.Imports);`,
+  );
   lines.push(`  const exp = instance.exports as Record<string, unknown>;`);
   if (exportedFns.length > 0) {
     // Resolve an export by name, tolerating the lossy WIT kebab<->camel round-trip:

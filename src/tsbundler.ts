@@ -55,7 +55,7 @@
 import { basename, dirname, join } from "@std/path";
 import { rt } from "./rt.ts";
 import { CAPABILITIES } from "./wasm/caps_bytes.ts";
-import { isWasMathSpecifier, WM_F32_TS, WM_NAMESPACES, wasMathRewrites } from "./wasmath_lower.ts";
+import { isWasMathSpecifier, wasMathRewrites, WM_F32_TS, WM_NAMESPACES } from "./wasmath_lower.ts";
 
 // ---------------------------------------------------------------------------
 // Phase 18 — WASM import types
@@ -119,7 +119,11 @@ function modulePrefix(filePath: string): string {
 /** The prefix of an exported CLASS: capitalised (`shapes` → `Shapes`, `2d` → `M2d`), since wasic
  *  reads `new X(…)` and a class type by a leading capital (ld84, 2026-10-22). */
 function classPrefix(prefix: string): string {
-  return /^[a-z]/.test(prefix) ? prefix[0]!.toUpperCase() + prefix.slice(1) : /^[A-Z]/.test(prefix) ? prefix : `M${prefix}`;
+  return /^[a-z]/.test(prefix)
+    ? prefix[0]!.toUpperCase() + prefix.slice(1)
+    : /^[A-Z]/.test(prefix)
+    ? prefix
+    : `M${prefix}`;
 }
 
 /**
@@ -213,7 +217,10 @@ function applyRenames(src: string, renames: Map<string, string>): string {
   // (`console.log("add")` printed the module-prefixed name; a wasMath label "i32.add" printed
   // `__wm_i32_add`, 2026-10-09). Code inside a template's `${…}` is code.
   const code = codeMask(src);
-  return src.replace(re, (match, offset: number) => (code[offset] ? renames.get(match) ?? match : match));
+  return src.replace(
+    re,
+    (match, offset: number) => (code[offset] ? renames.get(match) ?? match : match),
+  );
 }
 
 /** 1 for each character of `s` that is CODE: not inside a comment, a string literal or a template
@@ -742,7 +749,11 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
     // the spelling), so the collision is refused. `type` / `interface` repeats are left alone:
     // most files declare `type i32 = number`.
     const srcCode = codeMask(src);
-    for (const d of src.matchAll(/^(?:(?:async\s+)?function\*?|const|let|var|class|enum)\s+([A-Za-z_$][\w$]*)/gm)) {
+    for (
+      const d of src.matchAll(
+        /^(?:(?:async\s+)?function\*?|const|let|var|class|enum)\s+([A-Za-z_$][\w$]*)/gm,
+      )
+    ) {
       if (!srcCode[d.index!]) continue;
       const owner = topLevelOwner.get(d[1]!);
       if (owner !== undefined && owner !== realPath) {
@@ -766,7 +777,9 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
   // wasMath's f32 `Math`-style members are small TypeScript helpers (exactly their wasMath
   // bodies); append the ones the program calls, once.
   const f32Used = new Set(
-    [...result.source.matchAll(/\b__wm_f32_(\w+)\b/g)].map((m) => m[1]).filter((m) => m in WM_F32_TS),
+    [...result.source.matchAll(/\b__wm_f32_(\w+)\b/g)].map((m) => m[1]).filter((m) =>
+      m in WM_F32_TS
+    ),
   );
   const helpers = [...f32Used].map((m) => WM_F32_TS[m]).join("\n");
   return {

@@ -34,14 +34,34 @@ import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
  *  too, so `f64.sin` and the rest give the SAME correctly rounded value in Deno as in wasm (owner
  *  decision "CR, in both", 2026-10-09). V8's own `Math.sin` & co. may differ by one ulp. Compiled
  *  on first use: a program that never calls them pays nothing. */
-type MathLib = Record<
-  | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "asinh" | "acosh"
-  | "atanh" | "exp" | "expm1" | "log" | "log1p" | "log2" | "log10" | "cbrt",
-  (a: number) => number
-> & Record<"atan2" | "pow", (a: number, b: number) => number>;
+type MathLib =
+  & Record<
+    | "sin"
+    | "cos"
+    | "tan"
+    | "asin"
+    | "acos"
+    | "atan"
+    | "sinh"
+    | "cosh"
+    | "tanh"
+    | "asinh"
+    | "acosh"
+    | "atanh"
+    | "exp"
+    | "expm1"
+    | "log"
+    | "log1p"
+    | "log2"
+    | "log10"
+    | "cbrt",
+    (a: number) => number
+  >
+  & Record<"atan2" | "pow", (a: number, b: number) => number>;
 let mathlib: MathLib | undefined;
 const ml = (): MathLib =>
-  mathlib ??= new WebAssembly.Instance(new WebAssembly.Module(MATHLIB_BYTES)).exports as unknown as MathLib;
+  mathlib ??= new WebAssembly.Instance(new WebAssembly.Module(MATHLIB_BYTES))
+    .exports as unknown as MathLib;
 
 // ── Types (a type and a value may share a name: `const x: i32 = i32.add(a, b)`) ──────────────
 
@@ -60,7 +80,9 @@ export type f64 = number;
 
 // ── Traps (the WebAssembly spec's trap names) ──────────────────────────────────────────────────
 
-function trap(what: "integer divide by zero" | "integer overflow" | "invalid conversion to integer"): never {
+function trap(
+  what: "integer divide by zero" | "integer overflow" | "invalid conversion to integer",
+): never {
   throw new RangeError(what);
 }
 
