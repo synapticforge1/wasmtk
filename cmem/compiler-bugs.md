@@ -29,7 +29,8 @@ sw180 for `wasmbundle` (the H11 switch); found while fixing: sw193 (open) and th
 Open now: silent 23 compiler + 20 tool.
 
 **2026-10-26, found measuring binaryang's `wasm-bundle` against our bundling tests (letter H11):
-sw139, sw140 (silent, tools), both FIXED** (branch `fix/h11-bundle-findings-2026-10-26`).
+sw139, sw140 (silent, tools), both FIXED** (merged to `main` and pushed 2026-10-26; the work
+branch was deleted after the second history purge).
 - **sw139** `wasmbundle` seated the synthesized shared `$__heap_ptr` at the sum of the modules'
   data extents: 0 when no module has data. wasic reserves the bytes below `DATA_BASE` (260):
   scratch slots and the zero header every EMPTY array points at (an empty array is the pointer 0).

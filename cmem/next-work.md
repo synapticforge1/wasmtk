@@ -42,7 +42,7 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   runs with no override, and `go_bindgen` is 7 / 7 without `GOFLAGS=-buildvcs=false`. The overrides
   are no longer used.
 
-## For the workspace review — 2026-10-26 (W6–W11; the workspace pulls these, nothing written there from here except the owner-directed notes block)
+## For the workspace review — 2026-10-26 (W6–W12; ledger row C10, answers in the ledger's cells; W6, W7, W12 done the same day)
 
 - **W6. H22: DONE 2026-10-26** (owner: "fix the not done items"). It had NOT been recorded (the
   2026-10-26 review's "H22 recorded: … wasmtk" and H25's "fully compliant" did not hold); now in
@@ -645,32 +645,16 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
 - **Offload #1: our regex-over-WAT merging gives way to binaryang's parser** (offload-inventory.md;
   I2 / H11). The trigger is MET on our pin (2.2.0). The bundle path moved 2026-10-26; the wasic
   MERGE path (`import … from "x.wasm"`, wasmmerge.ts) is what remains.
-- **The next release** (roadmap.md, the unreleased block since v2.0.3): the compatibility gate's
-  floor since v2.0.3 is now **MAJOR** (re-measured 2026-10-09, `deno task api-surface --floor`),
-  set by ONE symbol: `./console_log` `LogSegment`, whose four variants gained an OPTIONAL property
-  (`console?` sw41, `strConv?` sw50). Every v2.0.3 value is still valid. **DECIDED (owner,
-  2026-10-09): the next release is MAJOR** (3.0.0; no reviewed exception for `LogSegment`). The
-  notes still name every behaviour change below. Everything else since v2.0.3 is minor (incl. the
-  new `./wasMath` entrypoint); the Deno floor is
-  written then (workflow.md, release step 2b). **The notes must name the BEHAVIOUR changes since
-  v2.0.3** (the package surface is unchanged, but programs can print differently):
-  - `e instanceof Error` is false for a thrown string or number, and `String(e)` follows what
-    was thrown (sw44);
-  - top-level code beside a `main` function now runs (sw46);
-  - operators group as in JavaScript, and an `i32` mixed with a known float computes as a float
-    (sw10–sw17);
-  - `console.log(-0)` prints `-0` (sw41);
-  - `Math.round` / `sign` / `hypot` match JavaScript exactly (wasm-math Phase 1);
-  - an array in a template, concat or `String(...)` is its join; a bigint there drops its `n`;
-    `Math.min` / `max` take every argument; `x ?? d` on a plain number is `x` (2026-10-09);
-  - `a && b` / `a || b` give an operand, not a boolean (`x || 7` is 7), and a closure keeps its
-    changes to a captured parameter (sw48, sw49);
-  - a closure in a returned object returns its real type: a boolean prints `true`, an f64 keeps
-    its fraction (sw52), and a closure keeps its changes to a captured f64 (sw53);
-  - a `number | null` field or tuple element holding 0 is no longer null, a null one prints
-    `null`, and nullable records are 4 bytes larger per such field (sw51, sw54–sw56).
-
-  Whether any of these makes the release MAJOR is the owner's call.
+- **The next release after 3.0.0** (roadmap.md § "The unreleased block (on `main`, after
+  v3.0.0)"): not scheduled; the owner's word. The package SURFACE gained nothing and lost nothing
+  this session (`runWasmBundle`'s signature unchanged; `deno task api-surface --floor` is what
+  decides — re-measure before bumping). BEHAVIOUR changes it must name: an i32 literal that does
+  not fit is now refused (sw160, BREAKING row in README), `wasmbundle` output laid out per image
+  (README row), fresh `new`, switch order. Before a patch / minor: Rule 3's previous-tag tests
+  (`bun scripts/check_prev_tests.ts`) and, once they exist, the consumer suites (H6.5b). The
+  owner's number-type direction, if built first, would make it a MAJOR (hints and wasMath
+  removed, after a deprecating release). (The 3.0.0 run-up text this item held is in git:
+  `git log -S"The next release" -- cmem/next-work.md`.)
 
 - **Review WasmEdge's AOT shared-library output** (owner, 2026-09-30):
   https://github.com/WasmEdge/WasmEdge. How a wasm module becomes a native library through
