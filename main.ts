@@ -130,7 +130,11 @@ async function main(): Promise<void> {
       }
       raw.push(t);
     }
-    if (raw.length === args._.length) args._ = raw;
+    // parseArgs reads a negative number (`-1`) as a short flag, so its list is shorter and the
+    // number was lost: `mod lib.wasm f -1` called `f()` and printed its result (2026-10-26). The
+    // scan above keeps it, so a negative number means the scan's list is the right one.
+    const negativeNumber = (t: string) => t.startsWith("-") && !isNaN(Number(t));
+    if (raw.length === args._.length || Deno.args.some(negativeNumber)) args._ = raw;
   }
 
   // A flag with a fixed set of values: anything else was silently its default (`--runtime=nodee`

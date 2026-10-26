@@ -8,6 +8,62 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+## DRAFT (not yet sent) — 2026-10-26: `wasm-bundle` measured on our inputs; what stops us switching
+
+**Short version:** we ran your 2.2.0 `wasm-bundle` over the inputs of every wasmtk test that
+bundles, and it is right wherever wasmtk's own bundler is right — and right in one place ours was
+wrong. We cannot switch `wasmtk wasmbundle` to it yet, for two reasons on wasic's side and one
+request on yours.
+
+**What we ran** (`wasmBundle(paths, …)` from `@jrmarcum/binaryang@2.2.0/tools/wasm-bundle`, each
+output checked exactly as our tests check ours):
+
+| inputs | `unmarked: 'refuse'` (your default) | `unmarked: 'guess'` |
+| --- | --- | --- |
+| two WAT libraries with data at 300 (our sw109) | refused: no linking section | right (65, 122) |
+| a `(` inside a data string (ld86) | refused | right |
+| a module whose cursor sits at 131072 in 3 pages (ld81) | refused | right |
+| a library with a host import, bundled with another (2026-06-24) | refused | right (import kept, `calc(5)=11`) |
+| one function under two export names (sw111) | refused | right |
+| two trivial modules (our witgen check) | refused | right |
+| `18_WasmImportMerge`: a `modc` library + a `wasic` program, `--on-conflict=exclude` | refused | right (`Scaled Area Result: 60`, `v1.8.0-core`) |
+
+Every refusal is the one you designed: nothing we produce today carries `linking` / `reloc.*`.
+
+**Where yours is right and ours was not:** two wasic libraries, each with a module-level array.
+After `apush(10)`, `bpush(10)` returned 18 from our bundle and 10 from yours. Ours seated the
+shared heap at 0 when no module had data, below wasic's reserved low area; fixed on our side today
+(our sw139).
+
+**Why we cannot switch yet:**
+
+1. **Every pair of wasic modules clashes on three exports**, `__heap_ptr`, `__exn_tag` and
+   `__exn_kind`, so the default policy refuses them. With `--on-conflict=prefix` they bundle, but
+   each keeps its OWN heap pointer and its own exception tag. Our bundler makes them one, on
+   purpose: one heap that grows at the end of memory (a wasic heap grows from its pointer upward
+   and calls `memory.grow` only past `memory.size`, so in your layout the first module's heap runs
+   into the second module's image once it outgrows its own pages), and one tag, so a program's
+   `catch` sees a library's `throw` (our ld114). Those are wasic semantics, not yours to carry.
+2. **wasic marks no addresses yet.** Its output is optimised (`-Oz`) before anyone bundles it, and
+   your bundler rightly wants marks it can verify, so wasic needs a relocatable, unoptimised output
+   with `(@reloc data)` on every data address, bundled first and optimised after. That is ours to
+   build (about 165 allocation sites in wasic and console_log).
+
+**The request:** to do (1) as a pass of OURS over your IR, before and after `bundle()`, we need a
+public way from bytes to the `WasmModule` that `bundle()` takes, and back. Today `readForPasses`
+and `writeWasm` are internal (`src/ir/prepare.ts`, `src/ir/write-wasm.ts`); neither `./ir` nor
+`./tools/wasm-bundle` exports them, so the only routes are `compat/binaryen`'s private `_inner` or
+editing printed WAT with regexes, which is what this move retires. Exporting the two (or an
+equivalent read / write pair) from `./ir` would let us: drop the three exports from each wasic
+input and turn its heap pointer, tag and kind global into imports of one small shared module, then
+seat that heap above the last image after `bundle()` reports the layout. Would you rather own a
+`share` option in `BundleOptions` instead? We think the pass belongs with us, but it is your API.
+
+**One hazard both bundlers share, for your caveats list:** wasic's empty array is the pointer 0,
+read as a zero header at address 0. In a bundle, address 0 belongs to the FIRST image; if that
+image is not wasic's and has non-zero bytes there, a wasic module's empty arrays read them. We
+have not seen it in a real input; we mention it because neither bundler can tell.
+
 ## DRAFT (not yet sent) — 2026-10-23: 1.15.0, then 1.16.1, pinned; the gate holds as on 1.13.0
 
 **Short version:** we bumped wasmtk's pin from 1.13.0 to **1.15.0** (all three specifiers) and ran
