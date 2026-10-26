@@ -37,9 +37,10 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   (4) the workspace rule (layout-and-packaging Rule 3) makes a red consumer suite a release
   BLOCKER for a patch or minor, so it will gate wasmtk's next 3.x release once it exists (3.0.0
   was a major and went out without it).
-- **Environment (machine-local, cmem/local/environment.md):** git's `safe.directory` no longer
-  covers this checkout's new path; TinyGo's VCS stamping then fails `go_bindgen`
-  (`GOFLAGS=-buildvcs=false` → 7 / 7). Owner's machine config.
+- **Environment: RESOLVED 2026-10-26** (ledger C9, closed): the owner added a wildcard
+  `safe.directory` for the workspace folder to the system config. Verified here the same day: git
+  runs with no override, and `go_bindgen` is 7 / 7 without `GOFLAGS=-buildvcs=false`. The overrides
+  are no longer used.
 
 ## For the workspace review — 2026-10-26 (W6–W11; the workspace pulls these, nothing written there from here except the owner-directed notes block)
 
