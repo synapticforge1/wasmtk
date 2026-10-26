@@ -133,7 +133,8 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 > outpath **14** (+2 dync) · witgen **24** (+1 binaryang header) · typed_decl **50** (+3 refused
 > literals, +1 accepted set) · wast 64,506 / 0 / 16 ALL CLEAN · cross-check **1368** on baseline,
 > 0 regressed, then `--update-baseline` added the two new tests' 6 pairs (all `match`) · every
-> other suite at its count. **Go suites ran with `GOFLAGS=-buildvcs=false`** (git's
+> other suite at its count. **Go suites ran with `GOFLAGS=-buildvcs=false`** (not needed since
+> the owner's system-config fix the same day, ledger C9: go_bindgen 7 / 7 without it) (git's
 > `safe.directory` does not cover the new path; machine config, cmem/local). Gate runner: one suite
 > at a time, in workflow.md's order, each to its own log.
 

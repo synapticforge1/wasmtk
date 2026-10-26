@@ -312,6 +312,27 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 
 ## Traps that have actually bitten
 
+- **PowerShell eats `stash@{0}`** (2026-10-26): unquoted, `{0}` is a script block, so
+  `git checkout stash@{0} -- .` FAILED while the `git stash drop` chained after it ran — the work
+  existed only as the dropped stash commit, recovered from the hash `stash drop` printed
+  (`git checkout <hash> -- .`). Quote it (`'stash@{0}'`), and never chain a `drop` after the
+  command that consumes the stash: check, then drop.
+- **`git reflog expire --expire=now --all` empties the stash LIST** (the list IS `refs/stash`'s
+  reflog; the ref survives). `git stash store <commit>` writes nothing when `refs/stash` already
+  holds that commit: `git update-ref -d refs/stash` first, then `stash store` (2026-10-26, after
+  the second purge).
+- **A `--mirror` clone refuses explicit refspecs on `git push origin`** ("--mirror can't be
+  combined with refspecs"): push to the URL instead, one `--force-with-lease=<ref>:<old>` per ref
+  (2026-10-26). Do history rewrites in such a mirror on NTFS, never in the exFAT checkout (VS
+  Code's auto-fetch moves remote-tracking refs mid-rewrite, 2026-10-23).
+- **`deno fmt` drift lands in a fix commit** (2026-10-26: 12 files on `main` were not fmt-clean
+  under Deno 2.9.8, so `deno fmt main.ts src/` turned a ~200-line fix into ~1,900 lines). Run
+  `deno fmt --check main.ts src/` BEFORE starting; if `main` is dirty, format it in its own
+  `style:` commit first, then the fix.
+- **A privacy scan with `git grep -I` skips binaries** (2026-10-26): a committed `.wasm` carried
+  Zig DWARF with machine paths through two scans and a history purge. Scan with `-a`, and scan
+  every blob of every ref before a purge (INDEX.md § Policy).
+
 - **A branch switch can fail half-way on this machine** (2026-10-22): `git checkout main` moved HEAD,
   deleted `cmem/workflow.md`, then could not write it back ("unable to create file …: File exists",
   most likely a Windows file lock held by an editor or indexer). The working tree was the BRANCH's
