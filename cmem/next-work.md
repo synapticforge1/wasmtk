@@ -14,7 +14,8 @@ then, after round 3's size: "record + worst few", and "land" the switch.
 - ✅ **H11: `wasmbundle` runs on binaryang's `bundle()`** (offload-inventory.md, 2026-10-26 note).
   Found measuring it and fixed: sw139 (shared heap at 0), sw140 (a negative CLI argument read as
   a flag), witgen accepting binaryang's `.wit` header, sw178–sw181 on the bundle path. Draft reply
-  in `scripts/binaryang-report.md` (2026-10-26, owner to send; one question: is `Module._inner` a
+  in `scripts/binaryang-report.md` (SENT 2026-10-26 via the workspace ledger, row C12, with the
+  2026-10-23 pin report; one question: is `Module._inner` a
   stable contract). Open from H11: wasic's relocatable output (exact relocation), offload #1 for
   the wasic MERGE path (sw178 / sw180 still there).
 - ⏳ **H12: audit round 3 NOT converged** (compiler-bugs.md § "audit round 3"): 52 silent + ~105
@@ -749,7 +750,8 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
   3. **The provenance outage was scope-wide** — recorded in design-decisions.md § JSR provenance
      (2026-10-23 entry; our "specific to wasmtk" conclusion withdrawn).
 
-  Nothing to reply on 2 and 3; the reply on 1 is drafted (owner to send).
+  Nothing to reply on 2 and 3; the reply on 1 was SENT 2026-10-26 (ledger C12, with a note that
+  2.2.0 was pinned since).
 
 ## Deferred (no consumer)
 

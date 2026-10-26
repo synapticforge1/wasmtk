@@ -62,7 +62,7 @@ universalWasmLoader SPEC 3.0.0) plus workspace rows I2 / I10 / I11 / C1 / S4. Li
 > program's catch, ld114). Sharing them is a wasmtk pass over binaryang's IR (as #2 below says),
 > and the IR's read / write entry points (`readForPasses`, `writeWasm`) are not exported: the only
 > routes today are `compat/binaryen`'s private `_inner` or regex over printed WAT, which is what
-> this move retires. Asked in `scripts/binaryang-report.md` (DRAFT 2026-10-26, owner to send).
+> this move retires. Asked in `scripts/binaryang-report.md` (SENT 2026-10-26, ledger C12; that ask itself was withdrawn before sending).
 > (2) wasic needs a relocatable output: unoptimised, `(@reloc data)` on every data address (about
 > 165 allocation sites in wasic + console_log), bundled first and `-Oz` after. Ours to build once
 > (1) is answered. Probes: the session's scratch `h11_probe.ts` / `h11_heap_probe.ts` /
