@@ -130,6 +130,7 @@ import { findUntypedDeclarations } from "./decltypes.ts";
 import { MATHLIB_BYTES } from "./wasm/mathlib_bytes.ts";
 import {
   floatStringIndexDiagnostic,
+  i32LiteralRangeDiagnostic,
   implicitTruncDiagnostic,
   intDivisionDiagnostic,
   WM_WAT,
@@ -7546,6 +7547,67 @@ ${arms.join("\n")}
     return plainArrayLiteral(v, f.type) !== undefined;
   }
 
+  /** Classes whose `$__new_<C>` constructor wrapper is used (sw141). */
+  private classNewWrappers = new Set<string>();
+
+  /**
+   * `new C(args)` as a value: a FRESH instance each time it runs, through `$__new_<C>`. Every run
+   * of one `new` site was ONE static block laid out at compile time, so objects made in a loop, a
+   * factory or a method returning `new` were the same object (`0,10,20` → `20,20,20`; sw141,
+   * round 3, 2026-10-26).
+   */
+  private emitClassNew(cls: string, argsStr: string, locals: Map<string, WatType>): string {
+    this.classNewWrappers.add(cls);
+    const ctorFn = this.functions.find((f) => f.name === `${cls}_constructor`);
+    const args = ctorFn && argsStr ? this.splitArgs(argsStr) : [];
+    const emitted = args.map((a, i) => {
+      const pt = ctorFn!.params[i + 1]?.type ?? ("i32" as WatType);
+      // a string parameter takes the (ptr, len) pair (ld101)
+      return pt === "string" ? this.emitStringArg(a, locals) : this.emitExpr(a, locals, pt);
+    });
+    return `(call $__new_${cls} ${emitted.join(" ")})`.replace(/ \)$/, ")");
+  }
+
+  /** The `$__new_<C>` wrappers: allocate, zero (a reused block is dirty), tag, construct. */
+  private emitClassNewWrappers(): string {
+    const out: string[] = [];
+    for (const cls of this.classNewWrappers) {
+      const cd = this.classDefs.get(cls);
+      if (!cd) continue;
+      const ctorFn = this.functions.find((f) => f.name === `${cls}_constructor`);
+      const params = (ctorFn?.params.slice(1) ?? []).flatMap((p) =>
+        p.type === "string"
+          ? [`(param $${p.name}_ptr i32)`, `(param $${p.name}_len i32)`]
+          : [`(param $${p.name} ${watBaseType(p.type)})`]
+      );
+      const passed = (ctorFn?.params.slice(1) ?? []).flatMap((p) =>
+        p.type === "string"
+          ? [`(local.get $${p.name}_ptr)`, `(local.get $${p.name}_len)`]
+          : [`(local.get $${p.name})`]
+      );
+      const size = Math.max(4, cd.struct.totalSize);
+      const body: string[] = [`(local.set $__obj (call $__malloc (i32.const ${size})))`];
+      for (let off = 0; off + 4 <= size; off += 4) {
+        body.push(`(i32.store offset=${off} (local.get $__obj) (i32.const 0))`);
+      }
+      for (let off = size - (size % 4); off < size; off++) {
+        body.push(`(i32.store8 offset=${off} (local.get $__obj) (i32.const 0))`);
+      }
+      const tag = this.classTags.get(cls);
+      if (this.classHeaderSize > 0 && tag !== undefined) {
+        body.push(`(i32.store (local.get $__obj) (i32.const ${tag}))`);
+      }
+      if (ctorFn) body.push(`(call $${cls}_constructor (local.get $__obj) ${passed.join(" ")})`);
+      body.push(`(local.get $__obj)`);
+      out.push(
+        `  (func $__new_${cls} ${params.join(" ")} (result i32)\n    (local $__obj i32)\n    ${
+          body.join("\n    ")
+        }\n  )`,
+      );
+    }
+    return out.join("\n");
+  }
+
   private allocStructData(
     def: StructDef,
     initFields: Record<string, string>,
@@ -11590,8 +11652,36 @@ ${prefixed}
    * `$__i32_toint32`. A bigint is left as is (its operator or Math call handles it).
    */
   private emitToInt32(a: string, locals: Map<string, WatType>): string {
+    this.toInt32Depth++;
+    try {
+      return this.emitToInt32Inner(a, locals);
+    } finally {
+      this.toInt32Depth--;
+    }
+  }
+
+  /** Inside an operand of `| & ^ << >> >>>`: a literal there is ToInt32'd, as in JavaScript. */
+  private toInt32Depth = 0;
+
+  /**
+   * An integer literal where an i32 is stored. One that does not fit was emitted as given and the
+   * assembler wrapped it: `const a: i32 = 3000000000` printed -1294967296 (sw160, round 3,
+   * 2026-10-26). The owner's rule 4 says such a store fails; for a literal that is at compile
+   * time. Inside a bitwise operand it is ToInt32'd (`x & 0xFFFFFFFF` keeps working).
+   */
+  private i32Literal(n: number, lit: string): string {
+    if (n >= -2147483648 && n <= 2147483647) return `(i32.const ${n})`;
+    if (this.toInt32Depth > 0) return `(i32.const ${n | 0})`;
+    if (this.emitDiagSuppressDepth === 0) {
+      this.diagnostics.push(i32LiteralRangeDiagnostic(this.d3Stmt || lit, lit));
+    }
+    return `(i32.const 0)`;
+  }
+
+  private emitToInt32Inner(a: string, locals: Map<string, WatType>): string {
     const lit = a.trim();
     if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+    if (/^0[xX][0-9a-fA-F]+$/.test(lit)) return `(i32.const ${parseInt(lit, 16) | 0})`;
     // an i32 `+ - *` (sw119): ToInt32 of JavaScript's exact value, as `(h * 31 + c) | 0` means;
     // never the checked store, which would throw where JavaScript wraps
     if (this.isArithChain(a) && watBaseType(this.inferExprType(a, locals)) === "i32") {
@@ -12107,6 +12197,7 @@ ${prefixed}
       // assembler rejected with no location (found with sw69, 2026-10-13).
       if (defaultType === "i32" || defaultType === "i64") {
         const n = Number(expr);
+        if (Number.isInteger(n) && defaultType === "i32") return this.i32Literal(n, expr);
         if (Number.isInteger(n)) return `(${defaultType}.const ${BigInt(n)})`;
         if (this.emitDiagSuppressDepth === 0) {
           this.diagnostics.push(
@@ -12121,7 +12212,7 @@ ${prefixed}
     // Hex integer literal (e.g. 0x6D2B79F5, 0xFF)
     if (/^0[xX][0-9a-fA-F]+$/.test(expr)) {
       const n = parseInt(expr, 16);
-      if (defaultType === "i32") return `(i32.const ${n})`;
+      if (defaultType === "i32") return this.i32Literal(n, expr);
       if (defaultType === "i64") return `(i64.const ${n})`;
       return `(f64.const ${n})`;
     }
@@ -13535,25 +13626,17 @@ ${prefixed}
           const retType = (mDef?.result ?? "i32") as WatType | null;
           // String-returning chains use the globals side-channel — out of scope here.
           if (retType !== null && retType !== "string") {
-            const ptr = this.allocStructData(ncCd.struct, {}, this.classTags.get(ncHead[1]!));
-            const ctorName = `${ncHead[1]}_constructor`;
-            const ctorFn = this.functions.find((f) => f.name === ctorName);
-            const ctorArgs = expr.slice(openIdx + 1, ctorEnd).trim();
-            const ctorEmitted = (ctorArgs ? this.splitArgs(ctorArgs) : []).map((a, i) => {
-              const pt = ctorFn?.params[i + 1]?.type ?? ("i32" as WatType);
-              return pt === "string"
-                ? this.emitStringPtrLen(a, locals)
-                : this.emitExpr(a, locals, pt); // ld101
-            });
-            const ctorCall = ctorFn
-              ? `(call $${ctorName} (i32.const ${ptr}) ${ctorEmitted.join(" ")})`.trim()
-              : "";
+            // a fresh instance as the receiver (sw141)
+            const recv = this.emitClassNew(
+              ncHead[1]!,
+              expr.slice(openIdx + 1, ctorEnd).trim(),
+              locals,
+            );
             const mArgs = methodM[2]!.trim();
             const mEmitted = (mArgs ? this.splitArgs(mArgs) : []).map((a, i) =>
               this.emitExpr(a, locals, mDef?.params[i + 1]?.type ?? ("i32" as WatType))
             );
-            const mCall = `(call $${mFn} (i32.const ${ptr}) ${mEmitted.join(" ")})`.trim();
-            return `(block (result ${watBaseType(retType)}) ${ctorCall} ${mCall})`;
+            return `(call $${mFn} ${recv} ${mEmitted.join(" ")})`.replace(/ \)$/, ")");
           }
         }
       }
@@ -13567,24 +13650,7 @@ ${prefixed}
       const ctorClassName = newMatch[1];
       const argsStr = newMatch[2].trim();
       const cd = this.classDefs.get(ctorClassName);
-      if (cd) {
-        const ptr = this.allocStructData(cd.struct, {}, this.classTags.get(ctorClassName));
-        const constructorName = `${ctorClassName}_constructor`;
-        const ctorFn = this.functions.find((f) => f.name === constructorName);
-        if (ctorFn) {
-          const args = argsStr ? this.splitArgs(argsStr) : [];
-          const emittedArgs = args.flatMap((a, i) => {
-            const pt = ctorFn.params[i + 1]?.type ?? ("i32" as WatType);
-            // a string parameter takes the (ptr, len) pair: `new Item("hi", 7)` was refused (ld101)
-            if (pt === "string") return [this.emitStringArg(a, locals)];
-            return [this.emitExpr(a, locals, pt)];
-          });
-          const ctorCall = `(call $${constructorName} (i32.const ${ptr}) ${emittedArgs.join(" ")})`
-            .trim();
-          return `(block (result i32) ${ctorCall} (i32.const ${ptr}))`;
-        }
-        return `(i32.const ${ptr})`;
-      }
+      if (cd) return this.emitClassNew(ctorClassName, argsStr, locals); // a fresh instance (sw141)
     }
 
     // Phase 47: super.method(args) in non-constructor method body (expression form)
@@ -16700,6 +16766,12 @@ ${prefixed}
     if (newDeclMatch) {
       const varName = newDeclMatch[1];
       const cv = this.classVars.get(varName);
+      // A fresh instance each time the declaration runs, in the variable (sw141, sw142)
+      if (cv && cv.ptr < 0) {
+        return `(local.set $${varName} ${
+          this.emitClassNew(cv.className, newDeclMatch[3].trim(), locals)
+        })`;
+      }
       if (cv) {
         const ptr = cv.ptr;
         const argsStr = newDeclMatch[3].trim();
@@ -17701,7 +17773,15 @@ ${prefixed}
       const taInfoW = this.typedArrayVars.get(arrWriteMatch[1]);
       if (taInfoW) {
         const idxWat = this.emitArrayIndex(arrWriteMatch[2], locals);
-        const valWat = this.emitExpr(arrWriteMatch[3], locals, taInfoW.elemType);
+        // An integer typed array's element store converts modulo 2^n, as in JavaScript: a literal
+        // that does not fit i32 (`u32[0] = 4000000000`) is wrapped, not refused (sw160)
+        this.toInt32Depth++;
+        let valWat: string;
+        try {
+          valWat = this.emitExpr(arrWriteMatch[3], locals, taInfoW.elemType);
+        } finally {
+          this.toInt32Depth--;
+        }
         const addrWat = taInfoW.shift === 0
           ? `(i32.add (i32.add (local.get $${arrWriteMatch[1]}) (i32.const 8)) ${idxWat})`
           : `(i32.add (i32.add (local.get $${
@@ -20299,9 +20379,15 @@ ${prefixed}
         type CaseEntry = { values: string[]; body: string[]; isDefault: boolean };
         const cases: CaseEntry[] = [];
         let cur: CaseEntry | null = null;
+        // Only a `case` / `default` at the switch's OWN depth starts a case: a nested switch's
+        // lines are the enclosing case's body (sw150, round 3, 2026-10-26: they became cases of
+        // the outer switch).
+        let depth = 0;
         for (const sl of switchBody) {
-          const caseM = sl.match(/^case\s+(.+?)\s*:\s*(.*)$/);
-          const defM = sl.match(/^default\s*:\s*(.*)$/);
+          const atTop = depth === 0;
+          depth += braceDepthOf(sl);
+          const caseM = atTop ? sl.match(/^case\s+(.+?)\s*:\s*(.*)$/) : null;
+          const defM = atTop ? sl.match(/^default\s*:\s*(.*)$/) : null;
           if (caseM) {
             if (cur) cases.push(cur);
             cur = {
@@ -20313,7 +20399,8 @@ ${prefixed}
             if (cur) cases.push(cur);
             cur = { values: [], body: defM[1] ? [defM[1].trim()] : [], isDefault: true };
           } else if (cur) {
-            if (sl !== "}" && sl !== "};") cur.body.push(sl);
+            // the switch's own closing brace only: a nested block's `}` is part of the body
+            if (!atTop || (sl !== "}" && sl !== "};")) cur.body.push(sl);
           }
         }
         if (cur) cases.push(cur);
@@ -20335,6 +20422,11 @@ ${prefixed}
             if (gt === "f64" || gt === "f32") switchType = "f64";
             else if (gt === "string") switchType = "string";
           }
+        } else if (!/^\w+\.\w+$/.test(switchExpr)) {
+          // A float EXPRESSION was emitted as i32, truncating it: `switch (x * 2)` with 1.2
+          // matched `case 1` (sw152, round 3, 2026-10-26).
+          const et = this.inferExprType(switchExpr, locals);
+          if (et === "f64" || et === "f32") switchType = "f64";
         }
         // Phase 32: detect discriminated union discriminant access: varName.discField
         let duSwitchDef: DiscUnionDef | null = null;
@@ -20365,10 +20457,12 @@ ${prefixed}
             })()
             : this.emitExpr(switchExpr, locals, switchType === "string" ? "i32" : switchType);
         }
-        const nonDefault = cases.filter((c) => !c.isDefault);
         const defaultCase = cases.find((c) => c.isDefault);
-        // Ordered: non-default cases first, default last
-        const orderedCases = [...nonDefault, ...(defaultCase ? [defaultCase] : [])];
+        // SOURCE order: the bodies are laid out in it, so a case falls through into the one
+        // written after it. `default` was moved last, which changed what a case before it fell
+        // into and what `default` fell into (sw149, round 3, 2026-10-26). The tests still run in
+        // order and `default` is taken only when none matches, as in JavaScript.
+        const orderedCases = cases;
         const N = orderedCases.length;
         // Label for each case (case k's label = innermost block k uses)
         const caseLabels = orderedCases.map((c, k) =>
@@ -20386,8 +20480,9 @@ ${prefixed}
 
         // Dispatch inside innermost block: br_if for each non-default, br for default
         const innerPad = "  ".repeat(N + 1);
-        for (let k = 0; k < nonDefault.length; k++) {
-          const c = nonDefault[k];
+        for (let k = 0; k < N; k++) {
+          const c = orderedCases[k];
+          if (c.isDefault) continue;
           const condWat = c.values.map((v) => {
             // Phase 32: DU discriminant switch — convert string literal case to integer tag index
             if (duSwitchDef) {
@@ -20396,10 +20491,16 @@ ${prefixed}
               return `(i32.eq ${switchValWat} (i32.const ${tagIdx}))`;
             }
             if (switchType === "string") {
-              // Compare string variable against a string literal case value
-              const caseStr = v.replace(/^["']|["']$/g, "");
-              const [casePtr, caseLen] = this.allocString(caseStr);
-              return `(i32.eq (call $__str_cmp ${switchValPtrWat} ${switchValLenWat} (i32.const ${casePtr}) (i32.const ${caseLen})) (i32.const 0))`;
+              // A string literal case is laid out as data; any other case value (a const, a
+              // call) is a string EXPRESSION. Its name was compared as text: `case RED:` matched
+              // "RED" (sw151, round 3, 2026-10-26).
+              if (/^(["']).*\1$/.test(v)) {
+                const [casePtr, caseLen] = this.allocString(v.slice(1, -1));
+                return `(i32.eq (call $__str_cmp ${switchValPtrWat} ${switchValLenWat} (i32.const ${casePtr}) (i32.const ${caseLen})) (i32.const 0))`;
+              }
+              return `(i32.eq (call $__str_cmp ${switchValPtrWat} ${switchValLenWat} ${
+                this.emitStringPtrLen(v, locals)
+              }) (i32.const 0))`;
             }
             if (switchType === "f64") {
               return `(f64.eq ${switchValWat} ${this.emitExpr(v, locals, "f64")})`;
@@ -20410,7 +20511,11 @@ ${prefixed}
           switchLines.push(`${indent}${innerPad}(br_if ${caseLabels[k]} ${condExpr})`);
         }
         // Default: jump to default label, or exit if no default
-        switchLines.push(`${indent}${innerPad}(br ${defaultCase ? caseLabels[N - 1] : exitLabel})`);
+        switchLines.push(
+          `${indent}${innerPad}(br ${
+            defaultCase ? caseLabels[orderedCases.indexOf(defaultCase)] : exitLabel
+          })`,
+        );
 
         // Close blocks and emit bodies from innermost (k=0) outward (k=N-1)
         for (let k = 0; k < N; k++) {
@@ -20422,9 +20527,15 @@ ${prefixed}
           // Pre-process case body: split compound "stmt; break;" lines into two lines
           const expandedBody: string[] = [];
           let hasBreak = false;
+          // Only this case's OWN `break`s: a nested switch's lines keep theirs (sw150).
+          let bodyDepth = 0;
           for (const bl of c.body) {
             const bt = bl.trim();
-            if (bt === "break;" || bt === "break") {
+            const own = bodyDepth === 0;
+            bodyDepth += braceDepthOf(bt);
+            if (!own) {
+              expandedBody.push(bl);
+            } else if (bt === "break;" || bt === "break") {
               hasBreak = true;
             } else if (bt.endsWith("; break;") || bt.endsWith("; break")) {
               const stmtPart = bt.replace(/;\s*break;?\s*$/, ";");
@@ -24419,9 +24530,9 @@ ${sum}
         //   const a: Animal = new Dog(3)  →  classVar.className = "Dog"
         const cd = this.classDefs.get(ctorName) ?? this.classDefs.get(typeName);
         if (cd) {
-          const classTag = this.classTags.get(cd.name);
-          const ptr = this.allocStructData(cd.struct, {}, classTag);
-          this.classVars.set(varName, { className: cd.name, ptr });
+          // The instance is made when the declaration runs, into the local (sw141): a static
+          // block was ONE object for every call of the function, and every pass of a loop.
+          this.classVars.set(varName, { className: cd.name, ptr: -1 });
           declaredLocals.push([varName, "i32"]);
           locals.set(varName, "i32");
           continue;
@@ -26725,9 +26836,9 @@ ${sum}
         }
         // Phase 51 (gap #1): module-level class instance — const obj: Base = new Sub(args).
         // Mirrors the emitFunction newClassPre pre-scan so module-level class vars are tracked in
-        // classVars (enabling field access, method dispatch, and instanceof at module scope). The
-        // static ptr is required because the const-new statement handler emits (i32.const ptr) for
-        // both the local.set and the constructor call. The `if (cd)` guard skips TypedArrays
+        // classVars (enabling field access, method dispatch, and instanceof at module scope). Since
+        // 2026-10-26 (sw141) the variable is a pointer local (ptr -1) set from `$__new_<C>`, as a
+        // class-typed parameter is. The `if (cd)` guard skips TypedArrays
         // (PascalCase but not in classDefs) so they fall through to their own pre-scan below.
         const newClassPre2 = line.match(
           /^(?:var|let|const)\s+(\w+)\s*(?::\s*([A-Z]\w*))?\s*=\s*new\s+([A-Z]\w*)\s*\(/,
@@ -26738,9 +26849,9 @@ ${sum}
           const ncTypeName = newClassPre2[2] ?? ncCtorName;
           const ncCd = this.classDefs.get(ncCtorName) ?? this.classDefs.get(ncTypeName);
           if (ncCd) {
-            const ncTag = this.classTags.get(ncCd.name);
-            const ncPtr = this.allocStructData(ncCd.struct, {}, ncTag);
-            this.classVars.set(ncVarName, { className: ncCd.name, ptr: ncPtr });
+            // made when the declaration runs, into the local (sw141): a block-scoped declaration
+            // in a top-level loop runs once per pass (sw104)
+            this.classVars.set(ncVarName, { className: ncCd.name, ptr: -1 });
             startLocals.set(ncVarName, "i32");
             startDeclaredLocals.push([ncVarName, "i32"]);
             continue;
@@ -27475,7 +27586,8 @@ ${sum}
 
     // Emit imports after all body emission so fd_write/helpers flags are set
     const imports = this.emitWasiImports();
-    const helpers = this.emitHelpers();
+    const classNew = this.emitClassNewWrappers();
+    const helpers = classNew ? `${this.emitHelpers()}\n${classNew}` : this.emitHelpers();
     const dataSection = this.emitDataSection();
     // Reserve at least 1 extra page (64 KB) beyond static data for heap growth
     const memoryPages = Math.max(2, Math.ceil(this.dataOffset / 65536) + 1);

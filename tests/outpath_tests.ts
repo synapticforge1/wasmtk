@@ -7,6 +7,8 @@
  * the INSTALLED wasmtk on a fresh copy of its input and checks: the input is byte-identical
  * afterwards, and the command either wrote the expected new file or failed with exit 1.
  *
+ * 2026-10-26: `dync -o prog.ts` (sw174, audit round 3).
+ *
  * Usage: deno run -A tests/outpath_tests.ts   (after `deno task install`)
  */
 import { join } from "jsr:@std/path";
@@ -86,6 +88,9 @@ await check("convert -o the input is refused", { "lib.wat": WAT }, "lib.wat", ["
 await check("bindgen -o the input is refused", { "h.wit": WIT }, "h.wit", ["bindgen", "h.wit", "-o", "h.wit"], { code: 1 });
 await check("wasic -o the input .ts is refused", { "p.ts": `console.log(1);\n` }, "p.ts", ["wasic", "p.ts", "-o", "p.ts"], { code: 1 });
 await check("wasic -o the input .wat is refused", { "lib.wat": WAT }, "lib.wat", ["wasic", "lib.wat", "-o", "lib.wat"], { code: 1 });
+// sw174 (round 3, 2026-10-26): dync compared the output with its generated driver, not the source
+await check("dync -o the input .ts is refused", { "prog2.ts": `console.log("hi", 1 + 2);\n` }, "prog2.ts", ["dync", "prog2.ts", "-o", "prog2.ts"], { code: 1 });
+await check("dync still writes its default output", { "prog3.ts": `console.log("hi", 1 + 2);\n` }, "prog3.ts", ["dync", "prog3.ts"], { code: 0, writes: "prog3.wasm" });
 // sw114: an assembler error in a .wat compile exited 0
 await check("wasic of a broken .wat exits 1", { "bad.wat": `(module (func i32.bogus_op))\n` }, "bad.wat", ["wasic", "bad.wat"], { code: 1 });
 

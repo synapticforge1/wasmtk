@@ -14,6 +14,9 @@
  *          (`mergeWasmWat`'s `importWat`), so a library calling a host function did not bundle.
  *   sw139  `wasmbundle` seated the shared heap at 0 when no module had data, below wasic's
  *          reserved area: two libraries' empty arrays became one (2026-10-26).
+ *   sw178–sw181  the regex bundler dropped a start function and non-function exports, moved
+ *          every mutable global to 131072, and wrote over an input (round 3, 2026-10-26); fixed
+ *          by bundling on binaryang's bundle() (H11).
  *
  * Runs the INSTALLED wasmtk in a temp directory. Usage: deno run -A tests/merge_layout_tests.ts
  */
@@ -71,6 +74,17 @@ const FILES: Record<string, string> = {
   // sw139: two wasic libraries, no data, each with a module-level array
   "arra.ts": arrLib("a"),
   "arrb.ts": arrLib("b"),
+  // sw178 / sw179 / sw180 (round 3, t12–t14): a start function, a global export, a counter
+  "startmem.wat": `(module (memory 1) (func $init (i32.store (i32.const 64) (i32.const 42))) (start $init)\n` +
+    `  (func (export "get") (result i32) (i32.load (i32.const 64))))\n`,
+  "startlib.wat": `(module (global $g (mut i32) (i32.const 0)) (global $ver i32 (i32.const 3))\n` +
+    `  (func $init (global.set $g (i32.const 42))) (start $init)\n` +
+    `  (func (export "get") (result i32) (global.get $g)) (export "version" (global $ver)))\n`,
+  "counter.wat": `(module (global $n (mut i32) (i32.const 0)) (func (export "next") (result i32)\n` +
+    `  (global.set $n (i32.add (global.get $n) (i32.const 1))) (global.get $n)))\n`,
+  // a library that throws, bundled with another wasic library: ONE exception tag (ld114)
+  "thrower.ts": `type i32 = number;\nexport function check(n: i32): i32 {\n  if (n < 0) {\n` +
+    `    throw new Error("negative");\n  }\n  return n * 2;\n}\n`,
 };
 
 /** One step's output must equal `want` (trimmed) with exit 0. */
@@ -97,7 +111,9 @@ try {
     if (f.includes("/")) await Deno.mkdir(join(dir, f.slice(0, f.lastIndexOf("/"))), { recursive: true });
     await Deno.writeTextFile(join(dir, f), body);
   }
-  for (const w of ["dlib", "elib", "plib2", "stk", "hostlib"]) await step(["convert", `${w}.wat`], dir);
+  for (const w of ["dlib", "elib", "plib2", "stk", "hostlib", "startmem", "startlib", "counter"]) {
+    await step(["convert", `${w}.wat`], dir);
+  }
 
   console.log("── merged and bundled modules keep their own data (sw109, sw110, ld86) ──");
   await step(["wasmbundle", "dlib.wasm", "elib.wasm", "-o", "de.wasm"], dir);
@@ -149,6 +165,66 @@ try {
       got = `apush(10)=${ex.apush(10)} bpush(10)=${ex.bpush(10)} apush(1)=${ex.apush(1)}`;
     }
     const want = "apush(10)=10 bpush(10)=10 apush(1)=11";
+    if (got === want) {
+      passed++;
+      console.log(`  ✓ ${name}`);
+    } else {
+      failed++;
+      console.log(`  ✗ ${name}: got "${got}", want "${want}"`);
+    }
+  }
+
+  // 2026-10-26, wasmbundle on binaryang's bundle() (H11): what the regex bundler lost
+  console.log("── wasmbundle keeps a module whole (sw178–sw181) ──");
+  await step(["wasmbundle", "startmem.wasm", "-o", "smb.wasm"], dir);
+  await expectOut("wasmbundle: a start function is kept and runs (sw178)", ["mod", "smb.wasm", "get"], dir, "42");
+  await step(["wasmbundle", "startlib.wasm", "-o", "sb.wasm"], dir);
+  {
+    const name = "wasmbundle: a global export is kept (sw179)";
+    const ex = new WebAssembly.Instance(new WebAssembly.Module(await Deno.readFile(join(dir, "sb.wasm"))), {})
+      .exports as Record<string, unknown>;
+    const got = `version=${(ex.version as WebAssembly.Global | undefined)?.value} get=${(ex.get as () => number)()}`;
+    if (got === "version=3 get=42") {
+      passed++;
+      console.log(`  ✓ ${name}`);
+    } else {
+      failed++;
+      console.log(`  ✗ ${name}: got "${got}", want "version=3 get=42"`);
+    }
+  }
+  await step(["wasmbundle", "counter.wasm", "-o", "cb.wasm"], dir);
+  await expectOut("wasmbundle: a counter keeps its initial value (sw180)", ["mod", "cb.wasm", "next"], dir, "1");
+  {
+    const name = "wasmbundle: -o naming an input is refused, the input untouched (sw181)";
+    const before = await Deno.readFile(join(dir, "counter.wasm"));
+    const r = await wasmtk(["wasmbundle", "counter.wasm", "startmem.wasm", "-o", "counter.wasm"], dir);
+    const after = await Deno.readFile(join(dir, "counter.wasm"));
+    const same = before.length === after.length && before.every((b, i) => b === after[i]);
+    if (r.code === 1 && same && /would be overwritten/.test(r.out)) {
+      passed++;
+      console.log(`  ✓ ${name}`);
+    } else {
+      failed++;
+      console.log(`  ✗ ${name}: exit ${r.code}, input unchanged ${same}\n      ${r.out.trim().split("\n").slice(-1)}`);
+    }
+  }
+  {
+    // ONE exception tag: a library's throw is a WebAssembly.Exception of the bundle's exported
+    // __exn_tag, which is what the runner decodes the message from (ld114).
+    const name = "wasmbundle: a wasic library's throw carries the bundle's one tag";
+    await step(["modc", "thrower.ts"], dir);
+    await step(["wasmbundle", "thrower.wasm", "arra.wasm", "-o", "ta.wasm"], dir);
+    const ex = new WebAssembly.Instance(new WebAssembly.Module(await Deno.readFile(join(dir, "ta.wasm"))), {})
+      .exports as Record<string, unknown>;
+    let got = `check(4)=${(ex.check as (n: number) => number)(4)}`;
+    try {
+      (ex.check as (n: number) => number)(-1);
+      got += " no throw";
+    } catch (e) {
+      got += e instanceof WebAssembly.Exception && e.is(ex.__exn_tag as WebAssembly.Tag) ? " throws __exn_tag" : ` threw ${e}`;
+    }
+    got += ` apush(3)=${(ex.apush as (n: number) => number)(3)}`;
+    const want = "check(4)=8 throws __exn_tag apush(3)=3";
     if (got === want) {
       passed++;
       console.log(`  ✓ ${name}`);

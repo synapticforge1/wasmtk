@@ -18,6 +18,7 @@
  */
 
 import { basename, dirname } from "@std/path";
+import { assertNotInput } from "./outpath.ts";
 import { rt } from "./rt.ts";
 import { compileWasiTs } from "./wasic.ts";
 
@@ -45,6 +46,15 @@ export async function compileDyn(path: string, outPath?: string): Promise<void> 
   const name = basename(path).replace(/\.[^/.]+$/, "");
   const srcDir = dirname(path);
   const wasmOut = outPath ?? `${srcDir}/${name}.wasm`;
+  // `-o prog.ts` wrote the module OVER its source: compileWasiTs compares the output with the
+  // generated driver, never with the user's file (sw174, round 3, 2026-10-26; sw113's rule).
+  try {
+    assertNotInput(path, wasmOut, "dync");
+  } catch (err) {
+    console.error(`❌ ${err instanceof Error ? err.message : err}`);
+    rt.exit(1);
+    return;
+  }
 
   let src: string;
   try {

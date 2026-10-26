@@ -64,6 +64,16 @@ export function implicitTruncDiagnostic(stmt: string, where: string): string {
     `f64.toI32Sat(x) clamps, f64.toI32Wrap(x) (or x | 0) wraps`;
 }
 
+/** The diagnostic for an integer LITERAL that does not fit i32 where an i32 is stored (sw160,
+ *  2026-10-26): the owner's rule 4 says a store that does not fit fails; a literal fails at
+ *  compile time. An operand of `| & ^ << >> >>>` is ToInt32'd, as in JavaScript, and is not this. */
+export function i32LiteralRangeDiagnostic(stmt: string, lit: string): string {
+  return `integer literal ${lit} does not fit i32 in '${stmt.trim().slice(0, 60)}'\n` +
+    `TypeScript: keeps the number ${Number(lit)}\n` +
+    `wasm: an i32 holds -2147483648 to 2147483647; the literal would wrap to ${Number(lit) | 0}\n` +
+    `help: declare it f64 or i64, or write ${lit} | 0 to wrap it as JavaScript's ToInt32 does`;
+}
+
 /** The diagnostic for a FLOAT index into a string, `s[pos]` with `pos: f64` (owner, 2026-10-15,
  *  narrowing D3's "indices keep the conversion" for strings): JavaScript gives `undefined` for a
  *  fractional index and wasm would truncate it, so the index must be an integer. */

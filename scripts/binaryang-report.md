@@ -8,12 +8,12 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
-## DRAFT (not yet sent) — 2026-10-26: `wasm-bundle` measured on our inputs; what stops us switching
+## DRAFT (not yet sent) — 2026-10-26: `wasmtk wasmbundle` now runs on your `bundle()`
 
 **Short version:** we ran your 2.2.0 `wasm-bundle` over the inputs of every wasmtk test that
-bundles, and it is right wherever wasmtk's own bundler is right — and right in one place ours was
-wrong. We cannot switch `wasmtk wasmbundle` to it yet, for two reasons on wasic's side and one
-request on yours.
+bundles; it is right wherever wasmtk's own bundler was right, and right in five places ours was
+wrong. So `wasmtk wasmbundle` now IS your `bundle()`, with one pass of ours around it for wasic's
+runtime state. Nothing is asked of you; one question at the end.
 
 **What we ran** (`wasmBundle(paths, …)` from `@jrmarcum/binaryang@2.2.0/tools/wasm-bundle`, each
 output checked exactly as our tests check ours):
@@ -30,34 +30,35 @@ output checked exactly as our tests check ours):
 
 Every refusal is the one you designed: nothing we produce today carries `linking` / `reloc.*`.
 
-**Where yours is right and ours was not:** two wasic libraries, each with a module-level array.
-After `apush(10)`, `bpush(10)` returned 18 from our bundle and 10 from yours. Ours seated the
-shared heap at 0 when no module had data, below wasic's reserved low area; fixed on our side today
-(our sw139).
+**Where yours is right and ours was not** (each now a regression row in our `merge_layout_tests`):
+two wasic libraries' module-level arrays (ours seated the shared heap at 0: `bpush(10)` was 18, yours
+10; our sw139), a module's `(start)` function (ours dropped it; sw178), a global export (dropped;
+sw179), a non-wasic module's mutable counter (ours moved it to 131072; sw180), and a bundle `-o`
+naming an input (ours overwrote it; sw181 — that one was wasmtk's own CLI).
 
-**Why we cannot switch yet:**
+**What stays ours, and how we did it:** every wasic module exports `__heap_ptr`, `__exn_tag` and
+`__exn_kind`, so any two clash under your default policy, and prefixed each would keep its OWN heap
+and tag. wasmtk wants one of each: one heap at the end of memory (a wasic heap grows upward from its
+pointer and grows memory only past `memory.size`; we reasoned, not measured, that in a per-image
+layout it would run into the next image), and one tag, so a program's `catch` sees a library's
+`throw` (our ld114; measured: a bundled library's throw now carries the bundle's one exported tag).
+Those are wasic semantics, so they are our pass, around your `bundle()`: each wasic input loses
+the three exports and imports them from a small module of ours (`wasmtk_rt`), which your
+cross-input linking wires up; after `bundle()` we seat the heap above `report.memory.pages`.
 
-1. **Every pair of wasic modules clashes on three exports**, `__heap_ptr`, `__exn_tag` and
-   `__exn_kind`, so the default policy refuses them. With `--on-conflict=prefix` they bundle, but
-   each keeps its OWN heap pointer and its own exception tag. Our bundler makes them one, on
-   purpose: one heap that grows at the end of memory (a wasic heap grows from its pointer upward
-   and calls `memory.grow` only past `memory.size`, so in your layout the first module's heap runs
-   into the second module's image once it outgrows its own pages), and one tag, so a program's
-   `catch` sees a library's `throw` (our ld114). Those are wasic semantics, not yours to carry.
-2. **wasic marks no addresses yet.** Its output is optimised (`-Oz`) before anyone bundles it, and
-   your bundler rightly wants marks it can verify, so wasic needs a relocatable, unoptimised output
-   with `(@reloc data)` on every data address, bundled first and optimised after. That is ours to
-   build (about 165 allocation sites in wasic and console_log).
+We reached your IR through `readBinary(bytes)._inner` from `compat/binaryen`, and wrote it back
+with `new Module(ir).emitBinary()` — the route your README and 1.6.0 changelog document. (An
+earlier draft of this note asked you to export `readForPasses` / `writeWasm`; withdrawn: we had
+not found that the documented route already exists.)
 
-**The request:** to do (1) as a pass of OURS over your IR, before and after `bundle()`, we need a
-public way from bytes to the `WasmModule` that `bundle()` takes, and back. Today `readForPasses`
-and `writeWasm` are internal (`src/ir/prepare.ts`, `src/ir/write-wasm.ts`); neither `./ir` nor
-`./tools/wasm-bundle` exports them, so the only routes are `compat/binaryen`'s private `_inner` or
-editing printed WAT with regexes, which is what this move retires. Exporting the two (or an
-equivalent read / write pair) from `./ir` would let us: drop the three exports from each wasic
-input and turn its heap pointer, tag and kind global into imports of one small shared module, then
-seat that heap above the last image after `bundle()` reports the layout. Would you rather own a
-`share` option in `BundleOptions` instead? We think the pass belongs with us, but it is your API.
+**Still ours to build:** wasic marks no addresses, so every wasic input is relocated by your
+`unmarked: 'guess'`, with your warning printed — inexact exactly as our regex bundler always was,
+but now said. The cure is a relocatable wasic output: unoptimised, `(@reloc data)` on every data
+address (about 165 allocation sites in wasic and console_log), bundled first and optimised after.
+
+**The one question:** may we rely on `Module._inner` and `bundle()` taking that module as a stable
+contract across your minors? If `_inner` is meant as an escape hatch rather than API, a public
+read / write pair on `./ir` would be the thing to pin instead.
 
 **One hazard both bundlers share, for your caveats list:** wasic's empty array is the pointer 0,
 read as a zero header at address 0. In a bundle, address 0 belongs to the FIRST image; if that

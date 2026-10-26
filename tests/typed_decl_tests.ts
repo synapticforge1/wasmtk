@@ -149,6 +149,11 @@ const REFUSED: [string, string, string | string[]][] = [
     `import { f64, i32 } from "${new URL("../src/wasmath.ts", import.meta.url).href}";\nconst f: f64 = 2.5;\nconst x: i32 = i32.add(f, 1);\nconsole.log(x);`,
     "passed to 'i32.add'",
   ],
+  // An integer literal that does not fit i32 where an i32 is stored (sw160, 2026-10-26): it wrapped
+  // silently; the owner's rule 4 says such a store fails. Declaration, hex, argument, console.
+  ["i32 literal out of range", `const a: i32 = 3000000000;\nconsole.log(a);`, ["error[unsupported]: integer literal 3000000000 does not fit i32", at("i32 literal out of range", 3)]],
+  ["i32 hex literal out of range", `const a: i32 = 0xFFFFFFFF;\nconsole.log(a);`, "integer literal 0xFFFFFFFF does not fit i32"],
+  ["i32 literal argument out of range", `function id(x: i32): i32 { return x; }\nconsole.log(id(2147483648));`, "integer literal 2147483648 does not fit i32"],
   // `>>>` on a bigint is a TypeError in JavaScript (wasMath L4, 2026-10-13).
   ["bigint >>>", `const a: bigint = 7n;\nconst s: bigint = a >>> 1n;\nconsole.log(s);`, "'>>>' on a bigint is a TypeError"],
   // A string index is an integer (owner, 2026-10-15): JavaScript gives undefined for s[1.5],
@@ -183,6 +188,20 @@ const REFUSED: [string, string, string | string[]][] = [
 
 // [name, source, expected stdout]. Each is compiled and RUN, so acceptance is also correctness.
 const ACCEPTED: [string, string, string][] = [
+  [
+    // sw160's accepted forms: a bitwise operand wraps (ToInt32, as in JavaScript); the i32 limits
+    // fit; a big literal printed or stored as f64. (A typed-array element store wraps too:
+    // 7d_ConsoleArrays; reading a Uint32Array element back is signed, sw193, open.)
+    "i32 literals: masks wrap, limits fit, f64 keeps a big one",
+    `const big: f64 = 3000000000;
+const x: i32 = -5;
+const m: i32 = x & 0xFFFFFFFF;
+const w: i32 = x ^ 0xFFFFFFFF;
+const lo: i32 = -2147483648;
+const hi: i32 = 2147483647;
+console.log(3000000000, big, m, w, lo, hi);`,
+    "3000000000 3000000000 -5 4 -2147483648 2147483647",
+  ],
   [
     // the float string index said as a conversion, and out of range undefined (2026-10-15)
     "string index from f64.toI32, out of range undefined",

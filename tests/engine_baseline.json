@@ -1414,6 +1414,11 @@
     "wasmer": "match",
     "wazero": "match"
   },
+  "48_SwitchOrderNestingAndCaseValues": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
   "48_ToStringRadix": {
     "wasmtime": "match",
     "wasmer": "match",
@@ -2100,6 +2105,11 @@
     "wazero": "match"
   },
   "9_LocalArrayShadowsModule": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "9_NewMakesAFreshObject": {
     "wasmtime": "match",
     "wasmer": "match",
     "wazero": "match"

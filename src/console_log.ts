@@ -29,7 +29,11 @@
  *       (trailing zeros stripped). Precision beyond 6 digits is truncated.
  */
 
-import { implicitTruncDiagnostic, intDivisionDiagnostic } from "./wasmath_lower.ts";
+import {
+  i32LiteralRangeDiagnostic,
+  implicitTruncDiagnostic,
+  intDivisionDiagnostic,
+} from "./wasmath_lower.ts";
 import { bindDefaultParam } from "./default_params.ts";
 
 // ---------------------------------------------------------------------------
@@ -2678,6 +2682,13 @@ function exprToWat(
       : expectedType === "i64"
       ? "i64"
       : "i32";
+    // A literal that does not fit i32 wrapped here as in wasic (sw160, 2026-10-26): refused, as
+    // wasic refuses it. A bitwise operand never reaches this (it is folded with `| 0` above).
+    const n = Number(expr);
+    if (t === "i32" && (n < -2147483648 || n > 2147483647)) {
+      _diagnosticSink?.(i32LiteralRangeDiagnostic(expr, expr));
+      return `(i32.const 0)`;
+    }
     return `(${t}.const ${expr})`;
   }
 

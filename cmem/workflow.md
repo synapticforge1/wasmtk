@@ -69,7 +69,8 @@ Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full
    compat `readWasm(…).toText()`, which our merge regexes read (1.7.2 re-laid it out; tokens were
    identical). A probe that imports `jsr:@jrmarcum/binaryang@<new>` with `--config deno.json` writes
    the new version into `deno.lock`: restore it (`git checkout -- deno.lock`) afterwards.
-4. **Pin all three specifiers together** (`compat/binaryen`, `wasm-validate`, `compat/wabt`, exact)
+4. **Pin all FOUR specifiers together** (`compat/binaryen`, `wasm-validate`, `compat/wabt`, and
+   since 2026-10-26 `tools/wasm-bundle` as `binaryang-bundle`, which `wasmbundle` runs on; exact)
    plus the `src/binaryen.ts` comment; `deno cache --reload=jsr:@jrmarcum/binaryang main.ts
    src/wast.ts`; the lock must then hold only the new version. `deno task install`.
 5. **`deno run -A scripts/check_try_table_oz.ts`** (the `-Oz` guard: 42 / 42; still RUN with Deno:
