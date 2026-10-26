@@ -22,6 +22,12 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   loud; fixed today sw141, sw142, sw149–sw152, sw160, sw174, sw179, sw181 (+ sw178 / sw180 for the
   bundle). **Open: silent 23 compiler + 20 tool**, then the loud groups ld115–ld118. Phase 1 of
   the modularization stays gated.
+- ✅ **MEASURED 2026-10-26 (owner: "proceed with item 1 which should also address items 7 and
+  8"; then "I agree" to scoping the Bun transition with it):**
+  [number-model-and-runtime-plan.md](number-model-and-runtime-plan.md) — the P0 harness built
+  (`scripts/migr/`), the typed baseline, the plain-number measurement, sw146 folded into sw145
+  (item 7: no ruling needed), the refreshed Deno-exit order (item 8: P0 done; M2 / M4 reopened).
+  **Waiting on the owner: decisions N1–N4 and M2 / M4.**
 - 🔒 **Owner's direction, 2026-10-26 (design-decisions.md, top of the number-model section):** no
   type hints, no wasMath; `number` = f64, `bigint` = i64, integers only where the compiler proves
   them (loop counters, indices). Decided in principle, NOT built. **Next, before more i32-typing

@@ -1,5 +1,12 @@
 # Leaving Deno, staying on JSR: wasmtk's migration plan (SCOPE, 2026-10-13)
 
+> **2026-10-26: refreshed with the owner's plain-numbers direction —
+> [number-model-and-runtime-plan.md](number-model-and-runtime-plan.md).** P0 is DONE (the harness
+> is `scripts/migr/`: `wasi_host.ts`, `corpus_matrix.ts`, `survey.ts`; baseline there). The
+> universal-wasm-loader precondition is met (1.1.1). **M2 and M4 are REOPENED** (wasMath goes away
+> with the hints). The order now puts the number build together with P6. Facts below are dated
+> 2026-10-13 unless marked.
+
 **Status: scoped, nothing started.** Source: binaryang's `cmem/jsr-deno-exit-guide.md` (read
 2026-10-13; findings F1–F11, steps § 4, the "both Bun and Node, Bun main" decision § 5, binaryang's
 recipes § 5a, npm as a second registry § 5b). This file holds what is SPECIFIC to wasmtk: the
