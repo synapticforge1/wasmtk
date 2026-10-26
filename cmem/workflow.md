@@ -57,7 +57,7 @@ list the changed names — every one must carry a library's `_modc` prefix, and 
 functions must be identical.)
 
 Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full text before the
-2026-09-30 rewrite: `git show f21bfb5f810:cmem/next-work.md`). Each step has cost time when skipped.
+2026-09-30 rewrite: `git show 2d151714025:cmem/next-work.md`). Each step has cost time when skipped.
 
 1. **Read the changelog FIRST and write predictions down** (binaryang's `CHANGELOG.md` on GitHub;
    JSR does not serve it): which of our numbers each change should move, and by how much. Nothing

@@ -29,14 +29,14 @@ full pipeline: wat2wasm + wasmmerge + Binaryen `-Oz`):
 
 | Fn(s) | commit | validation |
 | --- | --- | --- |
-| `sin` `cos` `tan` | `d7d4b890ab0` | 1032 sin/cos + 412 tan, 0 off |
-| `exp` | `5ea4af30cfd` | 518/518 (subnormal→`exp(-745)`, overflow→`exp(709)`) |
-| `log` `log2` `log10` | `e647ba1bdb2` | 1239/1239 (`log2` of powers → exact ints; `1e±300`) |
-| `cbrt` | `f824bb474ed` | 515/515 (subnormals, negatives, `1e±300`) |
-| `atan` | `eeb9d11f339` | 1528/1528 e2e (dd vs oracle 0/400k; boundaries 1, tan(pi/8), 1e±300) |
-| `asin` `acos` `atan2` | `dfc5798d449` | e2e asin 0/915, acos 0/915, atan2 0/908; dd vs oracle 0/300k each |
-| `sinh` `cosh` `tanh` `expm1` | `2dcfd5b5ab0` | e2e sinh/cosh/tanh 0/718, expm1 0/711; dd vs oracle 0/300k each |
-| `asinh` `acosh` `atanh` `log1p` | `7932ff5bec0` | e2e asinh 0/510, acosh 0/508, atanh 0/507, log1p 0/508; dd vs oracle 0/300k each |
+| `sin` `cos` `tan` | `0fc2a6edd7c` | 1032 sin/cos + 412 tan, 0 off |
+| `exp` | `2f039e50388` | 518/518 (subnormal→`exp(-745)`, overflow→`exp(709)`) |
+| `log` `log2` `log10` | `1ee0d82106c` | 1239/1239 (`log2` of powers → exact ints; `1e±300`) |
+| `cbrt` | `8a11b82c249` | 515/515 (subnormals, negatives, `1e±300`) |
+| `atan` | `b301d43d7a0` | 1528/1528 e2e (dd vs oracle 0/400k; boundaries 1, tan(pi/8), 1e±300) |
+| `asin` `acos` `atan2` | `ce619a6a739` | e2e asin 0/915, acos 0/915, atan2 0/908; dd vs oracle 0/300k each |
+| `sinh` `cosh` `tanh` `expm1` | `7bebe38efff` | e2e sinh/cosh/tanh 0/718, expm1 0/711; dd vs oracle 0/300k each |
+| `asinh` `acosh` `atanh` `log1p` | `8bbde6cfdc1` | e2e asinh 0/510, acosh 0/508, atanh 0/507, log1p 0/508; dd vs oracle 0/300k each |
 | `pow` (`**`) | (this commit) | e2e 0/1418 (exact ints 2³=8, 2¹⁰=1024, 4^0.5=2, neg base, ±0/±∞); dd vs oracle 0/400k + subnormal/overflow bands 0/200k |
 
 **SWEEP COMPLETE.** Full numbered suite stays **green** (375/375; regression test `67_TrigCorrectlyRounded`).

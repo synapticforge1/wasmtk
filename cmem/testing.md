@@ -880,7 +880,7 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 >
 > ⚠️ **This can fail a release gate.** If a publish run trips it, re-run rather than investigating
 > the Go producer. A retry-with-backoff around the asyncify write in `src/gowasic.ts` would remove it
-> for good; deliberately NOT done inside a release batch — see [next-work.md](next-work.md) (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`).
+> for good; deliberately NOT done inside a release batch — see [next-work.md](next-work.md) (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`).
 >
 > **Runner note:** a full `tests/wasi/wasm_wasi` pass now exceeds 10 minutes on this machine; run it
 > backgrounded or with a raised timeout. Beware the shell idiom `… ; grep -c "FAILED"` as the last
@@ -1052,7 +1052,7 @@ this gate compare against a compiler that no longer exists.
   `cp -r` over the directory, then **measure per file** — a refresh legitimately adds AND retires
   assertions, so a bare total is not enough to tell a corpus change from a regression.
 - **Line endings:** every `.wast` is LF in both the blob and the working tree, and `.gitattributes`
-  **pins `*.wast text eol=lf`** (commit `b38428e2d54`), so this machine's `core.autocrlf=true` can no
+  **pins `*.wast text eol=lf`** (commit `be89ce15316`), so this machine's `core.autocrlf=true` can no
   longer hand out a CRLF corpus and break the byte-for-byte upstream diff above. Do not remove the
   pin (see design-decisions.md).
 

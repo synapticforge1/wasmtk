@@ -239,7 +239,7 @@ batch. Know which one you are in.
 **Design the gate so an IMPROVEMENT also fails.** [wasmtk, 2026-08-20] Files pinned at 0 passes —
 like `ref_null.wast` — exist so that the day a backend learns to encode `ref.null`, the gate *says
 so* rather than absorbing the win silently. This will look like a regression during a version bump;
-it is written down in [next-work.md](next-work.md) (before 2026-09-30: `git show f21bfb5f810:cmem/next-work.md`) so nobody has to diagnose it live.
+it is written down in [next-work.md](next-work.md) (before 2026-09-30: `git show 2d151714025:cmem/next-work.md`) so nobody has to diagnose it live.
 
 **Prefer a self-discovering list to a hand-maintained one.** [wasmtk] `--update-baseline` finds
 unrunnable files by chunking across subprocesses and retrying a dead chunk file-by-file, because a
