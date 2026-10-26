@@ -43,16 +43,25 @@ then, after round 3's size: "record + worst few", and "land" the switch.
 
 ## For the workspace review — 2026-10-26 (W6–W11; the workspace pulls these, nothing written there from here except the owner-directed notes block)
 
-- **W6. H22 is NOT recorded in wasmtk** (the 2026-10-26 review's "H22 recorded: … wasmtk" and
-  H25's "wasmtk fully compliant" do not hold): `cmem/` has no written privacy rule or path test.
-  Record-only; not done this session (not asked).
-- **W7. H24 + H27 + C8, ONE re-copy, open for wasmtk:** best-practices.md ★ 5.2 still has the
-  old "`D:` drive" wording (H24); the stamp at `:728` names `wasmExamples/…` and must read
-  exactly `Copied from synapticforge1/cmem/best-practices.md on <date>` (H27; the only
-  `wasmExamples` mention left in tracked files outside the legacy archive); ★ 6.1 quotes
-  binaryang's pre-purge `b8fafaa3f` (C8, canonical still unfixed 2026-10-26). Do it once C8's
-  canonical fix lands: re-copy the whole block, compare the 28 bullets by number + normalized TEXT
-  (0 differences, and an inverted run that catches one changed word), re-date the stamp.
+- **W6. H22: DONE 2026-10-26** (owner: "fix the not done items"). It had NOT been recorded (the
+  2026-10-26 review's "H22 recorded: … wasmtk" and H25's "fully compliant" did not hold); now in
+  INDEX.md § Policy "No secrets or personal information" — the path test, the not-public / fine
+  lists, the email exception (wasmtk fills neither field), the scan, binaries scanned with `-a`,
+  snapshots free of absolute paths.
+- **W7. H24 + H27: DONE 2026-10-26; C8 still open.** The ★ block re-copied from the canonical
+  file (best-practices.md, stamp `Copied from synapticforge1/cmem/best-practices.md on
+  2026-10-26`); compared by TEXT: 1 difference before (5.2), 0 after, the inversion caught a
+  one-word change. 6.1 kept VERBATIM with binaryang's pre-purge `b8fafaa3f` (rsxtk's precedent):
+  when the workspace fixes the canonical 6.1 (C8), re-copy once more the same way.
+- **W12. H18 REOPENED for wasmtk by a binary (found 2026-10-26 making W6's scan include binaries):**
+  the committed fixture `tests/module/wasm_mod/fib-zig_mod.wasm` carried Zig DWARF with the
+  owner's profile, scoop and AppData paths and the OLD project path; every earlier scan used `-I`
+  (binaries skipped), as binaryang's own finding the same day. **Fixed at HEAD 2026-10-26:** its
+  seven `.debug_*` custom sections removed byte-exactly (every other section unchanged; 6,225 →
+  336 bytes; `mod_tests` 55 / 55); the 68 tracked binaries now scan clean with `-a`. **Still in
+  public history** (since at least `ad0a9167`, 2026-07-02; the 2026-10-23 purge searched text):
+  removing it is a second history rewrite + force-push — 🗓️ OWNER (binaryang has the same
+  decision open for its five binaries).
 - **W8. Stale workspace cells (verified 2026-10-26):** H16 wasmtk done (gc strategy set, 1 pack);
   H17 / H19 force-push done 2026-10-23; H20 done (3.0.0 published from `synapticforge1` with
   provenance); H21 wasmtk's map is pushed (`history-purge-2026-10-23.md`); H7 / X8 stamp
