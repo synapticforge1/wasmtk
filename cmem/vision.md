@@ -97,9 +97,10 @@ capabilities — `Set<i32>` + `Map<i32,i32>` + `JSON` shared-heap libraries + th
 `Date` and `RegExp` leaf libraries) shipped, plus feature-level tree-shake (virtual
 `wasmtk:<cap>` imports) and `wasmtk hybrid --auto` type-routing.** Historical baseline
 under npm:wabt + npm:binaryen: 446/446 tests passing (2026-05-25; 270 wasic +
-Go-by-Example + 103 bindgen + 73 jstyper). **Under the current dual JSR /compat
+Go-by-Example + 103 bindgen + 73 jstyper). **Under the then-current (2026-06) dual JSR /compat
 stack (`jsr:@jrmarcum/wabt-ts@^1.3.2/compat` +
-`jsr:@jrmarcum/binaryen-ts@^1.3.5/compat`):** the full `tests/wasi/wasm_wasi`
+`jsr:@jrmarcum/binaryen-ts@^1.3.5/compat`; both RETIRED 2026-10-26, letter H28 — the backend is
+binaryang, pinned in `deno.json`):** the full `tests/wasi/wasm_wasi`
 suite is **309/309** (`core_` 33/33), jstyper 73/73, and **bindgen 104/104** (Phase 53, 2026-06-15,
 added `Number.parseInt`/`parseFloat` + multi-level interface inheritance; the ABI return side was
 forward-aligned to callee-allocated + `cabi_post`, bindgen 103→104; pre-publish hardening

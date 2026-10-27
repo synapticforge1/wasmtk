@@ -5,6 +5,25 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-10-27 — workspace-rules compliance review (owner: "review the workspace rules and bring this repo into compliance")
+
+Checked against `../cmem/working-rules.md` and every open ledger row to wasmtk. **Already compliant
+(measured):** no committed shell / PowerShell / Python script of wasmtk's own (`git ls-files` finds
+4, all inside the vendored spec and wat-samples corpora — third-party test inputs); scripts' `Deno.*`
+only in strings, the one recorded `Deno.inspect` oracle and audit repro programs; `.gitattributes`
+wildcard-first; `deno fmt` excludes `**/*.md` (so `cmem/`); `CLAUDE.md`, `.claude/settings.local.json`
+and `cmem/local/` ignored, none tracked; version line 3.0.0 = the released tag; path scan `-I` and
+`-a` hits only the rule's own placeholder text; no email but noreply addresses and test strings.
+**Fixed:** (1) `workflow.md` hard-coded a model name in the attribution line (named by the workspace
+Git rule); (2) `publish.yml` — shell logic and two inline `deno eval` → `scripts/publish-workflow.ts`
+on Bun, and the gate step `deno run` → `bun`, so the local gate is CI's (proof in
+deno-exit-plan.md § P5); (3) ★ block re-copied for C8 (6.1's post-purge id), 0 differences;
+(4) H28 recorded (INDEX § Policy; `vision.md`'s "current" wabt-ts / binaryen-ts stack re-labelled
+history); (5) C20, C21 recorded as checks for P1 / P2 / P4 / P8 (deno-exit-plan.md). Answers
+written into the ledger cells of C8, H15, H28, C20, C21. **Not touched (owner calls or work items,
+not compliance):** H6.5b, H10, H12; `scripts/publish.ts` still moves the tag with `git tag -f`
+(the workspace Git rule's tag-move hazard, C21 (6)) — left for the owner.
+
 ## 2026-10-26 — H11, H12 round 3, and the owner's number-type direction
 
 Owner, 2026-10-26: "fix H11 and H12 then explain what the consumer suites are waiting on"; scope

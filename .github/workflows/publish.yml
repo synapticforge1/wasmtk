@@ -31,25 +31,28 @@ jobs:
         with:
           deno-version: v2.x
 
+      # Every script runs on Bun, locally and here, so the local gate IS CI's gate (workspace
+      # `working-rules.md` § The gate; Tooling rule 1). Deno above is for `deno publish` only.
+      # Pinned to the version the local gate ran on (2026-10-27).
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
       # Provenance requires a GitHub OIDC token. The `id-token: write` permission
       # above is what injects ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN into the runner.
       # If they are absent here despite the permission, an org/enterprise Actions
       # OIDC policy is blocking the token and `deno publish` will silently skip
       # provenance (publish still succeeds). This makes that failure mode visible.
       - name: Check OIDC availability (provenance prerequisite)
-        run: |
-          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
-            echo "OIDC token endpoint available — provenance prerequisites met."
-          else
-            echo "::warning::OIDC token NOT available (URL present: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}, TOKEN present: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}). deno publish will skip provenance. Verify id-token:write is honored — check org/enterprise Settings → Actions → General OIDC policy."
-          fi
+        run: bun scripts/publish-workflow.ts oidc-check
 
       # The local `deno task bump` ran the compatibility gate on the bump commit; this repeats it on
       # the TAGGED tree (H6, Rule 3), so a tag pushed by hand cannot skip it: the snapshot matches,
       # the version is the tag, one SemVer step at or above the floor since the previous tag, and
       # no removal without a deprecation release (Rule 4). The logic is TypeScript; this only runs it.
       - name: Compatibility gate on the tag
-        run: deno run -A scripts/api-surface.ts --verify-tag "${GITHUB_REF_NAME}"
+        run: bun scripts/api-surface.ts --verify-tag "${GITHUB_REF_NAME}"
 
       - name: Publish to JSR
         run: deno publish
@@ -68,37 +71,10 @@ jobs:
             --target release/${GITHUB_REF_NAME} \
             --generate-notes
 
-      # The OIDC step above only proves the PREREQUISITE was met. It passed on every release from
-      # v1.11.3 onward while JSR recorded NO provenance at all (rekorLogId null, v1.11.2 was the
-      # last version that had one) — ten releases of false assurance. This checks the OUTCOME: JSR
+      # The OIDC step above only proves the PREREQUISITE was met. This checks the OUTCOME: JSR
       # is the authority on whether a provenance statement actually landed in the Sigstore Rekor
-      # transparency log. Runs last so a failure here never blocks the publish or the GitHub
-      # release, but still fails the job loudly instead of letting the regression stay invisible.
+      # transparency log (the poll, its cache-bust and their history: scripts/publish-workflow.ts).
+      # Runs last so a failure here never blocks the publish or the GitHub release, but still
+      # fails the job loudly instead of letting the regression stay invisible.
       - name: Verify provenance was recorded on JSR
-        run: |
-          PKG=$(deno eval 'console.log(JSON.parse(Deno.readTextFileSync("deno.json")).name)')
-          SCOPE=${PKG%/*}; SCOPE=${SCOPE#@}
-          NAME=${PKG#*/}
-          VERSION=${GITHUB_REF_NAME#v}
-          URL="https://api.jsr.io/scopes/${SCOPE}/packages/${NAME}/versions/${VERSION}"
-          echo "Checking $URL"
-          # JSR ingests asynchronously, so poll rather than reading once.
-          for i in $(seq 1 12); do
-            # The JSR version endpoint is CACHED, and attestation is written a few
-            # seconds AFTER publish, so a plain re-read can keep returning the
-            # pre-attestation record for minutes and report a FALSE negative on a
-            # release that did get provenance. Measured 2026-08-27 on
-            # wabt-ts@1.5.1: eight plain reads over ~3 minutes all returned null,
-            # while one cache-busted read showed rekorLogId 2618866200, written 4s
-            # after publish. Cache-bust, or this step cannot be believed.
-            BODY=$(curl -sf -H "Accept: application/json" -H "Cache-Control: no-cache" "${URL}?cb=${GITHUB_RUN_ID}-${i}" || true)
-            REKOR=$(printf '%s' "$BODY" | deno eval 'const t=await new Response(Deno.stdin.readable).text(); try { console.log(JSON.parse(t).rekorLogId ?? "") } catch { console.log("") }' || true)
-            if [ -n "$REKOR" ]; then
-              echo "✅ Provenance recorded — Rekor log ID: $REKOR"
-              exit 0
-            fi
-            echo "  attempt $i: no provenance yet, retrying in 15s"
-            sleep 15
-          done
-          echo "::error::${PKG}@${VERSION} was published WITHOUT provenance (no Sigstore/Rekor entry). The last outage (v1.11.3 to v2.0.0, 2026-07-08 to 07-30) was SCOPE-WIDE, outside this repo: every @jrmarcum publish in that window lacked provenance (measured 2026-10-23, cmem/design-decisions.md). Check other packages' recent publishes before looking for a cause here; the OIDC step above only proves the token prerequisite."
-          exit 1
+        run: bun scripts/publish-workflow.ts provenance "${GITHUB_REF_NAME}"

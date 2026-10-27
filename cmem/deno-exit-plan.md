@@ -183,7 +183,8 @@ counting the dync host).
   `publish` out of `deno.json`; drop `version` and `bin` from `package.json`; point
   `sync-version.ts`, `bump.ts`, `publish.ts`, `api-surface.ts` and `publish.yml` at it; publish
   with `--config jsr.json`; a test that fails if `deno.json` carries `name` or `version` again.
-  **Done when** `deno publish --dry-run --config jsr.json` lists the same files as before.
+  **Done when** `deno publish --dry-run --config jsr.json` lists the same files as before **AND the
+  UPLOAD's specifiers equal today's** (ledger C20, below: a file list cannot show the rewrite).
 - **P2. The product runs on Bun, Node and Deno.**
   - `src/rt.ts` on `node:` builtins only (no `Bun.*`, no `Deno.*` except feature-detected where
     Deno behaviour must stay); `main.ts` on `process.argv` / `process.exit` / `process.platform`,
@@ -236,6 +237,17 @@ counting the dync host).
   same day in their own commit; testing.md 2026-10-21. gen_caps_bytes' `deno fmt` step was
   dropped: `src/wasm/` is excluded from formatting, so it could only fail.) Ad-hoc probes that
   import `src/` (the compiler) also stay `deno run --config deno.json` until P2.
+  **2026-10-27: `publish.yml` followed** (workspace compliance review): its compatibility-gate step
+  ran `deno run -A scripts/api-surface.ts` while `deno task api-surface` runs `bun` (the local gate
+  was not CI's gate), and its OIDC and provenance steps were shell logic with two inline
+  `deno eval` (Tooling rule 2). Now `setup-bun` 1.4.4, `bun scripts/api-surface.ts --verify-tag`,
+  and `bun scripts/publish-workflow.ts oidc-check | provenance <tag>`; Deno remains for
+  `deno publish` only. Compared on the same inputs: the old steps (a one-time shell copy) vs
+  `publish-workflow.ts`, 6 / 6 identical stdout + exit (OIDC set / unset / half-set; 3.0.0 →
+  Rekor 3439121339; 2.0.0 and 99.0.0 must fail and do); `api-surface.ts --verify-tag` on a scratch
+  clone at `v3.0.0` under Deno and Bun, identical for the pass and the Rule-4 refusal (`v2.0.0`), and
+  both exit 1 on a tag that does not exist, differing only in the runtime's uncaught-error print
+  (unreachable in CI: the tag is the triggering ref). The workflow itself first runs at the next tag.
 - **P6. Tests.**
   - The suite harnesses (`tests/*_tests.ts`, 36 files with `Deno.*`, 259 lines; 16 spawn `deno`)
     on `node:` builtins; `hybrid_tests` / `wasmmerge_guard_tests` (`Deno.test`, 15) → `node:test`
@@ -258,6 +270,39 @@ counting the dync host).
   (`rekorLogId`). This is the only step that cannot be undone (a JSR version is permanent).
 - **P8. Delete `deno.json` and `deno.lock`**, drop `--config jsr.json`; the `deno task` entries
   are `package.json` scripts by then; `CLAUDE.md`'s "reinstall before testing" rule is retired.
+
+## Measured in S3D-ReportCompiler, NOT yet here (ledger C20, C21; recorded 2026-10-27)
+
+Hypotheses for wasmtk until re-run here; full text `../S3D-ReportCompiler/cmem/bun-migration.md`
+steps 1–4 (Deno 2.9.8, Bun 1.4.4). Each names the phase it bites and the check to run first.
+
+- **C20 → P1, P7. `deno publish --config jsr.json` beside a `deno.json` silently rewrites import-map
+  dependencies in the upload** to relative paths that cannot load, and still says "Successfully
+  published". S3D measured it on trailing-slash entries (`"pkg/": "npm:pkg@x/"`) and, with deps only
+  in `package.json`, on every bare dependency; the one clean variant was `jsr.json` carrying
+  `imports` + `nodeModulesDir` with NO `deno.json` and no `--config`. wasmtk ships 7 import-map
+  dependencies (no trailing-slash entry today) and plans exactly the `--config jsr.json` beside
+  `deno.json` shape, so it is exposed. **Check:** publish each variant to a fake JSR on
+  `127.0.0.1` (`JSR_URL=http://127.0.0.1:<port>/`, dummy `--token`, `--no-provenance`) and read the
+  uploaded tarball's specifiers; positive control = today's upload equals what jsr.io serves for
+  3.0.0. The release gate reads the UPLOAD, not the exit code.
+- **C21 (1) → P8. With no `tasks` in `deno.json`, `deno task <name>` runs the `package.json` script
+  of that name** — S3D's "does the old name still resolve?" probe of `deno task release` ran the
+  real release. Never probe `deno task publish` / `bump` that way here.
+- **C21 (2) → P2, P6. `Deno.readTextFile` keeps a leading BOM**; `readFile(p, "utf8")` matches it, a
+  `TextDecoder` port strips it (3 bytes). Use `readFile(p, "utf8")` in ports.
+- **C21 (3) → P4. Bun 1.4.4 ships `bun fmt`** (`--check`; Prettier-style, so NOT `deno fmt`'s
+  output — P4's byte-for-byte rule still holds); bare `bun fmt` formats every supported file,
+  `cmem/` and test inputs included — name the paths. `bun lint` is still absent.
+- **C21 (4) → P4. Biome's binaries are optional per-platform dependencies**: `omit=optional`
+  installs a wrapper with no binary; `bunx @biomejs/biome@<pin>` works.
+- **C21 (5) → P2. npm 12.2.0 (bundled with Node 24.21.0) refuses JSR's npm tarballs**
+  (`EALLOWREMOTE`); `npm_config_allow_remote=all` for the install. Bites P2's
+  `npm:@jsr/jrmarcum__binaryang` route on that Node line.
+- **C21 (6) → `publish.yml` today. `deno publish` of an existing version SKIPS with exit 0**, so a
+  re-run of the tag workflow (a moved `v*` tag; workspace `working-rules.md` § Git) carries on to
+  "Create release branch" and "Create GitHub Release". UNMEASURED here what those two then do on a
+  re-run; read them before any `v*` tag is moved.
 
 ## Ordering against other work
 
