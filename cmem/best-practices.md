@@ -723,18 +723,18 @@ it; an unmarked older section is UNKNOWN, not sent.
 Go suites could not run, the useful record was not "3 suites red" but "'ran the ENTIRE suite set'
 carries a three-suite asterisk on this machine, including in today's commit messages".
 
-## ★ The workspace's convergent rules — a COPY, stamped 2026-10-26 (workspace letters H6, H24, H27)
+## ★ The workspace's convergent rules — a COPY, stamped 2026-10-27 (workspace letters H6, H24, H27, C8)
 
-**Copied from synapticforge1/cmem/best-practices.md on 2026-10-26** (the stamp wording of letter
+**Copied from synapticforge1/cmem/best-practices.md on 2026-10-27** (the stamp wording of letter
 H27 and `memory-conventions.md` § Open book; first copied 2026-09-30). **28 rules**, every bullet the
 source marks **★ = convergent**: two or more repos derived it without reading each other. Copied
 VERBATIM, with the source's section headings (`##` there, `###` here) and rule numbers, so a rule
-can be cited as "workspace 2.1" in either place. **Checked by TEXT, not by count** (2026-10-26): a
-one-time Bun script compared the 28 bullets by number and whitespace-normalized full text — before
-the re-copy 1 difference (5.2, letter H24's new wording), after it 0; inverted (one word added to
-the source's 6.1, in memory) it reports `DIFF 6.1`. **Known mismatch, kept verbatim:** 6.1 quotes
-binaryang's PRE-purge id `b8fafaa3f`; on binaryang's `origin/main` that commit is `8d9ba0cb9`
-(ledger C8). The source is fixed first, then this block is re-copied — it is not corrected here.
+can be cited as "workspace 2.1" in either place. **Checked by TEXT, not by count**: a one-time Bun
+script compares the 28 bullets by number and whitespace-normalized full text. 2026-10-26: before
+the re-copy 1 difference (5.2, letter H24's new wording), after it 0. 2026-10-27 (ledger C8, the
+source's 6.1 now cites binaryang's post-purge `8d9ba0cb9`): before 1 difference (`DIFF 6.1`), after
+it 0, one line changed in the diff; inverted (one word added to the copy's 2.1, in memory) it
+reports `DIFF 2.1`; control, loader-js's copy, 0.
 
 - **Do not edit these here.** The source is authoritative. If it changes, re-copy the whole block
   and re-stamp the date; a hand-edited copy is the drift H10 exists to stop.
@@ -832,7 +832,7 @@ binaryang's PRE-purge id `b8fafaa3f`; on binaryang's `origin/main` that commit i
 
 - **6.1 ★ A written result is a CLAIM: a commit message, a status line, a doc of a safety guard, a
   contract row verified by reading. Compare it to the artifact; put a pin where the tool enforces
-  it.** `b8fafaa3f` said "pin to 132" and left 116; prose has no failure mode. [binaryang + wabt-ts + wasmrt]
+  it.** `8d9ba0cb9` (was `b8fafaa3f` before binaryang's 2026-10-23 purge; corrected here 2026-10-26, ledger C8) said "pin to 132" and left 116; prose has no failure mode. [binaryang + wabt-ts + wasmrt]
 - **6.2 ★ Write down the thing you only said out loud; write the negatives (what was varied, what
   held fixed), the calibration, and what you did NOT check; distinguish clean / measured /
   UNMEASURED.** Knowledge that exists only in a conversation is operationally identical to

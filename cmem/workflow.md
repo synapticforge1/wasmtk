@@ -304,11 +304,10 @@ explicitly. Publishing from a branch would leave the tag dangling if the branch 
 Conventional-commit subject (`fix(wasic):`, `docs(cmem):`, `chore:`, `release:`). The body is where
 the value is: **state the root cause, the concrete wrong output, why it went untested, and what was
 deliberately NOT done**. Several bodies this session recorded a rejected alternative — that is the
-part a future reader needs. End every commit with:
-
-```
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-```
+part a future reader needs. End every commit with **the attribution line the session supplies**
+(a `Co-Authored-By:` trailer). The model name in it changes between sessions, so it is not written
+down here (workspace `working-rules.md` § Git, which named this file for hard-coding one; fixed
+2026-10-27).
 
 ## Traps that have actually bitten
 
