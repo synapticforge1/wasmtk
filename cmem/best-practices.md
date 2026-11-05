@@ -86,6 +86,13 @@ already published. If the answers differ, the range is doing work a lock cannot.
 editing anything in `src/` or `deno.json` you MUST run `deno task install` or you are testing the old
 binary. Never hand-write the `deno install` line — `--allow-ffi` is required.
 
+**Prove WHICH dependency ran with an input only one of them can pass.** [wasmtk, 2026-11-05] A
+generated config that points the backend at a local checkout "worked" in the sense that it ran —
+but a run that silently resolved to the pinned JSR copy would have looked identical. The proof was
+a known defect: binaryang 2.2.0 accepts one invalid `delegate` module in `legacy/try_delegate.wast`
+and the checkout carries the fix, so `validatorAcceptedInvalid` read 1 under the pin and 0 through
+the config. Keep one such discriminating input per swap you rely on; a clean exit is not one.
+
 ## 2. Investigating a defect
 
 **A speculative probe must undo EVERY side effect, not only the ones its suppressor knows about.**
@@ -210,6 +217,13 @@ and what you inferred, so the other side knows which half to check.
 alternative to fixing a class is a permanent "known deviation" nobody re-examines, which hides the
 next genuine failure in the same file. That argument arrived here from a downstream consumer on
 2026-08-20 and it was right.
+
+**Read a producer's layout from ITS manifest; never hard-code a copy of it.** [wasmtk, 2026-11-05]
+`scripts/upstream-link.ts` hard-coded binaryang's `deno.json` and two `src/*-ts/api/` paths.
+binaryang's Bun migration (2026-10-13) removed both, and the script refused on every clone for
+three weeks — nobody ran it, so nobody saw. It now resolves each pin through the checkout's own
+`jsr.json` `exports`, the same table JSR resolves the pin through, so the two cannot disagree. A
+consumer-side copy of a producer's paths is a second source of truth with no gate on it.
 
 ## 4. Tests and gates
 
@@ -507,6 +521,12 @@ between. Nothing reported an error — the harness said the task was stopped, an
 a long run, list the process table and kill survivors by PID. On a gate whose failures are *timeouts*,
 a stray CPU hog is not just noise, it manufactures the symptom you are hunting.
 
+**When a script moves runtime, move EVERY caller — CI YAML included — or the local gate stops being
+CI's.** [wasmtk, 2026-10-27] P5 (2026-10-21) moved `deno task api-surface` to `bun`; `publish.yml`
+kept `deno run -A scripts/api-surface.ts` for six more days, so the tag gate and the local gate ran
+the same file on two runtimes. Found only by a rules review. Before calling a port done, grep the
+script's name across `.github/`, `deno.json` tasks and docs, and A/B the CI invocation too.
+
 ## 4b. Tooling that lies to you (the shell, the cache, the generator)
 
 These are not "be careful" items — each returns a **confident, plausible, wrong** answer, and every
@@ -548,6 +568,14 @@ This was the second wrong scope in a row on the same task — the first counted 
 decode failures as conflation and claimed 930. **Both were confident, both were wrong, and the
 second felt more rigorous because it was a correction.** The rule that would have caught either:
 when a probe reimplements logic the codebase already has, it is testing the copy.
+
+**A second config beside the gate's manifest shares its lockfile — and writes to it.** [wasmtk,
+2026-11-05] One `deno run --config deno.upstream.json` (exploration only, gitignored) PRUNED the
+pinned binaryang 2.2.0 entry and its integrity hash from the committed `deno.lock`, with no
+message. Committed, that would have unpinned the gate of record's integrity check from an
+exploration run. The generated config now says `"lock": false`. Any side config — a probe, an
+override, an upstream link — must name its own lockfile or none; check `git status` after the
+first run through it.
 
 ### 🔒 HARD RULE — scripting is **TypeScript only, run with Bun**. No `python3`. (owner directive 2026-09-19; Bun 2026-10-21)
 
