@@ -647,7 +647,10 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
   `delegate 2` out of range both VALID to binaryang, invalid to V8). Pinned in
   `tests/wast_tests.ts` `KNOWN_ACCEPTED_INVALID`; inverted both ways (pin removed: that file red;
   customDescriptors everywhere: the two br_on_cast files red, 3 each). Reported in the DRAFT to
-  binaryang. When their fix lands and the pin reads 0, the definition verdict is a few lines in
+  binaryang. **2026-11-05: FIXED upstream** (binaryang `12e6c042d`, reply in their `handoffs.md`
+  § 47; ledger C12 closed): their tag `v2.2.2` carries it (JSR availability not checked here).
+  **Next:** pin a release that carries it (the binaryang bump checklist in workflow.md, full gate),
+  then set this pin to 0 and invert it. When the pin reads 0, the definition verdict is a few lines in
   the `kind === "definition"` catch (judge only an engine SIZE-CAP refusal, not an unimplemented
   proposal — two custom-descriptors definitions would otherwise be judged too), then re-record the
   4 files' `unbuilt`. The plain `memory64.wast` module `(module (memory i64 0 0x1_0000_0000_0000))`
