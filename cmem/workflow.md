@@ -36,16 +36,30 @@ deno task upstream:install     # installs as `wasmtk-upstream`, NOT `wasmtk`
 2. **NOT a submodule.** A submodule would commit a second pin into this repo that can disagree with
    the JSR pin in `deno.json`, and the JSR pin is the single source of truth for what we ship. The
    checkout is a working convenience, not a dependency declaration.
+3. **`deno.upstream.json` uses no lockfile** (`"lock": false`, 2026-11-05). Both configs sit beside
+   the same `deno.lock`, and one run through the upstream config PRUNED the pinned binaryang entry
+   and its integrity hash from it (measured). If `deno.lock` shows a diff after exploring, it is
+   that hazard: copy it aside and restore it, never commit it.
+
+**How `upstream:link` finds the paths** (2026-11-05): every `deno.json` import of the form
+`jsr:@jrmarcum/binaryang@<v>/<subpath>` is resolved through the checkout's own `jsr.json`
+`exports["./<subpath>"]`, so all four binaryang specifiers map to the checkout and a layout move
+upstream cannot strand it. It refuses (exit 1) when the checkout or an export is missing. Before
+this it hard-coded two pre-Bun-migration paths and refused on every clone from 2026-10-13 (binaryang
+B7) to 2026-11-05. **Check that a run really used the checkout:** `legacy/try_delegate.wast` gives
+`validatorAcceptedInvalid` 1 on the 2.2.0 pin and 0 on any binaryang carrying `12e6c042d`.
 
 ⚠️ **A result from `wasmtk-upstream` or `deno.upstream.json` is NEVER evidence for a decision** — it
 tells you where to look. Upstream asked for exactly this discipline in their own words: *"point at a
 local checkout for your gate … and hold until you've seen those green against a version you can
 pin."* The premature `-Oz` skip removal on 2026-08-25 is what that sentence is protecting against.
 
-**Environment note:** this drive does not record file ownership, so git refuses the nested repo with
-*"dubious ownership"* until you run
+**Environment note:** this drive does not record file ownership, so git once refused the nested repo
+with *"dubious ownership"* until you ran
 `git config --global --add safe.directory <abs-path-to>/upstream/binaryang`. The symptom is a silent
-`unknown` where `upstream:link` should print the checkout revision.
+`unknown` where `upstream:link` should print the checkout revision. Not seen 2026-11-05 (the fresh
+clone printed its revision; ledger C9 closed the workspace-wide `safe.directory` issue) — if
+`unknown` comes back, this is the cause.
 
 ## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, 1.13.0 → 1.15.0, 1.15.0 → 1.16.1, and 1.16.1 → 2.2.0 — a MAJOR, whose one breaking change, a flag spelling, wasmtk never used; nothing moved, 2026-10-24)
 
