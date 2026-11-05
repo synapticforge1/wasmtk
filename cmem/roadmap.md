@@ -57,6 +57,10 @@
    witgen replaces a binaryang-generated `.wit` (H11).
 6. **sw139:** the regex bundler's shared heap at 0 (fixed before the switch, kept as a test).
 7. Test harness: the golden snapshot writes the repo root as `<repo>`.
+8. Release and dev tooling (not user-facing): `publish.yml`'s gate, OIDC and provenance steps run
+   on Bun through `scripts/publish-workflow.ts` (2026-10-27; first runs at the next tag);
+   `deno task upstream:link` maps every binaryang pin through the checkout's `jsr.json` and its
+   config uses no lockfile (2026-11-05).
 
 ## Release status (2026-10-24) — v3.0.0: JavaScript's numbers, whole-object printing, binaryang 2.2.0
 
