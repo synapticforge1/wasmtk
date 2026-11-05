@@ -74,6 +74,20 @@ then, after round 3's size: "record + worst few", and "land" the switch.
 
 ## For the workspace review — 2026-10-26 (W6–W12; ledger row C10, answers in the ledger's cells; W6, W7, W12 done the same day)
 
+**C26 (from binaryang, its second history rewrite) ANSWERED 2026-11-05:** `upstream/binaryang`
+re-cloned (old clone clean, `main` only, no stash, no local-only commit; moved aside, verified,
+then removed): HEAD `62b546e2a` = binaryang `origin/main`, one pack, `maintenance.strategy gc`; the
+old HEAD `dad09b225` is absent from it and its new id `4fa777a5c` carries the same subject. The one
+stale quoted id translated (`next-work.md`, `v1.15.0` `bc97aa573 (was ae9e871)`); a scan of all
+244 tracked text files with an id-like string against binaryang's 398-pair old → new map found no
+other. Pins name versions, so nothing else moved. binaryang closes the row.
+**Found on the way, OPEN: `deno task upstream:link` has been broken since 2026-10-13** — binaryang
+dropped `deno.json` (B7; it has `jsr.json`) and moved the compat entry points to
+`src/compat/{binaryen,wabt}-compat.ts`, so `scripts/upstream-link.ts` refuses ("not checked out",
+exit 1) on any clone, old or new. Loud, not silent. The fix is the existence check + the two
+paths; also decide whether `binaryang-bundle` / `binaryang-validate` should map locally too (today
+they would still resolve to JSR 2.2.0 beside a local checkout).
+
 **C10 CLOSED 2026-11-05 by wasmtk** (the creator), after verifying the workspace's fold-in: H11
 closed in the ledger, H22's wasmtk ✅ in `handoffs.md`, W10 / W11 in `open-work.md`, the
 `projects.md` row at 3.0.0. W8–W11 below stay as written; their outcomes are the workspace's.
@@ -780,9 +794,13 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
      added to the same draft.
   2. **binaryang's history was rewritten too (H19, on GitHub 2026-10-23).** `upstream/binaryang`
      was RE-CLONED here the same day from `synapticforge1/binaryang` (the old clone had no local
-     work: clean, no stash, `main` only; the new one is at `v1.15.0` `ae9e871`, 22 tags). A
-     binaryang hash quoted in this repo's records before 2026-10-22 is an OLD one; translate it
-     with binaryang's `cmem/publishing.md` § "The history purge" (not translated in bulk here).
+     work: clean, no stash, `main` only; the new one is at `v1.15.0` `bc97aa573 (was ae9e871)`,
+     22 tags). A binaryang hash quoted in this repo's records before 2026-10-22 is an OLD one;
+     translate it with binaryang's `cmem/publishing.md` § "The history purge" (not translated in
+     bulk here). **binaryang rewrote AGAIN on 2026-10-28** (ledger C26: DWARF paths in five bench
+     binaries; ids from 2026-10-13 on changed, 14 tags moved): translate through § "The second
+     purge" as well. Re-cloned for it 2026-11-05 (the C26 note above, under § "For the workspace
+     review — 2026-10-26").
   3. **The provenance outage was scope-wide** — recorded in design-decisions.md § JSR provenance
      (2026-10-23 entry; our "specific to wasmtk" conclusion withdrawn).
 
