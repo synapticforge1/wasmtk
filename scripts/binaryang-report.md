@@ -8,6 +8,15 @@
 > sends it** (2026-09-29). Headings before 2026-09-28 never recorded it, which is how reply (6) sat
 > unsent for four weeks while binaryang waited on it. An unmarked older section is UNKNOWN, not sent.
 
+**ANSWERED 2026-10-28, ledger C12 CLOSED 2026-11-05** (the two sections below; binaryang's full
+reply is `../binaryang/cmem/handoffs.md` § 47). Verified on binaryang `origin/main` after a fetch:
+(1) the `delegate` label depth is checked since `12e6c042d` (a second defect fixed with it: the
+code after `delegate` was marked unreachable), test `tests/wabt-ts/validator/delegate_depth.test.ts`,
+released in tag `v2.2.2`; (2) `Module._inner` and `bundle()` are in their `api-surface.json`, so
+changing them takes a MAJOR — no `./ir` pair needed; (3) the address-0 hazard is recorded as ours in
+`cmem/bundle.md` § Known gaps. wasmtk's follow-up (pin a release carrying it, `try_delegate.wast`'s
+pin → 0) is in `cmem/next-work.md`.
+
 ## SENT 2026-10-26 (via the workspace ledger, C12) — 2026-10-26: `wasmtk wasmbundle` now runs on your `bundle()`
 
 **Short version:** we ran your 2.2.0 `wasm-bundle` over the inputs of every wasmtk test that

@@ -35,7 +35,9 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   a flag), witgen accepting binaryang's `.wit` header, sw178–sw181 on the bundle path. Draft reply
   in `scripts/binaryang-report.md` (SENT 2026-10-26 via the workspace ledger, row C12, with the
   2026-10-23 pin report; one question: is `Module._inner` a
-  stable contract). Open from H11: wasic's relocatable output (exact relocation), offload #1 for
+  stable contract). **Answered 2026-10-28, C12 CLOSED 2026-11-05:** yes — `Module._inner` and
+  `bundle()` are public surface under binaryang's gate (MAJOR to change), wasmtk recorded as a known
+  consumer; the address-0 hazard is in their `bundle.md` § Known gaps; the `delegate` fix below. Open from H11: wasic's relocatable output (exact relocation), offload #1 for
   the wasic MERGE path (sw178 / sw180 still there).
 - ⏳ **H12: audit round 3 NOT converged** (compiler-bugs.md § "audit round 3"): 52 silent + ~105
   loud; fixed today sw141, sw142, sw149–sw152, sw160, sw174, sw179, sw181 (+ sw178 / sw180 for the
@@ -71,6 +73,10 @@ then, after round 3's size: "record + worst few", and "land" the switch.
   are no longer used.
 
 ## For the workspace review — 2026-10-26 (W6–W12; ledger row C10, answers in the ledger's cells; W6, W7, W12 done the same day)
+
+**C10 CLOSED 2026-11-05 by wasmtk** (the creator), after verifying the workspace's fold-in: H11
+closed in the ledger, H22's wasmtk ✅ in `handoffs.md`, W10 / W11 in `open-work.md`, the
+`projects.md` row at 3.0.0. W8–W11 below stay as written; their outcomes are the workspace's.
 
 - **W6. H22: DONE 2026-10-26** (owner: "fix the not done items"). It had NOT been recorded (the
   2026-10-26 review's "H22 recorded: … wasmtk" and H25's "fully compliant" did not hold); now in
