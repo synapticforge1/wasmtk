@@ -81,12 +81,18 @@ old HEAD `dad09b225` is absent from it and its new id `4fa777a5c` carries the sa
 stale quoted id translated (`next-work.md`, `v1.15.0` `bc97aa573 (was ae9e871)`); a scan of all
 244 tracked text files with an id-like string against binaryang's 398-pair old → new map found no
 other. Pins name versions, so nothing else moved. binaryang closes the row.
-**Found on the way, OPEN: `deno task upstream:link` has been broken since 2026-10-13** — binaryang
-dropped `deno.json` (B7; it has `jsr.json`) and moved the compat entry points to
-`src/compat/{binaryen,wabt}-compat.ts`, so `scripts/upstream-link.ts` refuses ("not checked out",
-exit 1) on any clone, old or new. Loud, not silent. The fix is the existence check + the two
-paths; also decide whether `binaryang-bundle` / `binaryang-validate` should map locally too (today
-they would still resolve to JSR 2.2.0 beside a local checkout).
+**Found on the way, FIXED the same day (owner: "yes proceed with the fixes"): `deno task
+upstream:link` had been broken since 2026-10-13** — binaryang dropped `deno.json` (B7; `jsr.json`
+now) and moved the compat entry points to `src/compat/`, so `scripts/upstream-link.ts` refused
+("not checked out", exit 1) on any clone. Now it resolves every `jsr:@jrmarcum/binaryang@…/<sub>`
+import through the checkout's `jsr.json` exports: all FOUR specifiers map (bundle and validate
+too, so an exploration build no longer mixes the checkout with JSR 2.2.0). **A second defect found
+proving it:** a run through `deno.upstream.json` pruned the pinned binaryang entry + integrity hash
+from the shared `deno.lock`; the generated config now sets `"lock": false` (re-run: `deno.lock`
+untouched). Evidence: `legacy/try_delegate.wast` `validatorAcceptedInvalid` 1 on the pin, 0
+through the upstream config (the checkout carries binaryang's `delegate` fix); refusals inverted
+(no checkout → exit 1; an export renamed in the checkout's `jsr.json` → exit 1 naming it; restored,
+clone clean). workflow.md § "Co-developing" records the guard and the check.
 
 **C10 CLOSED 2026-11-05 by wasmtk** (the creator), after verifying the workspace's fold-in: H11
 closed in the ledger, H22's wasmtk ✅ in `handoffs.md`, W10 / W11 in `open-work.md`, the
