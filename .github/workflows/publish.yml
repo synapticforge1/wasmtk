@@ -1,48 +1,65 @@
-# The release workflow, as written for JS / TS projects in the workspace's release-process.md
-# (2026-11-10, by binaryang on the owner's word; reference: binaryang's publish.yml). wasmtk
-# publishes to JSR only, so it has three of the five jobs, the credential only where it is used:
+# The release workflow — the workspace's release-process.md § 5 (U5–U9), in 🔒 the owner's order
+# (2026-11-10, decision D1): "the CI to check first, then push the tag, and then create the release
+# page from the tag, then publish the package to the registry for the project in that order."
 #
-#   checks   no token          the tag is the manifest version and the surface floor holds
-#                              (api-surface.ts --verify-tag), the type check, and a publish dry run
-#                              on exactly the tree the jsr job publishes
-#   jsr      id-token: write   the published files only, nothing installed; skip if JSR has the
-#                              version (a re-run); `uploaded` written BEFORE `deno publish`, which is
-#                              called DIRECTLY; the Rekor id read back
-#   release  contents: write   on `uploaded`, not on deno publish's exit: JSR serves the version →
-#                              the tag peels to this commit → the GitHub Release page ON the tag,
-#                              through the REST API (never `gh`), an existing page = done → read back
+# The local `deno task release` (scripts/release.ts, U4) pushes `main` with the `bump to vX.Y.Z`
+# commit and NO tag. Every push to `main` runs this workflow:
 #
-# The version tag IS the release (owner, 2026-11-10): no `release/<tag>` branch. A failure after
-# JSR's upload: "Re-run failed jobs" — each job skips what is already done — never a new tag for
-# the same code. Tests are NOT run here yet: wasmtk's gate is local (installed `wasmtk`, Go, Zig,
-# standalone engines); the CI gate is Deno-exit plan P7 (cmem/deno-exit-plan.md).
+#   checks   contents: read    U5: HEAD = github.sha; "is this a release?" (v<deno.json version>
+#                              not on origin); for a release, the surface floor on the untagged
+#                              candidate (api-surface.ts --verify-release); the type check; the
+#                              publish dry run on exactly the tree the jsr job publishes
+#   tag      contents: write   U6: CI creates the annotated tag on github.sha (an existing one at
+#                              this commit = done; elsewhere = refused, a tag never moves), reads back
+#   release  contents: write   U7: the GitHub Release page FROM the tag — REST API, never `gh`; an
+#                              existing page = done; read back
+#   jsr      id-token: write   U8, LAST: the published files only, nothing installed; skips if JSR
+#                              already has the version; `deno publish` DIRECTLY; the Rekor id read
+#                              back, FATAL
+#
+# A push that is not a release runs `checks` only. A failure: "Re-run failed jobs" — `checks`'
+# outputs are kept, the tag, the page and the upload each skip what is already done (U12); never a
+# new tag for the same code, never a moved tag, never "Re-run all jobs" (a fresh `checks` would see
+# the tag made by the first attempt and call it not a release). The version tag IS the release
+# (owner, 2026-11-10): no `release/<tag>` branch.
+#
+# ⚠️ UNMEASURED until the first release under this order: `deno publish` now runs in a run started
+# by a push to `main`, after a tag made by github-actions[bot]. binaryang recorded that a tag
+# PUSHED by the bot could not trigger a JSR publish; here nothing waits for a tag trigger (the jobs
+# chain with `needs:`), and the OIDC identity is this run's — binaryang re-measures it first
+# (release-process.md U6 ⚠️). Tests are NOT run in `checks` yet: wasmtk's gate is local (installed
+# `wasmtk`, Go, Zig, standalone engines); a CI gate is Deno-exit plan P7.
 #
 # Every action is pinned to a commit hash; the comment names its release. Move a pin by reading
 # the release tag's commit with `git ls-remote` (verified 2026-11-10 for the three below).
-#
-# JSR side: the package `@jrmarcum/wasmtk` is linked to this repository (JSR → Settings → GitHub
-# Actions); no JSR token is needed with OIDC.
+# JSR side: `@jrmarcum/wasmtk` is linked to this repository; no JSR token is needed with OIDC.
 
-name: Publish to JSR
+name: Release
 
 on:
   push:
-    tags:
-      - "v*"
-  workflow_dispatch: # a non-tag dispatch runs `checks` only
+    branches:
+      - main
+  workflow_dispatch:
 
-# One run per tag at a time, QUEUED, never cancelled: a cancelled run after `deno publish` and
-# before the jobs that follow it would leave a version on JSR without its page (C30 (2)).
+permissions: {}
+
+# One run at a time, QUEUED, never cancelled: a cancelled run between the tag and the publish
+# would leave a tag and a page for a version JSR never got (C30 (2)).
 concurrency:
-  group: publish-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   checks:
-    name: Checks ${{ github.ref_name }}
+    name: Checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      release: ${{ steps.rel.outputs.release }}
+      version: ${{ steps.rel.outputs.version }}
+      tag: ${{ steps.rel.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -66,13 +83,16 @@ jobs:
         with:
           deno-version: v2.x
 
-      # The local `deno task bump` ran the compatibility gate on the bump commit; this repeats it on
-      # the TAGGED tree (H6, Rule 3), so a tag pushed by hand cannot skip it: the snapshot matches,
-      # the version is the tag, one SemVer step at or above the floor since the previous tag, and
-      # no removal without a deprecation release (Rule 4). The logic is TypeScript; this only runs it.
-      - name: Compatibility gate on the tag (tag = version, the floor holds)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: bun scripts/api-surface.ts --verify-tag "${GITHUB_REF_NAME}"
+      - name: Is this a release? (HEAD = github.sha; the version's tag not on origin)
+        id: rel
+        run: bun scripts/publish-workflow.ts is-release
+
+      # The local `deno task bump` ran the compatibility gate; this repeats it on the pushed
+      # commit before CI tags it (H6, Rule 3): the snapshot matches, one SemVer step at or above
+      # the floor since the previous tag, no removal without a deprecation release (Rule 4).
+      - name: Compatibility gate on the release candidate
+        if: steps.rel.outputs.release == 'true'
+        run: bun scripts/api-surface.ts --verify-release
 
       - name: Type-check
         run: deno check main.ts
@@ -99,18 +119,78 @@ jobs:
         working-directory: jsr-tree
         run: deno publish --dry-run
 
-  jsr:
-    name: Publish ${{ github.ref_name }} to JSR
+  tag:
+    name: Tag ${{ needs.checks.outputs.tag }}
     needs: checks
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.checks.outputs.release == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout the workflow script and the manifest only
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /deno.json
+            /scripts/publish-workflow.ts
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+
+      - name: Create the annotated tag on this commit (REST API), read back
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.checks.outputs.tag }}
+        run: bun scripts/publish-workflow.ts tag "$TAG"
+
+  release:
+    name: GitHub Release ${{ needs.checks.outputs.tag }}
+    needs: [checks, tag]
+    if: needs.checks.outputs.release == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      # Only the release script and the manifest it reads the package name from: no package code
+      # beside the write token, and the checkout keeps no credential.
+      - name: Checkout the workflow script and the manifest only
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /deno.json
+            /scripts/publish-workflow.ts
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+
+      # The tag peels to this commit → an existing page = done → the page ON the tag → read back.
+      # Tested against a mock API by scripts/check_publish_workflow.ts.
+      - name: Create the GitHub Release from the tag (REST API)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.checks.outputs.tag }}
+        run: bun scripts/publish-workflow.ts release "$TAG"
+
+  jsr:
+    name: Publish ${{ needs.checks.outputs.tag }} to JSR
+    needs: [checks, release]
+    if: needs.checks.outputs.release == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
-    # Written BEFORE `deno publish`: the jobs after it run on this, not on `deno publish`'s exit
-    # (C34 (1): `deno publish` uploads, THEN signs provenance).
-    outputs:
-      uploaded: ${{ steps.mark.outputs.uploaded }}
 
     steps:
       # What deno.json publishes, and the one script this job runs. Nothing else, nothing installed.
@@ -140,10 +220,12 @@ jobs:
         with:
           bun-version: "1.4.4"
 
-      # A re-run after a failure past the upload finds the version there and skips the upload.
+      # A re-run finds the version there and skips the upload.
       - name: Does JSR already have this version?
         id: jsr
-        run: bun scripts/publish-workflow.ts jsr-has "${GITHUB_REF_NAME}"
+        env:
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: bun scripts/publish-workflow.ts jsr-has "$VERSION"
 
       # Provenance requires a GitHub OIDC token; `id-token: write` above injects it. If it is absent
       # despite the permission, an org/enterprise Actions OIDC policy blocks it and `deno publish`
@@ -151,52 +233,16 @@ jobs:
       - name: Check OIDC availability (prerequisite, not proof)
         run: bun scripts/publish-workflow.ts oidc-check
 
-      - name: Record the upload attempt (before the upload)
-        id: mark
-        run: bun scripts/publish-workflow.ts mark-uploaded
-
       # `deno publish` called DIRECTLY: through a task or a wrapper it runs as a subprocess, which
       # can lose provenance (binaryang's measurement). scripts/** is outside publish.include.
       - name: Publish to JSR (with provenance)
         if: steps.jsr.outputs.present == 'false'
         run: deno publish
 
-      # THE evidence: JSR's `rekorLogId` (the poll, its cache-bust and their history:
-      # scripts/publish-workflow.ts). The version exists either way, so this fails loudly without
-      # blocking the `release` job.
+      # THE evidence, FATAL (U8): JSR's `rekorLogId` (the poll, its cache-bust and their history:
+      # scripts/publish-workflow.ts). It runs even when `deno publish` failed after its upload.
       - name: Verify provenance was recorded on JSR
-        if: ${{ !cancelled() && steps.mark.outputs.uploaded == 'true' }}
-        run: bun scripts/publish-workflow.ts provenance "${GITHUB_REF_NAME}"
-
-  release:
-    name: GitHub Release ${{ github.ref_name }}
-    needs: jsr
-    if: ${{ !cancelled() && needs.jsr.outputs.uploaded == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-
-    steps:
-      # Only the release script and the manifest it reads the package name from: no package code
-      # beside the write token, and the checkout keeps no credential.
-      - name: Checkout the release script and the manifest only
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /deno.json
-            /scripts/publish-workflow.ts
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.4.4"
-
-      # JSR serves the version → the tag peels to this commit → the page ON the tag (an existing
-      # one = done) → read back. Tested against a mock API by scripts/check_publish_workflow.ts.
-      - name: Create the GitHub Release (REST API)
+        if: ${{ !cancelled() }}
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: bun scripts/publish-workflow.ts release "${GITHUB_REF_NAME}"
+          VERSION: ${{ needs.checks.outputs.version }}
+        run: bun scripts/publish-workflow.ts provenance "$VERSION"

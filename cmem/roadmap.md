@@ -61,12 +61,16 @@
    on Bun through `scripts/publish-workflow.ts` (2026-10-27; first runs at the next tag);
    `deno task upstream:link` maps every binaryang pin through the checkout's `jsr.json` and its
    config uses no lockfile (2026-11-05). The release follows the workspace's
-   release-process.md (2026-11-10; H30, H32, C30, C34, C44): `publish.yml` = `checks` (no token) /
-   `jsr` (OIDC, no repo write, skips an upload already made) / `release` (`contents: write` only:
-   the GitHub Release page ON the version tag through the REST API, never `gh`, no `release/<tag>`
-   branch), run even when `deno publish` fails after its upload, every action pinned to a commit;
-   `deno task publish` → `deno task release` with step 8's guards. Self-test
+   release-process.md § 5 in the owner's order D1 (2026-11-10; H30, H32, H33, C30, C34, C44):
+   `deno task release` pushes `main` only; `publish.yml` on each push to `main` = `checks` →
+   `tag` (CI's annotated tag) → `release` (the GitHub Release page from the tag, REST API, never
+   `gh`, no `release/<tag>` branch) → `jsr` (last; skips an upload already made; Rekor fatal);
+   every action pinned to a commit. Releases recorded in `cmem/release.md`. Self-test
    `scripts/check_publish_workflow.ts`.
+
+> **Releases are recorded in [release.md](release.md) § "Release History" since 2026-11-10** (🔒
+> owner D3: one place, newest first). The "Release status" sections below are the earlier
+> per-release logs it indexes; no new one is written here.
 
 ## Release status (2026-10-24) — v3.0.0: JavaScript's numbers, whole-object printing, binaryang 2.2.0
 
