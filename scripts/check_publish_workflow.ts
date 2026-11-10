@@ -1,29 +1,37 @@
 /**
- * check_publish_workflow.ts — proves `scripts/publish-workflow.ts release` (publish.yml's `release`
- * job, letters H30 / H32) does what H32's order says, against a MOCK GitHub REST API and a mock
- * JSR: no network, no token. Re-run it whenever publish-workflow.ts changes; the real API is
- * exercised only by the next tag run.
+ * check_publish_workflow.ts — proves the CI steps in `scripts/publish-workflow.ts` (publish.yml,
+ * the workspace release process U5–U8 in the owner's order: checks → tag → page → publish) do what
+ * they promise, against a MOCK GitHub REST API, a mock JSR and a fake `git`: no network, no token.
+ * Re-run it whenever publish-workflow.ts changes; the real API is exercised only by a real release.
  *
  * The version tag IS the release (owner, 2026-11-10): the page is made ON the tag, and no branch
- * is ever written. The mock refuses a page that names a `target_commitish`, and records any
- * branch write, so either would turn a case red.
+ * is ever written. The mock refuses a page that names a `target_commitish`, and records every
+ * write, so a stray write turns a case red.
  *
- *   A  fresh tag (annotated): the page created on it, read back — exactly 1 write
- *   B  re-run (page there): 0 writes, success
- *   C  lightweight tag: peels without a tag object
- *   D  tag missing on GitHub: refused, 0 writes (POST /releases would CREATE the tag)
- *   E  tag peels to another commit: refused, 0 writes
- *   F  JSR does not serve the version: refused, 0 writes
- *   G  a leftover `release/<tag>` branch at another commit (the old flow's): ignored, page on the tag
- *   H  page POST "succeeds" but cannot be read back: refused
- *   I  a call that never answers: times out, refused (HTTP_TIMEOUT_MS)
- *   J  C34: JSR has the version although `deno publish` failed after the upload → page made
- *   K  `jsr-has`: 200 → "true", 404 → "false", 500 → an error (never "absent", which would
- *      re-attempt an immutable upload)
+ *   U5 is-release
+ *     S1  the tag is not on origin → release; S2 it is → not a release;
+ *     S3  HEAD is not GITHUB_SHA → refused
+ *   U6 tag
+ *     T1  absent → an annotated tag object + its ref (2 writes), read back peels to the commit
+ *     T2  a re-run: already at this commit → 0 writes
+ *     T3  already at ANOTHER commit → refused, 0 writes (a tag never moves)
+ *     T4  created, but does not read back → refused
+ *   U7 release (the page FROM the tag)
+ *     A   fresh annotated tag: the page created on it, read back — exactly 1 write
+ *     B   a re-run (page there): 0 writes
+ *     C   lightweight tag: peels without a tag object
+ *     D   tag missing on GitHub: refused, 0 writes (POST /releases would CREATE the tag)
+ *     E   tag peels to another commit: refused, 0 writes
+ *     G   a leftover `release/<tag>` branch elsewhere (the old flow's): ignored, page on the tag
+ *     H   page POST "succeeds" but cannot be read back: refused
+ *     I   a call that never answers: times out, refused (HTTP_TIMEOUT_MS)
+ *   U8 jsr-has
+ *     K   200 → "true", 404 → "false", 500 → an error (never "absent", which would re-attempt an
+ *         immutable upload)
  *
  * Usage (from the repo root):  bun scripts/check_publish_workflow.ts
  */
-import { jsrHas, release, type ReleaseEnv } from "./publish-workflow.ts";
+import { createTag, type GitHubEnv, isRelease, jsrHas, release } from "./publish-workflow.ts";
 
 const SHA = "a".repeat(40);
 const OTHER = "b".repeat(40);
@@ -36,8 +44,8 @@ interface World {
   tagObjects: Record<string, { type: string; sha: string }>; // annotated tag sha → object
   branches: Record<string, string>;
   releases: Record<string, { tag_name: string; html_url: string; author: { login: string } }>;
-  jsrHas: boolean;
   dropReleaseOnPost?: boolean; // H: POST answers 201 but nothing is stored
+  dropTagRefOnPost?: boolean; // T4: the ref POST answers 201 but nothing is stored
   hang?: boolean; // I: every GitHub call hangs until its signal aborts
   writes: string[];
 }
@@ -47,7 +55,6 @@ const world = (over: Partial<World> = {}): World => ({
   tagObjects: { ["t".repeat(40)]: { type: "commit", sha: SHA } },
   branches: {},
   releases: {},
-  jsrHas: true,
   writes: [],
   ...over,
 });
@@ -56,7 +63,6 @@ function mockFetch(w: World) {
   return async (url: string, init: RequestInit = {}): Promise<Response> => {
     const res = (status: number, body: unknown = {}) =>
       new Response(JSON.stringify(body), { status });
-    if (url.startsWith("https://api.jsr.io/")) return res(w.jsrHas ? 200 : 404);
     if (w.hang) {
       return await new Promise<Response>((_, reject) =>
         init.signal?.addEventListener("abort", () => reject(new Error("aborted (timeout)")))
@@ -73,15 +79,24 @@ function mockFetch(w: World) {
       const o = w.tagObjects[m[1]];
       return o ? res(200, { object: o }) : res(404);
     }
-    if (method === "GET" && (m = path.match(/^\/git\/ref\/heads\/(.+)$/))) {
-      const b = w.branches[m[1]];
-      return b ? res(200, { object: { type: "commit", sha: b } }) : res(404);
+    if (method === "POST" && path === "/git/tags") {
+      const body = JSON.parse(String(init.body));
+      w.writes.push(`tag object ${body.tag}`);
+      if (body.type !== "commit" || body.object !== SHA) {
+        return res(422, { message: "test: bad tag" });
+      }
+      const objSha = "o".repeat(40);
+      w.tagObjects[objSha] = { type: "commit", sha: body.object };
+      return res(201, { sha: objSha });
     }
     if (method === "POST" && path === "/git/refs") {
-      // Never expected: a branch write shows up in `writes` and fails the case.
       const body = JSON.parse(String(init.body));
-      w.writes.push(`branch ${body.ref}`);
-      w.branches[body.ref.replace("refs/heads/", "")] = body.sha;
+      w.writes.push(`ref ${body.ref}`);
+      if (body.ref.startsWith("refs/tags/")) {
+        if (!w.dropTagRefOnPost) w.tags[body.ref.slice(10)] = { type: "tag", sha: body.sha };
+      } else {
+        w.branches[body.ref.replace("refs/heads/", "")] = body.sha;
+      }
       return res(201, { ref: body.ref });
     }
     if (method === "GET" && (m = path.match(/^\/releases\/tags\/(.+)$/))) {
@@ -108,82 +123,150 @@ function mockFetch(w: World) {
   };
 }
 
-const env: ReleaseEnv = { api: API, repo: REPO, sha: SHA, token: "test", tries: 2, waitS: 0 };
+const env: GitHubEnv = { api: API, repo: REPO, sha: SHA, token: "test" };
 
 let failed = 0;
+let cases = 0;
+const report = (name: string, ok: boolean, got: string, detail = "") => {
+  cases++;
+  if (!ok) failed++;
+  console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${got}${ok || !detail ? "" : `\n     ${detail}`}`);
+};
+
 async function check(
   name: string,
+  run: (f: ReturnType<typeof mockFetch>) => Promise<number>,
   w: World,
-  want: { code: number; writes: string[]; page?: boolean },
+  want: { code: number; writes: string[]; page?: boolean; tagAt?: string },
 ) {
   const log = console.log;
   const lines: string[] = [];
   console.log = (...a: unknown[]) => lines.push(a.join(" "));
   let code: number;
   try {
-    code = await release(TAG, env, mockFetch(w));
+    code = await run(mockFetch(w));
   } finally {
     console.log = log;
   }
   const page = TAG in w.releases;
+  const tagObj = w.tags[TAG];
+  const tagAt = tagObj
+    ? (tagObj.type === "tag" ? w.tagObjects[tagObj.sha]?.sha ?? "?" : tagObj.sha)
+    : "";
   const ok = code === want.code && JSON.stringify(w.writes) === JSON.stringify(want.writes) &&
-    (want.page === undefined || page === want.page);
-  if (!ok) failed++;
-  console.log(`${ok ? "ok  " : "FAIL"} ${name}: exit ${code}, writes [${w.writes.join(", ")}]`);
-  if (!ok) {
-    console.log(
-      `     want exit ${want.code}, writes [${want.writes.join(", ")}]\n     ${
-        lines.join("\n     ")
-      }`,
-    );
-  }
+    (want.page === undefined || page === want.page) &&
+    (want.tagAt === undefined || tagAt === want.tagAt);
+  report(
+    name,
+    ok,
+    `exit ${code}, writes [${w.writes.join(", ")}]`,
+    `want exit ${want.code}, writes [${want.writes.join(", ")}]\n     ${lines.join("\n     ")}`,
+  );
 }
 
+// ── U5 is-release, with a fake git ──
+const fakeGit = (head: string, remoteHasTag: boolean) => (args: string[]) => {
+  if (args[0] === "rev-parse") return { code: 0, out: `${head}\n` };
+  if (args[0] === "ls-remote") {
+    return { code: 0, out: remoteHasTag ? `${SHA}\trefs/tags/v9.8.7\n` : "" };
+  }
+  return { code: 1, out: "fake git: unexpected" };
+};
+{
+  const r1 = isRelease(SHA, "9.8.7", fakeGit(SHA, false));
+  report(
+    "S1 tag not on origin → release",
+    r1.release === true && r1.tag === TAG,
+    JSON.stringify(r1),
+  );
+  const r2 = isRelease(SHA, "9.8.7", fakeGit(SHA, true));
+  report("S2 tag on origin → not a release", r2.release === false, JSON.stringify(r2));
+  let threw = "";
+  try {
+    isRelease(SHA, "9.8.7", fakeGit(OTHER, false));
+  } catch (e) {
+    threw = (e as Error).message;
+  }
+  report(
+    "S3 HEAD is not GITHUB_SHA → refused",
+    /not this run's commit/.test(threw),
+    threw || "no error",
+  );
+}
+
+// ── U6 tag ──
+const tagWrites = [`tag object ${TAG}`, `ref refs/tags/${TAG}`];
+await check(
+  "T1 tag absent → created, read back",
+  (f) => createTag(TAG, env, f),
+  world({ tags: {} }),
+  {
+    code: 0,
+    writes: tagWrites,
+    tagAt: SHA,
+  },
+);
+await check("T2 re-run, tag at this commit", (f) => createTag(TAG, env, f), world(), {
+  code: 0,
+  writes: [],
+  tagAt: SHA,
+});
+await check(
+  "T3 tag at another commit → refused",
+  (f) => createTag(TAG, env, f),
+  world({ tags: { [TAG]: { type: "commit", sha: OTHER } } }),
+  { code: 1, writes: [], tagAt: OTHER },
+);
+await check(
+  "T4 created but not readable back → refused",
+  (f) => createTag(TAG, env, f),
+  world({ tags: {}, dropTagRefOnPost: true }),
+  { code: 1, writes: tagWrites },
+);
+
+// ── U7 release ──
+const rel = (f: ReturnType<typeof mockFetch>) => release(TAG, env, f);
 const page = [`release ${TAG}`];
-await check("A fresh annotated tag", world(), { code: 0, writes: page, page: true });
+await check("A fresh annotated tag", rel, world(), { code: 0, writes: page, page: true });
 await check(
   "B re-run, page there",
+  rel,
   world({
     releases: { [TAG]: { tag_name: TAG, html_url: "x", author: { login: "github-actions[bot]" } } },
   }),
   { code: 0, writes: [] },
 );
-await check("C lightweight tag", world({ tags: { [TAG]: { type: "commit", sha: SHA } } }), {
+await check("C lightweight tag", rel, world({ tags: { [TAG]: { type: "commit", sha: SHA } } }), {
   code: 0,
   writes: page,
 });
-await check("D tag missing", world({ tags: {} }), { code: 1, writes: [], page: false });
+await check("D tag missing", rel, world({ tags: {} }), { code: 1, writes: [], page: false });
 await check(
   "E tag peels elsewhere",
+  rel,
   world({ tags: { [TAG]: { type: "commit", sha: OTHER } } }),
-  { code: 1, writes: [], page: false },
+  {
+    code: 1,
+    writes: [],
+    page: false,
+  },
 );
-await check("F JSR lacks the version", world({ jsrHas: false }), {
-  code: 1,
-  writes: [],
-  page: false,
-});
 await check(
   "G leftover release branch elsewhere is ignored",
+  rel,
   world({ branches: { [`release/${TAG}`]: OTHER } }),
   { code: 0, writes: page, page: true },
 );
-await check("H page not readable back", world({ dropReleaseOnPost: true }), {
+await check("H page not readable back", rel, world({ dropReleaseOnPost: true }), {
   code: 1,
   writes: page,
   page: false,
 });
 process.env.HTTP_TIMEOUT_MS = "200";
-await check("I a call that never answers", world({ hang: true }), { code: 1, writes: [] });
+await check("I a call that never answers", rel, world({ hang: true }), { code: 1, writes: [] });
 delete process.env.HTTP_TIMEOUT_MS;
-// J is A's world reached on the C34 path: publish.yml runs this job on `uploaded`, not on
-// `deno publish`'s exit, so what decides is JSR serving the version — which it does here.
-await check("J publish failed after upload, JSR has it", world({ jsrHas: true }), {
-  code: 0,
-  writes: page,
-  page: true,
-});
 
+// ── U8 jsr-has ──
 {
   const jsr = (status: number) => () => Promise.resolve(new Response("{}", { status }));
   const got: string[] = [];
@@ -194,10 +277,8 @@ await check("J publish failed after upload, JSR has it", world({ jsrHas: true })
       got.push("error");
     }
   }
-  const ok = got.join(",") === "true,false,error";
-  if (!ok) failed++;
-  console.log(`${ok ? "ok  " : "FAIL"} K jsr-has 200 / 404 / 500: ${got.join(", ")}`);
+  report("K jsr-has 200 / 404 / 500", got.join(",") === "true,false,error", got.join(", "));
 }
 
-console.log(failed ? `\n${failed} case(s) FAILED` : "\nall 11 cases pass");
+console.log(failed ? `\n${failed} of ${cases} case(s) FAILED` : `\nall ${cases} cases pass`);
 process.exit(failed ? 1 : 0);

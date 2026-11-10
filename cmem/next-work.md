@@ -25,18 +25,26 @@ Every open ledger row naming wasmtk, read; answers in each row's cell.
   `git ls-remote`). A failure after `deno publish`'s upload skipped the page; now `release` and
   the provenance check run on `uploaded`. C34 (2)–(4) n/a (no npm, no version handed between
   jobs, no YAML-reading test).
-- **The official release process (workspace `release-process.md`, by binaryang on the owner's
-  word, ledger C44) — ADOPTED, owner 2026-11-10** ("We should be releasing on version tag and
-  creating a release page at that time"; "the universalWasmLoader projects and binaryang have
-  this the way it should be"): the version tag IS the release, no `release/<tag>` branch (the old
-  flow made one; dropped). publish.yml = `checks` / `jsr` / `release` (binaryang's five, less npm):
-  `jsr-has` skips an upload already made, the published tree is a sparse checkout of
-  `publish.include` + `deno.lock` (rehearsed: the same 37 files as a full clone, dry run green),
-  runs queued per tag. `deno task publish` → **`deno task release`** (`scripts/release.ts`, step 8's
-  guards; rehearsed against a scratch bare origin: 4 cases + a cold-check mutant). workflow.md
-  § The release flow is now the eleven steps with wasmtk's names. **Gaps, recorded not closed:**
-  no tests in CI `checks` (wasmtk's gate is local; Deno-exit P7); step 5's consumer check is
-  H6.5b (🗓️ OWNER). **Seen while confirming (read-only, on each `origin/main`):** binaryang and 8
+- **The official release process (workspace `release-process.md`; ledger C44, letter H33) —
+  ADOPTED in 🔒 the owner's order D1** ("the CI to check first, then push the tag, and then create
+  the release page from the tag, then publish the package to the registry"; also "We should be
+  releasing on version tag and creating a release page at that time"): the version tag IS the
+  release, no `release/<tag>` branch. `deno task release` (`scripts/release.ts`, U4) pushes `main`
+  only; publish.yml runs on every push to `main`: `checks` (U5, `is-release`, `--verify-release`)
+  → `tag` (U6, CI's annotated tag) → `release` (U7, the page from the tag) → `jsr` (U8, last,
+  `jsr-has` skip, Rekor fatal). Every action pinned to a commit hash. Record: **new
+  `release.md` § "Release History"** (U11 / D3). Rehearsed: the jsr tree (37 files = a full
+  clone's); `release.ts` + CI's `checks` decisions, 11 cases against a scratch bare origin; the
+  CI steps 16 cases on a mock API, 6 mutants each caught by its own case. ⚠️ UNMEASURED until the
+  first release in this order: `deno publish` after a bot-made tag in a `main`-push run
+  (binaryang re-measures first, U6). **Not converged, recorded:** U3 `bump` does not refuse a dirty
+  tree itself (`release.ts` does, before anything is committed) and does not run the previous
+  tag's tests (`check_prev_tests.ts`, ~25 min, stays a manual step 5 — a patch / minor needs it);
+  U5 no tests in CI (wasmtk's gate is local; Deno-exit P7); U9 Bun and Deno come through their
+  setup actions by version, no sha256 (as binaryang); U11 the per-release logs before 2026-11-10
+  stay in roadmap.md § Release status, indexed from release.md, not moved; H6.5b consumer suites
+  (🗓️ OWNER). Today's earlier steps (`ce8af1ef`, `c6ae6b27`) built the superseded order — tag
+  pushed locally, page after the publish; this replaces them. **Seen while confirming (read-only, on each `origin/main`):** binaryang and 8
   loaders make the page on the tag with no branch; **loader-js (`scripts/github-release.ts:165`)
   and loader-jvm (`scripts/github-release.main.kts:143`, `:168`) still create `release/<tag>`**
   (jvm also targets the page at it) — reported in the ledger, theirs to change.

@@ -14,10 +14,14 @@
  *                                    record a REVIEWED change (see `Review`)
  *   deno task api-surface --floor    print the minimum release kind since the last `v*` tag, and
  *                                    the symbols that set it (what `deno task bump` enforces)
- *   deno run -A scripts/api-surface.ts --verify-tag <v-tag>
- *                                    CI on the tagged commit (publish.yml): the snapshot matches,
- *                                    the version is the tag, one SemVer step from the previous tag,
- *                                    at or above the floor, and Rule 4 holds
+ *   bun scripts/api-surface.ts --verify-tag <v-tag>
+ *                                    on a tagged commit: the snapshot matches, the version is the
+ *                                    tag, one SemVer step from the previous tag, at or above the
+ *                                    floor, and Rule 4 holds
+ *   bun scripts/api-surface.ts --verify-release
+ *                                    the same on the UNTAGGED release candidate (publish.yml's
+ *                                    `checks`, before CI tags — release-process.md U5, owner D1):
+ *                                    v<deno.json version> must not exist yet
  *
  * Rule 4 (deprecate before remove, 2026-10-23): a symbol or member may be REMOVED only after a
  * release in which it carried a `@deprecated` tag (on its own doc-comment line). Deprecations are in
@@ -159,7 +163,10 @@ async function symbolsOf(cwd: string, file: string): Promise<Record<string, Surf
       // the next floor read `VERSION signature CHANGED`, major (found 2026-10-23, by
       // check_compat_gate F3, before any release had used the gate). Its contract is `string`.
       const defs = sym.name === "VERSION"
-        ? decls.map((d: any) => ({ ...d.def, tsType: { kind: "keyword", repr: "string", value: "string" } }))
+        ? decls.map((d: any) => ({
+          ...d.def,
+          tsType: { kind: "keyword", repr: "string", value: "string" },
+        }))
         : decls.map((d: any) => d.def);
       out[sym.name] = {
         kind,
@@ -545,12 +552,14 @@ export function releaseStep(prev: string, next: string): Kind | null {
 }
 
 /**
- * CI's repeat of the gate ON THE TAG (H6; Rule 3 of the compatibility gate): run by publish.yml
- * before `deno publish`. The tree at `tag` must carry a matching `api-surface.json`, a deno.json
- * version equal to the tag, one SemVer step from the previous `v*` tag, at least the surface floor,
- * and no removal that skipped its deprecation release (Rule 4). Returns the problems (empty = pass).
+ * CI's repeat of the gate (H6; Rule 3 of the compatibility gate). The tree must carry a matching
+ * `api-surface.json`, a deno.json version equal to `tag`, one SemVer step from the previous `v*`
+ * tag, at least the surface floor, and no removal that skipped its deprecation release (Rule 4).
+ * Returns the problems (empty = pass). `base` is where the previous tag is looked up from: `<tag>^`
+ * on a tagged tree (`--verify-tag`), `HEAD` on a release candidate that has no tag yet
+ * (`--verify-release`: the workspace release process checks BEFORE CI tags, owner D1 2026-11-10).
  */
-export async function verifyTag(root: string, tag: string): Promise<string[]> {
+export async function verifyTag(root: string, tag: string, base = `${tag}^`): Promise<string[]> {
   const problems: string[] = [];
   const current = await generateSurface(root);
   let committed = "";
@@ -560,11 +569,13 @@ export async function verifyTag(root: string, tag: string): Promise<string[]> {
     problems.push("api-surface.json is missing from the tagged tree");
   }
   if (committed && committed !== serialize(current)) {
-    problems.push("api-surface.json does not match the tagged tree (a re-baseline was not committed)");
+    problems.push(
+      "api-surface.json does not match the tagged tree (a re-baseline was not committed)",
+    );
   }
   const version = JSON.parse(await readFile(`${root}/deno.json`, "utf8")).version;
   if (`v${version}` !== tag) problems.push(`deno.json's version ${version} is not the tag ${tag}`);
-  const prev = await surfaceAtLastTag(`${tag}^`);
+  const prev = await surfaceAtLastTag(base);
   const step = releaseStep(prev.tag.replace(/^v/, ""), String(version));
   const floor = await diffSurfaces(prev.surface, current, await loadReviews(root));
   printFloor(floor, `${prev.tag} (${prev.source})`);
@@ -628,6 +639,21 @@ if (import.meta.main) {
       process.exit(1);
     }
     console.log(`✅ ${tag}: the compatibility gate holds on the tagged tree`);
+  } else if (mode === "--verify-release") {
+    // The release candidate on `main`, BEFORE CI tags it: the tag must not exist yet, and the
+    // previous tag is the last one reachable from HEAD.
+    const version = JSON.parse(await readFile(`${root}/deno.json`, "utf8")).version;
+    const tag = `v${version}`;
+    if ((await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])).code === 0) {
+      console.error(`❌ ${tag} already exists: this tree is not a new release`);
+      process.exit(1);
+    }
+    const problems = await verifyTag(root, tag, "HEAD");
+    if (problems.length > 0) {
+      for (const p of problems) console.error(`❌ ${tag}: ${p}`);
+      process.exit(1);
+    }
+    console.log(`✅ ${tag}: the compatibility gate holds on the release candidate (untagged)`);
   } else if (mode === "--review") {
     // --review <entrypoint> <symbol> <member> <kind> <reason…>: record a person's judgment of ONE
     // changed member since the last release tag. The hashes are computed here, never typed.
@@ -673,7 +699,7 @@ if (import.meta.main) {
     console.log("   Commit it with its reason, like a re-baseline (Rule 5).");
   } else {
     console.error(
-      `❌ api-surface: unknown mode ${mode} — use --record | --check | --floor | --review | --verify-tag`,
+      `❌ api-surface: unknown mode ${mode} — use --record | --check | --floor | --review | --verify-tag | --verify-release`,
     );
     process.exit(1);
   }
