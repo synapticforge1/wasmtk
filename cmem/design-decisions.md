@@ -1651,9 +1651,10 @@ silently break (all `src/wasic.ts`):
   already known-good and needs no re-checking: `publish.yml` (unchanged since 2026-06-15 and
   byte-identical to what produced attested releases), `id-token: write`, the OIDC prerequisite step
   (passes, no `::warning::`), the JSR↔GitHub repo link (intact), and the absence of
-  `--no-provenance`. **The next diagnostic needs an authenticated `gh`** (not installed here; the
-  Actions logs endpoint 403s unauthenticated): `gh run view <id> --log` on the v1.11.2 vs v1.11.3
-  runs. The "Verify provenance was recorded on JSR" step will detect a fix whenever one lands.
+  `--no-provenance`. **The next diagnostic needed the run logs** (the Actions logs endpoint 403s
+  unauthenticated) on the v1.11.2 vs v1.11.3 runs — never through `gh` (🔒 owner 2026-11-08, letter
+  H30, workspace Tooling rule 9): the REST API with a token, or the owner reading them in the web UI.
+  The "Verify provenance was recorded on JSR" step will detect a fix whenever one lands.
 - **The OIDC diagnostic step is NOT sufficient evidence of provenance — it gave 10 releases of false
   assurance.** It checks only the PREREQUISITE (are the OIDC env vars present), and the v1.11.12 run
   emitted no `::warning::` at all (verified via the check-runs annotations API — its one annotation
@@ -1669,11 +1670,12 @@ silently break (all `src/wasic.ts`):
   `hasProvenance: false`. Provenance is worth fixing as a **supply-chain/trust** property (SLSA
   attestation linking the artifact to the building workflow), not to move the number — do not
   justify the work with the score, it will not change.
-- **Reading CI logs needs auth and `gh` is NOT installed on this machine.** The GitHub Actions logs
-  endpoint returns 403 unauthenticated, so the Deno version each run used could not be read. The next
-  diagnostic step for provenance is `gh run view <run-id> --log | grep -i "deno\|provenance"` on the
-  v1.11.2 vs v1.11.3 runs (ids `30569718486` is v1.11.12; list with
-  `gh run list --workflow=publish.yml`), comparing the resolved `deno-version`.
+- **Reading CI logs needs auth.** The GitHub Actions logs endpoint returns 403 unauthenticated, so
+  the Deno version each run used could not be read. The diagnostic step for provenance was the
+  v1.11.2 vs v1.11.3 run logs (`30569718486` is v1.11.12), comparing the resolved `deno-version` —
+  read through the REST API (`GET /repos/{owner}/{repo}/actions/runs/{id}/logs`, token) or by the
+  owner in the web UI, **never `gh`** (🔒 owner 2026-11-08: not installed and will not be; letter
+  H30). Moot since 2026-08-27 (resolved, below).
 
 - ✅✅ **RESOLVED — v2.0.1 PUBLISHED WITH PROVENANCE (2026-08-27). Twelve releases of absence ended.**
 

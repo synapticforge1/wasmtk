@@ -102,6 +102,20 @@ Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full
 8. **If a report went to binaryang, verify every item it claims fixed against OUR numbers**, and
    answer with them.
 
+**For the 2.2.0 → 3.0.x bump (a MAJOR; binaryang's ledger C43, read into our tree by them
+2026-11-09 — a claim until re-measured here):** predicted unaffected — the binaryen facade's type
+ids, `Features` bits, a new module's default features and shrink level now follow binaryen.js 132,
+but we compare types by name (`witgen.ts`), set features from `Features.All` and set the shrink
+level ourselves; `i64.const` now throws on a second argument (we pass one); `wasm-objdump -d` is
+refused (we run none). **Check at the bump:** the wabt facade's `parseWat` feature bag now GATES
+(a partial bag = upstream defaults PLUS its keys; `wasmbundle.ts` passes `{ exceptions: true }`);
+`wasm2wat` validates by default; `wasm-validate` prints nothing on success; unknown options are
+errors in `wasm-strip` / `wasm2wat` / `wasm-objdump`; two optimizer fixes (tail-call inlining,
+SimplifyLocals inside a `try`) may move `-O2` / `-Oz` goldens, correctly — step 6's per-function
+check. Since 2.2.2 the legacy `delegate` depth is checked: `KNOWN_ACCEPTED_INVALID`'s
+`legacy/try_delegate.wast` pin goes to 0 (invert it), and the `kind === "definition"` follow-up in
+next-work.md unblocks.
+
 ## Context boundaries
 
 **One context per batch.** Cut at the natural boundary: after the memory update and commit. That
@@ -288,8 +302,10 @@ git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
 #    If api-surface.ts or bump.ts changed: `bun scripts/check_compat_gate.ts` (19 cases, 2026-10-23).
 #    Rule 4: a removal needs a release that DEPRECATED it first (a `@deprecated` doc tag on its own
 #    line); bump refuses an undeprecated removal at any kind. CI repeats the gate on the tag
-#    (publish.yml → `deno run -A scripts/api-surface.ts --verify-tag <tag>`), so a hand-pushed tag
+#    (publish.yml → `bun scripts/api-surface.ts --verify-tag <tag>`), so a hand-pushed tag
 #    below the floor, or one whose deno.json is not the tag, fails before `deno publish`.
+#    If publish-workflow.ts changed: `bun scripts/check_publish_workflow.ts` (10 cases against a
+#    mock GitHub / JSR, 2026-11-10) — the release job is otherwise first exercised by the real tag.
 #    Before a PATCH or MINOR bump (Rule 3, H6.5a): `bun scripts/check_prev_tests.ts`
 #    (~25–30 min; the last tag's tests/ against today's src/ in a fresh clone). Classify every red
 #    suite: regression (fix first) / intended surface change (raises the floor) / improvement.
@@ -307,8 +323,20 @@ deno doc --lint <the 16 deno.json entrypoints>      # MUST be clean — see trap
 # 6. commit, then:
 deno task publish               # tags + pushes; GitHub Actions publishes to JSR
 # 7. verify: curl -s https://jsr.io/@jrmarcum/wasmtk/meta.json | grep latest
+#    and the page: GET https://api.github.com/repos/synapticforge1/wasmtk/releases/tags/<tag>
+#    (200, author.login github-actions[bot]) — CI makes it, never `gh`, never by hand.
 # 8. delete the merged branch (local + remote) with `git branch -d` (safe form)
 ```
+
+**publish.yml is two jobs since 2026-11-10** (letters H30, H32; S3D's C30 / C34). `publish`
+(`id-token: write`, `contents: read`): OIDC check, the gate on the tag, `mark-uploaded`, `deno
+publish`, the provenance check. `release` (`contents: write` only, a sparse checkout of the release
+script and `deno.json`): runs on publish's `uploaded` output — written just before `deno publish`,
+so a failure AFTER the upload still gets its branch and page — and then, in
+`scripts/publish-workflow.ts release`: JSR serves the version → the tag peels to the run's commit
+(a `POST /releases` would CREATE a missing tag) → branch `release/<tag>` → the Release page, an
+existing one = done → read back. Every call has its own time limit. A re-run of the tag writes
+nothing that is already there. Only NEW tags get pages (owner, 2026-11-09): no backfill.
 
 **Releases go out from `main`**, so the tag is reachable from `main` — the owner chose this
 explicitly. Publishing from a branch would leave the tag dangling if the branch were deleted.

@@ -302,7 +302,10 @@ steps 1–4 (Deno 2.9.8, Bun 1.4.4). Each names the phase it bites and the check
 - **C21 (6) → `publish.yml` today. `deno publish` of an existing version SKIPS with exit 0**, so a
   re-run of the tag workflow (a moved `v*` tag; workspace `working-rules.md` § Git) carries on to
   "Create release branch" and "Create GitHub Release". UNMEASURED here what those two then do on a
-  re-run; read them before any `v*` tag is moved.
+  re-run; read them before any `v*` tag is moved. **Answered 2026-11-10 by design:** both are now
+  `scripts/publish-workflow.ts release` (H30, H32), which writes nothing already there (branch at
+  the commit = done, existing page = done; mock case B) and refuses a tag that no longer peels to
+  the run's commit (case E; read-only on the real API: wrong commit → refused before any write).
 
 ## Ordering against other work
 

@@ -5,18 +5,28 @@ on:
     tags:
       - "v*"
 
+# Two jobs (2026-11-10; letters H30, H32 and S3D's C30 / C34): `publish` holds the OIDC token that
+# IS the JSR publishing credential, and nothing that can write the repo; `release` holds
+# `contents: write` only, runs no package code, and makes the release branch and the GitHub
+# Release page through the REST API (never `gh`). `release` runs on publish's `uploaded` output,
+# written just BEFORE `deno publish`, not on its exit: `deno publish` uploads, then signs
+# provenance, so a failure after the upload must not strand the version without its page. The
+# release script first requires JSR to serve the version, and the tag to peel to this commit.
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
+    outputs:
+      uploaded: ${{ steps.mark.outputs.uploaded }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the compatibility gate reads the PREVIOUS v* tag's surface
+          persist-credentials: false
 
       # DO NOT pin this to chase the missing JSR provenance — that was tried on 2026-07-30 and
       # RULED OUT. The provenance history splits exactly on a Deno release boundary (Deno <= 2.9.1
@@ -54,27 +64,51 @@ jobs:
       - name: Compatibility gate on the tag
         run: bun scripts/api-surface.ts --verify-tag "${GITHUB_REF_NAME}"
 
+      # From here on the follow-on steps and the `release` job run whatever `deno publish` exits with.
+      - name: Mark the upload as started
+        id: mark
+        run: bun scripts/publish-workflow.ts mark-uploaded
+
       - name: Publish to JSR
         run: deno publish
-
-      - name: Create release branch
-        run: |
-          git checkout -b release/${GITHUB_REF_NAME}
-          git push origin release/${GITHUB_REF_NAME}
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create ${GITHUB_REF_NAME} \
-            --title "${GITHUB_REF_NAME}" \
-            --target release/${GITHUB_REF_NAME} \
-            --generate-notes
 
       # The OIDC step above only proves the PREREQUISITE was met. This checks the OUTCOME: JSR
       # is the authority on whether a provenance statement actually landed in the Sigstore Rekor
       # transparency log (the poll, its cache-bust and their history: scripts/publish-workflow.ts).
-      # Runs last so a failure here never blocks the publish or the GitHub release, but still
-      # fails the job loudly instead of letting the regression stay invisible.
+      # It runs even when `deno publish` failed after the upload, and fails the job loudly instead of
+      # letting the regression stay invisible; it never blocks the `release` job.
       - name: Verify provenance was recorded on JSR
+        if: ${{ !cancelled() && steps.mark.outputs.uploaded == 'true' }}
         run: bun scripts/publish-workflow.ts provenance "${GITHUB_REF_NAME}"
+
+  release:
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.outputs.uploaded == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # Only the release script and the manifest it reads the package name from: no package code
+      # beside the write token. The token is passed to the script, not left in git's config.
+      - name: Checkout the release script
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/publish-workflow.ts
+            deno.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+
+      # JSR serves the version → the tag peels to this commit → branch release/<tag> → the page
+      # (an existing one is done) → read back. Tested against a mock API by
+      # scripts/check_publish_workflow.ts; on GitHub, first exercised by the next tag.
+      - name: Release branch and GitHub Release page
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/publish-workflow.ts release "${GITHUB_REF_NAME}"
