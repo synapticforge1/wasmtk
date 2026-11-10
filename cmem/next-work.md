@@ -44,7 +44,16 @@ Every open ledger row naming wasmtk, read; answers in each row's cell.
   setup actions by version, no sha256 (as binaryang); U11 the per-release logs before 2026-11-10
   stay in roadmap.md § Release status, indexed from release.md, not moved; H6.5b consumer suites
   (🗓️ OWNER). Today's earlier steps (`ce8af1ef`, `c6ae6b27`) built the superseded order — tag
-  pushed locally, page after the publish; this replaces them. **Seen while confirming (read-only, on each `origin/main`):** binaryang and 8
+  pushed locally, page after the publish; this replaces them.
+- **OPEN, found 2026-11-10: the compatibility gate's own self-test is stale.**
+  `bun scripts/check_compat_gate.ts` (run because `api-surface.ts` changed): 15 / 19, red A1, A2
+  (a level "below the MAJOR floor" — but the floor against the real last tag `v3.0.0` is PATCH
+  now), D1 (the 2026-09-30 reviews match no change since v3.0.0) and F4 (`--verify-tag v3.1.0` "below
+  the floor" — a minor is allowed at a PATCH floor). The SAME four are red at `c6ae6b27`, before
+  this change (measured in a scratch clone), so they are expectations written against v2.0.3
+  that went stale when 3.0.0 shipped, not a regression. Re-anchor A1 / A2 / D1 / F4 on a scratch
+  tag with a KNOWN surface (as C already does), then invert. Must be green before the next bump
+  relies on it. **Seen while confirming (read-only, on each `origin/main`):** binaryang and 8
   loaders make the page on the tag with no branch; **loader-js (`scripts/github-release.ts:165`)
   and loader-jvm (`scripts/github-release.main.kts:143`, `:168`) still create `release/<tag>`**
   (jvm also targets the page at it) — reported in the ledger, theirs to change.
