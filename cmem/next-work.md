@@ -13,18 +13,33 @@ Every open ledger row naming wasmtk, read; answers in each row's cell.
   design-decisions.md re-worded. `gh` in tracked files outside comments and history: 0.
 - **H32 (CI makes every new tag's page) — DONE with H30**, in its order: a `release` job after the
   upload, `contents: write` only, sparse checkout of the script; JSR 200 → tag peels to the commit
-  → `release/<tag>` → page or done → read back; per-call time limits. `scripts/check_publish_workflow.ts`
-  10 / 10 on a mock API, 3 mutants caught (no peel check → E; existing page not done → B; JSR
-  not consulted → F); read-only on the real API for `v3.0.0` (page and branch there → 0 writes, 4
-  GETs; wrong commit → refused before a write; absent tag → refused). Annotated-tag peel: mock only
-  (wasmtk's tags are lightweight). **UNMEASURED on GitHub until the next tag** — its first page's
-  `author.login` goes into the H32 row then.
-- **C30, C34 (S3D, record-only) — read; both APPLIED and were folded into the H32 split:** the one
-  job held `id-token: write` AND `contents: write`; now OIDC and repo-write are in different jobs,
-  checkouts don't persist the token. A failure after `deno publish`'s upload skipped the branch and
-  page; now `release` and the provenance check run on `uploaded`. Not done: actions pinned by tag,
-  not commit hash (C30's further step) — owner call; C34 (2)–(4) n/a (no npm, no version handed
-  between jobs, no YAML-reading test).
+  → the page ON the tag, or done → read back; per-call time limits. `scripts/check_publish_workflow.ts`
+  11 / 11 on a mock API, 4 mutants caught (no peel check → E; existing page not done → B; JSR
+  not consulted → F; jsr-has reading a 500 as absent → K); read-only on the real API for `v3.0.0`
+  (page there → 0 writes; wrong commit → refused before a write; absent tag → refused).
+  Annotated-tag peel: mock only (wasmtk's tags are lightweight). **UNMEASURED on GitHub until the
+  next tag** — its first page's `author.login` goes into the H32 row then.
+- **C30, C34 (S3D, record-only) — read; both APPLIED:** the one job held `id-token: write` AND
+  `contents: write`; now OIDC and repo-write are in different jobs, checkouts don't persist the
+  token, every action is pinned to a commit hash (each read from its release tag with
+  `git ls-remote`). A failure after `deno publish`'s upload skipped the page; now `release` and
+  the provenance check run on `uploaded`. C34 (2)–(4) n/a (no npm, no version handed between
+  jobs, no YAML-reading test).
+- **The official release process (workspace `release-process.md`, by binaryang on the owner's
+  word, ledger C44) — ADOPTED, owner 2026-11-10** ("We should be releasing on version tag and
+  creating a release page at that time"; "the universalWasmLoader projects and binaryang have
+  this the way it should be"): the version tag IS the release, no `release/<tag>` branch (the old
+  flow made one; dropped). publish.yml = `checks` / `jsr` / `release` (binaryang's five, less npm):
+  `jsr-has` skips an upload already made, the published tree is a sparse checkout of
+  `publish.include` + `deno.lock` (rehearsed: the same 37 files as a full clone, dry run green),
+  runs queued per tag. `deno task publish` → **`deno task release`** (`scripts/release.ts`, step 8's
+  guards; rehearsed against a scratch bare origin: 4 cases + a cold-check mutant). workflow.md
+  § The release flow is now the eleven steps with wasmtk's names. **Gaps, recorded not closed:**
+  no tests in CI `checks` (wasmtk's gate is local; Deno-exit P7); step 5's consumer check is
+  H6.5b (🗓️ OWNER). **Seen while confirming (read-only, on each `origin/main`):** binaryang and 8
+  loaders make the page on the tag with no branch; **loader-js (`scripts/github-release.ts:165`)
+  and loader-jvm (`scripts/github-release.main.kts:143`, `:168`) still create `release/<tag>`**
+  (jvm also targets the page at it) — reported in the ledger, theirs to change.
 - **H31 (Bun notation = latest installed) — conforms:** the two pins are 1.4.4 = installed; dated
   measurement lines stay. Rule recorded in INDEX § tooling (rule 4).
 - **C43 (binaryang 3.0.2) — recorded for the bump:** workflow.md § "Bumping the binaryang backend"

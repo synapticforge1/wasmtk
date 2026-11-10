@@ -60,10 +60,13 @@
 8. Release and dev tooling (not user-facing): `publish.yml`'s gate, OIDC and provenance steps run
    on Bun through `scripts/publish-workflow.ts` (2026-10-27; first runs at the next tag);
    `deno task upstream:link` maps every binaryang pin through the checkout's `jsr.json` and its
-   config uses no lockfile (2026-11-05). `publish.yml` split into `publish` (OIDC, no repo write)
-   and `release` (`contents: write` only), the GitHub Release page made through the REST API
-   instead of `gh`, and run even when `deno publish` fails after its upload (2026-11-10; H30, H32,
-   C30, C34; self-test `scripts/check_publish_workflow.ts`).
+   config uses no lockfile (2026-11-05). The release follows the workspace's
+   release-process.md (2026-11-10; H30, H32, C30, C34, C44): `publish.yml` = `checks` (no token) /
+   `jsr` (OIDC, no repo write, skips an upload already made) / `release` (`contents: write` only:
+   the GitHub Release page ON the version tag through the REST API, never `gh`, no `release/<tag>`
+   branch), run even when `deno publish` fails after its upload, every action pinned to a commit;
+   `deno task publish` → `deno task release` with step 8's guards. Self-test
+   `scripts/check_publish_workflow.ts`.
 
 ## Release status (2026-10-24) — v3.0.0: JavaScript's numbers, whole-object printing, binaryang 2.2.0
 

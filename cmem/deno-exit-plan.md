@@ -68,7 +68,7 @@ them into repo scripts in phase P0.
 | B. the TypeScript REFERENCE in the suites (`run-ts`, "same value in TS and wasm") | `deno run -A x.ts` | owner's call, **M2** | P6 |
 | C. the ENGINE ORACLE (`wast_tests` with `--v8-flags`, `engine_cross_check`) | Deno's V8 15.0 | a pinned Node through fnm (binaryang's `scripts/v8.ts` pattern) | P6 |
 | D. the TOOLCHAIN: check, fmt, lint, tasks, 15 scripts and ~40 test harnesses using `Deno.*` | `deno check` / `fmt` / `task`, `Deno.Command`, `Deno.test` | `tsc` 7, dprint, Biome, `package.json` scripts on `node:` | P3–P6 |
-| E. PUBLISHING to JSR | `scripts/publish.ts`, `publish.yml`, `deno publish` | stays `deno publish --config jsr.json` (F2; the one Deno dependency nobody can remove yet) | P1, P7 |
+| E. PUBLISHING to JSR | `scripts/release.ts` (was `scripts/publish.ts` until 2026-11-10), `publish.yml`, `deno publish` | stays `deno publish --config jsr.json` (F2; the one Deno dependency nobody can remove yet) | P1, P7 |
 
 ## Decisions for the owner
 
@@ -288,7 +288,7 @@ steps 1–4 (Deno 2.9.8, Bun 1.4.4). Each names the phase it bites and the check
   3.0.0. The release gate reads the UPLOAD, not the exit code.
 - **C21 (1) → P8. With no `tasks` in `deno.json`, `deno task <name>` runs the `package.json` script
   of that name** — S3D's "does the old name still resolve?" probe of `deno task release` ran the
-  real release. Never probe `deno task publish` / `bump` that way here.
+  real release. Never probe `deno task release` / `bump` (or the retired `publish`) that way here.
 - **C21 (2) → P2, P6. `Deno.readTextFile` keeps a leading BOM**; `readFile(p, "utf8")` matches it, a
   `TextDecoder` port strips it (3 bytes). Use `readFile(p, "utf8")` in ports.
 - **C21 (3) → P4. Bun 1.4.4 ships `bun fmt`** (`--check`; Prettier-style, so NOT `deno fmt`'s
@@ -302,10 +302,12 @@ steps 1–4 (Deno 2.9.8, Bun 1.4.4). Each names the phase it bites and the check
 - **C21 (6) → `publish.yml` today. `deno publish` of an existing version SKIPS with exit 0**, so a
   re-run of the tag workflow (a moved `v*` tag; workspace `working-rules.md` § Git) carries on to
   "Create release branch" and "Create GitHub Release". UNMEASURED here what those two then do on a
-  re-run; read them before any `v*` tag is moved. **Answered 2026-11-10 by design:** both are now
-  `scripts/publish-workflow.ts release` (H30, H32), which writes nothing already there (branch at
-  the commit = done, existing page = done; mock case B) and refuses a tag that no longer peels to
-  the run's commit (case E; read-only on the real API: wrong commit → refused before any write).
+  re-run; read them before any `v*` tag is moved. **Answered 2026-11-10 by design:** the release
+  branch is gone (the version tag IS the release, owner, release-process.md) and the page is
+  `scripts/publish-workflow.ts release` (H30, H32), which writes nothing already there (existing
+  page = done; mock case B) and refuses a tag that no longer peels to the run's commit (case E;
+  read-only on the real API: wrong commit → refused before any write); the `jsr` job's `jsr-has`
+  skips an upload JSR already has.
 
 ## Ordering against other work
 

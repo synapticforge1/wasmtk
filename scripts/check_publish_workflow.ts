@@ -4,20 +4,26 @@
  * JSR: no network, no token. Re-run it whenever publish-workflow.ts changes; the real API is
  * exercised only by the next tag run.
  *
- *   A  fresh tag (annotated): branch + page created, read back — exactly 2 writes
- *   B  re-run (branch and page there): 0 writes, success
+ * The version tag IS the release (owner, 2026-11-10): the page is made ON the tag, and no branch
+ * is ever written. The mock refuses a page that names a `target_commitish`, and records any
+ * branch write, so either would turn a case red.
+ *
+ *   A  fresh tag (annotated): the page created on it, read back — exactly 1 write
+ *   B  re-run (page there): 0 writes, success
  *   C  lightweight tag: peels without a tag object
  *   D  tag missing on GitHub: refused, 0 writes (POST /releases would CREATE the tag)
  *   E  tag peels to another commit: refused, 0 writes
  *   F  JSR does not serve the version: refused, 0 writes
- *   G  branch exists at another commit: refused, no page written
+ *   G  a leftover `release/<tag>` branch at another commit (the old flow's): ignored, page on the tag
  *   H  page POST "succeeds" but cannot be read back: refused
  *   I  a call that never answers: times out, refused (HTTP_TIMEOUT_MS)
  *   J  C34: JSR has the version although `deno publish` failed after the upload → page made
+ *   K  `jsr-has`: 200 → "true", 404 → "false", 500 → an error (never "absent", which would
+ *      re-attempt an immutable upload)
  *
  * Usage (from the repo root):  bun scripts/check_publish_workflow.ts
  */
-import { release, type ReleaseEnv } from "./publish-workflow.ts";
+import { jsrHas, release, type ReleaseEnv } from "./publish-workflow.ts";
 
 const SHA = "a".repeat(40);
 const OTHER = "b".repeat(40);
@@ -72,6 +78,7 @@ function mockFetch(w: World) {
       return b ? res(200, { object: { type: "commit", sha: b } }) : res(404);
     }
     if (method === "POST" && path === "/git/refs") {
+      // Never expected: a branch write shows up in `writes` and fails the case.
       const body = JSON.parse(String(init.body));
       w.writes.push(`branch ${body.ref}`);
       w.branches[body.ref.replace("refs/heads/", "")] = body.sha;
@@ -85,6 +92,9 @@ function mockFetch(w: World) {
       const body = JSON.parse(String(init.body));
       w.writes.push(`release ${body.tag_name}`);
       if (!body.generate_release_notes) return res(422, { message: "test: notes not asked" });
+      if ("target_commitish" in body) {
+        return res(422, { message: "test: the page must be made ON the tag, no target" });
+      }
       if (!w.dropReleaseOnPost) {
         w.releases[body.tag_name] = {
           tag_name: body.tag_name,
@@ -129,19 +139,18 @@ async function check(
   }
 }
 
-const both = [`branch refs/heads/release/${TAG}`, `release ${TAG}`];
-await check("A fresh annotated tag", world(), { code: 0, writes: both, page: true });
+const page = [`release ${TAG}`];
+await check("A fresh annotated tag", world(), { code: 0, writes: page, page: true });
 await check(
-  "B re-run, branch and page there",
+  "B re-run, page there",
   world({
-    branches: { [`release/${TAG}`]: SHA },
     releases: { [TAG]: { tag_name: TAG, html_url: "x", author: { login: "github-actions[bot]" } } },
   }),
   { code: 0, writes: [] },
 );
 await check("C lightweight tag", world({ tags: { [TAG]: { type: "commit", sha: SHA } } }), {
   code: 0,
-  writes: both,
+  writes: page,
 });
 await check("D tag missing", world({ tags: {} }), { code: 1, writes: [], page: false });
 await check(
@@ -155,13 +164,13 @@ await check("F JSR lacks the version", world({ jsrHas: false }), {
   page: false,
 });
 await check(
-  "G branch at another commit",
+  "G leftover release branch elsewhere is ignored",
   world({ branches: { [`release/${TAG}`]: OTHER } }),
-  { code: 1, writes: [], page: false },
+  { code: 0, writes: page, page: true },
 );
 await check("H page not readable back", world({ dropReleaseOnPost: true }), {
   code: 1,
-  writes: both,
+  writes: page,
   page: false,
 });
 process.env.HTTP_TIMEOUT_MS = "200";
@@ -171,9 +180,24 @@ delete process.env.HTTP_TIMEOUT_MS;
 // `deno publish`'s exit, so what decides is JSR serving the version — which it does here.
 await check("J publish failed after upload, JSR has it", world({ jsrHas: true }), {
   code: 0,
-  writes: both,
+  writes: page,
   page: true,
 });
 
-console.log(failed ? `\n${failed} case(s) FAILED` : "\nall 10 cases pass");
+{
+  const jsr = (status: number) => () => Promise.resolve(new Response("{}", { status }));
+  const got: string[] = [];
+  for (const s of [200, 404, 500]) {
+    try {
+      got.push(await jsrHas("9.8.7", jsr(s)));
+    } catch {
+      got.push("error");
+    }
+  }
+  const ok = got.join(",") === "true,false,error";
+  if (!ok) failed++;
+  console.log(`${ok ? "ok  " : "FAIL"} K jsr-has 200 / 404 / 500: ${got.join(", ")}`);
+}
+
+console.log(failed ? `\n${failed} case(s) FAILED` : "\nall 11 cases pass");
 process.exit(failed ? 1 : 0);

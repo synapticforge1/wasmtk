@@ -1151,12 +1151,15 @@ to miss it.
 
 ## CI / pre-publish gate
 
-The only GitHub workflow is `.github/workflows/publish.yml`: it fires on a `v*` tag, runs a **"Check
-OIDC availability"** diagnostic step (added 2026-06-15 — surfaces a gated GitHub OIDC token in the
-run log) and then **`deno publish`** (with OIDC provenance), then creates a `release/<tag>` branch +
-GitHub release. So the _enforced_ CI gate is exactly what `deno publish` validates: **type-check of
-all 15 `deno.json` exports + JSR "slow-types" check + package validation**. `deno fmt` / `deno lint`
-/ `deno doc --lint` / the test suites are **not** gated by CI — but `deno doc --lint` must be kept
+The only GitHub workflow is `.github/workflows/publish.yml`: it fires on a `v*` tag. **Since
+2026-11-10 it follows the workspace's release-process.md** (workflow.md § The release flow, step 9):
+`checks` (no token: tag = version and the compatibility floor via `api-surface.ts --verify-tag`,
+`deno check main.ts`, `deno publish --dry-run` on the published tree), `jsr` (OIDC: the "Check OIDC
+availability" diagnostic, `deno publish` with provenance, the Rekor id read back), `release` (the
+GitHub Release page on the tag, REST API). So the _enforced_ CI gate is the surface floor plus what
+`deno check` and `deno publish` validate: **type-check of all `deno.json` exports + JSR
+"slow-types" check + package validation**. `deno fmt` / `deno lint` / `deno doc --lint` / the test
+suites are **not** gated by CI — but `deno doc --lint` must be kept
 clean to hold the JSR doc-coverage score (see design-decisions.md), and provenance requires the OIDC
 token to actually reach the runner (was environmentally gated through v1.6.5; v1.7.0 published
 2026-06-15 with `hasProvenance: true`, JSR score 100).
@@ -1231,8 +1234,10 @@ deno run -A tests/jstyper_tests.ts     # 73/73
 Publish flow: **`deno task bump patch|minor|major`** (`scripts/bump.ts`; SemVer since 2026-09-30, the kind is required)
 raises the `deno.json` version and propagates it to `package.json` + `src/utils.ts` — JSR rejects
 re-publishing the same version (`1.6.2` was the last published; `bump` took it to `1.6.3`). Then
-`deno task publish` → `scripts/publish.ts` re-syncs the version, commits `bump version to vX.Y.Z`,
-tags it, and pushes; the tag triggers `publish.yml`.
+`deno task release` → `scripts/release.ts` (since 2026-11-10; before it `deno task publish`) runs
+its guards (clean tree incl. untracked, tag not on origin, JSR without the version, cold check and
+dry run, the CLI's `--version` / `--help`), commits `bump to vX.Y.Z`, and pushes `main` and the tag
+in one push; the tag triggers `publish.yml`. Full steps: workflow.md § The release flow.
 
 ## Runner does OUTPUT comparison (hardened 2026-06-07)
 
