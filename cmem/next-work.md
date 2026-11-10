@@ -35,9 +35,12 @@ Every open ledger row naming wasmtk, read; answers in each row's cell.
   `jsr-has` skip, Rekor fatal). Every action pinned to a commit hash. Record: **new
   `release.md` § "Release History"** (U11 / D3). Rehearsed: the jsr tree (37 files = a full
   clone's); `release.ts` + CI's `checks` decisions, 11 cases against a scratch bare origin; the
-  CI steps 16 cases on a mock API, 6 mutants each caught by its own case. ⚠️ UNMEASURED until the
-  first release in this order: `deno publish` after a bot-made tag in a `main`-push run
-  (binaryang re-measures first, U6). **Not converged, recorded:** U3 `bump` does not refuse a dirty
+  CI steps 16 cases on a mock API, 6 mutants each caught by its own case. **Pushed 2026-11-10
+  (`origin/main` `35301d47`); the NON-release path MEASURED on GitHub:** run 42846020431 (event
+  push) — `checks` green (is-release, type check, the dry run on the jsr tree), the release-candidate
+  gate skipped, `tag` / `release` / `jsr` skipped, as for a version already tagged (3.0.0).
+  ⚠️ UNMEASURED until the first release in this order: the tag → page → publish half, including
+  `deno publish` after a bot-made tag in a `main`-push run (binaryang re-measures first, U6). **Not converged, recorded:** U3 `bump` does not refuse a dirty
   tree itself (`release.ts` does, before anything is committed) and does not run the previous
   tag's tests (`check_prev_tests.ts`, ~25 min, stays a manual step 5 — a patch / minor needs it);
   U5 no tests in CI (wasmtk's gate is local; Deno-exit P7); U9 Bun and Deno come through their
