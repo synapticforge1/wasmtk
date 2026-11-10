@@ -5,6 +5,34 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-10 — workspace items for wasmtk (owner: "review workspace for items needing this project's attention and make the requested fixes")
+
+Every open ledger row naming wasmtk, read; answers in each row's cell.
+- **H30 (no `gh`, in CI too) — DONE.** `publish.yml:69` `gh release create` → `scripts/publish-workflow.ts
+  release` (REST API, `GITHUB_TOKEN`); the "next diagnostic needs `gh`" notes in
+  design-decisions.md re-worded. `gh` in tracked files outside comments and history: 0.
+- **H32 (CI makes every new tag's page) — DONE with H30**, in its order: a `release` job after the
+  upload, `contents: write` only, sparse checkout of the script; JSR 200 → tag peels to the commit
+  → `release/<tag>` → page or done → read back; per-call time limits. `scripts/check_publish_workflow.ts`
+  10 / 10 on a mock API, 3 mutants caught (no peel check → E; existing page not done → B; JSR
+  not consulted → F); read-only on the real API for `v3.0.0` (page and branch there → 0 writes, 4
+  GETs; wrong commit → refused before a write; absent tag → refused). Annotated-tag peel: mock only
+  (wasmtk's tags are lightweight). **UNMEASURED on GitHub until the next tag** — its first page's
+  `author.login` goes into the H32 row then.
+- **C30, C34 (S3D, record-only) — read; both APPLIED and were folded into the H32 split:** the one
+  job held `id-token: write` AND `contents: write`; now OIDC and repo-write are in different jobs,
+  checkouts don't persist the token. A failure after `deno publish`'s upload skipped the branch and
+  page; now `release` and the provenance check run on `uploaded`. Not done: actions pinned by tag,
+  not commit hash (C30's further step) — owner call; C34 (2)–(4) n/a (no npm, no version handed
+  between jobs, no YAML-reading test).
+- **H31 (Bun notation = latest installed) — conforms:** the two pins are 1.4.4 = installed; dated
+  measurement lines stay. Rule recorded in INDEX § tooling (rule 4).
+- **C43 (binaryang 3.0.2) — recorded for the bump:** workflow.md § "Bumping the binaryang backend"
+  carries their read of our tree and the checks; the bump itself is NOT done (a MAJOR with a full
+  gate; owner's call when).
+- **No new action from wasmtk:** H6 (H6.5b waits on the owner), H10 and H12 (work items, as
+  answered 2026-10-26), H19 / H27 / H28 (wasmtk's parts verified by the workspace).
+
 ## 2026-10-27 — workspace-rules compliance review (owner: "review the workspace rules and bring this repo into compliance")
 
 Checked against `../cmem/working-rules.md` and every open ledger row to wasmtk. **Already compliant
