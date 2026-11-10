@@ -6,28 +6,31 @@
  *
  * Usage:
  *   bun scripts/publish-workflow.ts oidc-check            # the PREREQUISITE: OIDC env present?
+ *   bun scripts/publish-workflow.ts jsr-has <version>     # step output present=true|false (a re-run)
  *   bun scripts/publish-workflow.ts mark-uploaded         # job output `uploaded=true`, BEFORE publish
  *   bun scripts/publish-workflow.ts provenance <version>  # the OUTCOME: JSR recorded a Rekor entry?
- *   bun scripts/publish-workflow.ts release <tag>         # the `release` job: branch + Release page
+ *   bun scripts/publish-workflow.ts release <tag>         # the `release` job: the tag's Release page
  *
  * `oidc-check` and `provenance` were kept as they were in the shell, message for message;
  * `provenance` polls 12 times, 15 s apart (override with PROVENANCE_TRIES / PROVENANCE_WAIT_S).
  *
  * ## `release` (H32's order, kept)
  *
- * Runs in its own job with `contents: write` only, after the publish job, on the publish job's
- * `uploaded` output rather than its exit (C34: `deno publish` uploads, THEN signs provenance, so a
- * failure after the upload would otherwise strand the version without its branch and page):
+ * **The version tag IS the release** (owner, 2026-11-10: "We should be releasing on version tag and
+ * creating a release page at that time"): the tag push runs publish.yml, and the page is made in
+ * that run, ON the tag — no `release/<tag>` branch (the old flow made one and pointed the page at
+ * it; dropped 2026-11-10). Runs in its own job with `contents: write` only, after the publish job,
+ * on the publish job's `uploaded` output rather than its exit (C34: `deno publish` uploads, THEN
+ * signs provenance, so a failure after the upload would otherwise strand the version without its
+ * page):
  *
  *   0. JSR answers 200 for the version (polled like `provenance`) — nothing is made for a version
  *      the registry does not have;
  *   1. the tag exists on GitHub and peels (annotated tags followed) to GITHUB_SHA — `POST /releases`
  *      CREATES a missing tag, so this is checked before any write;
- *   2. branch `release/<tag>` at that commit: created if absent, done if already there, refused if
- *      it points elsewhere;
- *   3. the Release page: one already there = done (re-runs write nothing); else `POST` with
- *      `generate_release_notes` and the JSR link on top;
- *   4. read back: the page exists for the tag, and the tag still peels to GITHUB_SHA.
+ *   2. the Release page: one already there = done (re-runs write nothing); else `POST` for the
+ *      existing tag (no `target_commitish`) with `generate_release_notes` and the JSR link on top;
+ *   3. read back: the page exists for the tag, and the tag still peels to GITHUB_SHA.
  *
  * Every network call has its own time limit (HTTP_TIMEOUT_MS, default 30 s). `gh` is never used
  * (🔒 owner 2026-11-08, letter H30). Tested against a mock API by `scripts/check_publish_workflow.ts`.
@@ -78,14 +81,34 @@ function oidcCheck(): number {
   return 0;
 }
 
-/** Writes `uploaded=true` to the step's outputs; run immediately BEFORE `deno publish` (C34). */
-function markUploaded(): number {
+/**
+ * Does JSR already serve this version? Writes `present=true|false` to the step's outputs, so a
+ * re-run after a failure past the upload skips `deno publish` (release-process.md § 2 step 9).
+ * Only 200 and 404 are answers; anything else (or no answer in time) fails the step rather than
+ * being read as "absent", which would re-attempt an immutable upload.
+ */
+export async function jsrHas(version: string, f: Fetch = fetch): Promise<"true" | "false"> {
+  const res = await call(f, `${jsrVersionUrl(denoJson.name, version)}?cb=has-${Date.now()}`, {
+    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+  });
+  if (res.status === 200) return "true";
+  if (res.status === 404) return "false";
+  throw new Error(`JSR answered HTTP ${res.status} for ${denoJson.name}@${version}`);
+}
+
+function writeOutput(line: string): number {
   const out = process.env.GITHUB_OUTPUT;
   if (!out) {
-    console.error("::error::GITHUB_OUTPUT is not set (mark-uploaded runs inside GitHub Actions)");
+    console.error("::error::GITHUB_OUTPUT is not set (this subcommand runs inside GitHub Actions)");
     return 1;
   }
-  appendFileSync(out, "uploaded=true\n");
+  appendFileSync(out, `${line}\n`);
+  return 0;
+}
+
+/** Writes `uploaded=true` to the step's outputs; run immediately BEFORE `deno publish` (C34). */
+function markUploaded(): number {
+  if (writeOutput("uploaded=true") !== 0) return 1;
   console.log(
     "uploaded=true (the follow-on jobs run from here on, whatever deno publish exits with)",
   );
@@ -144,7 +167,7 @@ export interface ReleaseEnv {
 
 class ReleaseError extends Error {}
 
-/** H32's order: JSR has it → tag peels to sha → release branch → page (or done) → read back. */
+/** H32's order: JSR has it → tag peels to sha → page on the tag (or done) → read back. */
 export async function release(tag: string, env: ReleaseEnv, f: Fetch = fetch): Promise<number> {
   const version = tag.replace(/^v/, "");
   const gh = (path: string, init: RequestInit = {}) =>
@@ -207,27 +230,7 @@ export async function release(tag: string, env: ReleaseEnv, f: Fetch = fetch): P
     }
     console.log(`tag ${tag} → ${env.sha}`);
 
-    // 2. The release branch.
-    const branch = `release/${tag}`;
-    const b = await gh(`/git/ref/heads/${branch}`);
-    if (b.status === 404) {
-      await json(
-        await gh(`/git/refs`, {
-          method: "POST",
-          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: env.sha }),
-        }),
-        `POST branch ${branch}`,
-      );
-      console.log(`branch ${branch} created at ${env.sha}`);
-    } else {
-      const at = (await json(b, `GET branch ${branch}`)).object.sha as string;
-      if (at !== env.sha) {
-        throw new ReleaseError(`branch ${branch} exists at ${at}, not ${env.sha}`);
-      }
-      console.log(`branch ${branch} already at ${env.sha}`);
-    }
-
-    // 3. The page: one already there is done.
+    // 2. The page, on the tag: one already there is done.
     const existing = await gh(`/releases/tags/${encodeURIComponent(tag)}`);
     if (existing.status === 200) {
       const page = await existing.json();
@@ -241,7 +244,6 @@ export async function release(tag: string, env: ReleaseEnv, f: Fetch = fetch): P
         body: JSON.stringify({
           tag_name: tag,
           name: tag,
-          target_commitish: branch,
           generate_release_notes: true,
           body: `JSR: https://jsr.io/${denoJson.name}@${version}`,
         }),
@@ -249,7 +251,7 @@ export async function release(tag: string, env: ReleaseEnv, f: Fetch = fetch): P
       `POST release ${tag}`,
     );
 
-    // 4. Read back.
+    // 3. Read back.
     const page = await json(
       await gh(`/releases/tags/${encodeURIComponent(tag)}`),
       `read back ${tag}`,
@@ -274,6 +276,18 @@ if (import.meta.main) {
     case "mark-uploaded":
       process.exit(markUploaded());
       break;
+    case "jsr-has": {
+      if (!arg) break;
+      const version = arg.replace(/^v/, "");
+      try {
+        const present = await jsrHas(version);
+        console.log(`JSR ${present === "true" ? "already serves" : "does not serve"} ${version}`);
+        process.exit(writeOutput(`present=${present}`));
+      } catch (e) {
+        console.error(`::error::${(e as Error).message}`);
+        process.exit(1);
+      }
+    }
     case "provenance":
       if (!arg) break;
       process.exit(await provenance(arg.replace(/^v/, "")));
@@ -299,7 +313,7 @@ if (import.meta.main) {
     }
   }
   console.error(
-    "usage: publish-workflow.ts oidc-check | mark-uploaded | provenance <version> | release <tag>",
+    "usage: publish-workflow.ts oidc-check | jsr-has <version> | mark-uploaded | provenance <version> | release <tag>",
   );
   process.exit(2);
 }

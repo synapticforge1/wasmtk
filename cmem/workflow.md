@@ -287,59 +287,78 @@ Always `deno task install` first, or the suites silently test the previous binar
 
 ## The release flow
 
-Only when the owner asks. Steps, in order:
+**THE process is the workspace's `../cmem/release-process.md`** (JS / TS, written 2026-11-10 by
+binaryang on the owner's word, ledger C44; reference implementation binaryang). This section is
+that process with wasmtk's names filled in — where they differ, the workspace file governs. Its
+§ 1 standing rules: nothing published, pushed or tagged without the owner's word; merge first,
+bump in its own commit; **never publish from a workstation** (`scripts/release.ts` has no
+`deno publish`); provenance read back, not assumed; every release recorded. **The version tag IS
+the release** (owner, 2026-11-10): the tag push publishes and makes the page; no `release/<tag>`
+branch on GitHub.
 
-```bash
-git checkout main && git merge --ff-only <branch> && git push   # 1. merge FIRST
-# 2. SemVer bump (2026-09-30, H6): the KIND is required and is a compatibility statement.
-#    patch = fixes only; minor = new capability, compatible; major = anything breaking (+ a README
-#    Breaking Changes row). Writes deno.json and propagates to package.json + src/utils.ts.
-#    THE COMPATIBILITY GATE runs first (H6.3): it refuses if api-surface.json is stale (re-baseline
-#    in its own commit: `deno task api-surface`, stating why), prints the floor since the last v*
-#    tag with the symbols that set it, and refuses a kind below it. `deno task api-surface --floor`
-#    previews it. A compatible change the diff calls CHANGED can be reviewed:
-#    `deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>` (committed).
-#    If api-surface.ts or bump.ts changed: `bun scripts/check_compat_gate.ts` (19 cases, 2026-10-23).
-#    Rule 4: a removal needs a release that DEPRECATED it first (a `@deprecated` doc tag on its own
-#    line); bump refuses an undeprecated removal at any kind. CI repeats the gate on the tag
-#    (publish.yml → `bun scripts/api-surface.ts --verify-tag <tag>`), so a hand-pushed tag
-#    below the floor, or one whose deno.json is not the tag, fails before `deno publish`.
-#    If publish-workflow.ts changed: `bun scripts/check_publish_workflow.ts` (10 cases against a
-#    mock GitHub / JSR, 2026-11-10) — the release job is otherwise first exercised by the real tag.
-#    Before a PATCH or MINOR bump (Rule 3, H6.5a): `bun scripts/check_prev_tests.ts`
-#    (~25–30 min; the last tag's tests/ against today's src/ in a fresh clone). Classify every red
-#    suite: regression (fix first) / intended surface change (raises the floor) / improvement.
-deno task bump patch|minor|major
-#    (`deno task update-version` alone only propagates a version already edited by hand.)
-# 2b. DENO FLOOR (REVISED by the owner 2026-09-28, see design-decisions.md § Tooling): while
-#     fixes are in flight the floor IS the installed Deno and moves up with each install, so
-#     nothing is written. Once we are OUT OF FIXES, write the TESTED minimum:
-deno --version                  # the version the full gate ran on -> "deno": ">=X.Y.Z"
-# 3. CHANGELOG entry (user-facing; lead with impact, not internals)
-# 4. promote roadmap.md's working-tree entry to a Release-status section
-# 5. pre-publish gate:
-deno publish --dry-run --allow-dirty
-deno doc --lint <the 16 deno.json entrypoints>      # MUST be clean — see traps
-# 6. commit, then:
-deno task publish               # tags + pushes; GitHub Actions publishes to JSR
-# 7. verify: curl -s https://jsr.io/@jrmarcum/wasmtk/meta.json | grep latest
-#    and the page: GET https://api.github.com/repos/synapticforge1/wasmtk/releases/tags/<tag>
-#    (200, author.login github-actions[bot]) — CI makes it, never `gh`, never by hand.
-# 8. delete the merged branch (local + remote) with `git branch -d` (safe form)
-```
+1. **Owner: the go** — "release X.Y.Z".
+2. **Release notes on a branch:** `CHANGELOG.md` § X.Y.Z (user-facing; lead with impact) and
+   roadmap.md's unreleased block promoted to a Release-status section, on a local branch
+   `release/X.Y.Z`; the gate on the committed tree; `git merge --no-ff` into `main`. The version
+   line is still the RELEASED one.
+3. **Push `main` UNBUMPED.**
+4. **The fresh-clone gate:** clone the pushed commit from GitHub into an empty folder and run
+   publish.yml's `checks` there — `deno check main.ts`, `deno publish --dry-run`, and
+   `deno doc --lint <the 16 deno.json entrypoints>` (MUST be clean — see traps). wasmtk's full
+   suite gate (§ The full gate) ran on the committed tree before step 2; it is not in CI yet
+   (Deno-exit P7).
+5. **The consumer check** (letter H6, rule 3 — wasmtk's H6.5b, 🗓️ OWNER until decided): each known
+   consumer's suite against the UNPUBLISHED build, or the recorded reason it is skipped; a red
+   consumer blocks a patch or a minor.
+6. **Preconditions:** no `vX.Y.Z` on origin (`git ls-remote --tags origin`), JSR without X.Y.Z —
+   `deno task release` re-checks both before it writes anything.
+7. **Owner: the level.** `deno task bump patch|minor|major` (SemVer, H6): the KIND is a
+   compatibility statement; major needs a README Breaking Changes row. It writes deno.json and
+   syncs package.json + src/utils.ts. THE COMPATIBILITY GATE runs first (H6.3): it refuses if
+   api-surface.json is stale (re-baseline in its own commit: `deno task api-surface`, stating
+   why), prints the floor since the last `v*` tag with the symbols that set it, and refuses a kind
+   below it (`deno task api-surface --floor` previews; a compatible CHANGED item can be reviewed:
+   `deno task api-surface --review <entrypoint> <symbol> <member> <kind> <reason>`, committed).
+   Rule 4: a removal needs a release that DEPRECATED it first. Before a PATCH or MINOR (Rule 3,
+   H6.5a): `bun scripts/check_prev_tests.ts` (~25–30 min; the last tag's tests against today's
+   src in a fresh clone; classify every red suite). If api-surface.ts or bump.ts changed:
+   `bun scripts/check_compat_gate.ts` (19 cases, 2026-10-23). **Deno floor** (owner 2026-09-28,
+   design-decisions.md § Tooling): while fixes are in flight it is the installed Deno, nothing
+   written; once out of fixes, write the tested minimum (`deno --version` of the full gate's run).
+8. **`deno task release`** (`scripts/release.ts`, since 2026-11-10; replaced `deno task publish`).
+   Guards: a clean tree but for the bump's three files, untracked files counted; the tag not on
+   origin; JSR without the version; COLD `deno check main.ts` and `deno publish --dry-run` in an
+   empty `DENO_DIR`; `main.ts --version` names the version and `--help` exits 0. Then it commits
+   `bump to vX.Y.Z` and pushes `main` AND the tag in ONE push, as a user. Rehearsed 2026-11-10 in
+   a scratch clone against a scratch bare origin: an untracked file, a version JSR serves, a tag
+   already on origin → each refused, nothing pushed; a fresh version → main and the tag at the
+   `bump to` commit, its three files only; a planted type error → refused at the cold check.
+9. **The tag push publishes** — publish.yml, three jobs (binaryang's five, less npm), each action
+   pinned to a commit hash, runs queued per tag and never cancelled:
 
-**publish.yml is two jobs since 2026-11-10** (letters H30, H32; S3D's C30 / C34). `publish`
-(`id-token: write`, `contents: read`): OIDC check, the gate on the tag, `mark-uploaded`, `deno
-publish`, the provenance check. `release` (`contents: write` only, a sparse checkout of the release
-script and `deno.json`): runs on publish's `uploaded` output — written just before `deno publish`,
-so a failure AFTER the upload still gets its branch and page — and then, in
-`scripts/publish-workflow.ts release`: JSR serves the version → the tag peels to the run's commit
-(a `POST /releases` would CREATE a missing tag) → branch `release/<tag>` → the Release page, an
-existing one = done → read back. Every call has its own time limit. A re-run of the tag writes
-nothing that is already there. Only NEW tags get pages (owner, 2026-11-09): no backfill.
+   | job | token | what it runs |
+   | --- | --- | --- |
+   | `checks` | none | tag = version and the floor (`api-surface.ts --verify-tag`); `deno check main.ts`; `deno publish --dry-run` on exactly the jsr job's sparse tree |
+   | `jsr` | `id-token` | sparse checkout of `publish.include` + `deno.lock` + the workflow script, nothing installed; `jsr-has` (skip if JSR has it); OIDC check; `uploaded` written BEFORE `deno publish`, which is called DIRECTLY; Rekor id read back |
+   | `release` | `contents: write` | on `uploaded`: JSR serves the version → the tag peels to the run's commit (`POST /releases` would CREATE a missing tag) → the page ON the tag, an existing one = done → read back; REST API, never `gh` |
 
-**Releases go out from `main`**, so the tag is reachable from `main` — the owner chose this
-explicitly. Publishing from a branch would leave the tag dangling if the branch were deleted.
+   **A failure after JSR's upload: "Re-run failed jobs"** — `jsr-has` skips the upload, an existing
+   page is done — never a new tag for the same code. If publish-workflow.ts changed:
+   `bun scripts/check_publish_workflow.ts` (11 cases on a mock GitHub / JSR) and REHEARSE the
+   changed job as the runner lays it out — a re-run runs the TAG's workflow, so a release-job bug
+   costs a version (binaryang 3.0.0 and 3.0.1). Tests do not run in `checks` yet (Deno-exit P7).
+10. **Read back as a user:** the Rekor id (`bun scripts/publish-workflow.ts provenance <tag>`);
+    `deno run -A --minimum-dependency-age=0 jsr:@jrmarcum/wasmtk@X.Y.Z --version`; the page
+    (`GET https://api.github.com/repos/synapticforge1/wasmtk/releases/tags/<tag>` → 200,
+    `author.login` `github-actions[bot]`); spot-check what the release changed.
+11. **Record it:** roadmap.md § Release status (run ids, the read-backs, what was checked as a
+    user); next-work.md and the unreleased block updated. Delete the merged local `release/X.Y.Z`
+    branch with `git branch -d`.
+
+Only NEW tags get pages (owner, 2026-11-09): no backfill. **Releases go out from `main`**, so the
+tag is reachable from `main` (owner). The variants and their lessons (a patch while `main` holds
+unreleased work; a tag publishes from ANY branch; a tag pushed before the first branch push runs
+nothing) are in release-process.md § 3.
 
 ## Commit conventions
 

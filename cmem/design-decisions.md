@@ -1221,7 +1221,9 @@ silently break (all `src/wasic.ts`):
 - Bump the version with **`deno task bump patch|minor|major`** (`scripts/bump.ts`): raises
   `deno.json`'s version, then propagates it to `package.json` + `src/utils.ts VERSION` via
   `sync-version.ts`. `deno task update-version` only *propagates* an already-edited version.
-  `bump` is intentionally NOT wired into `deno task publish` (bumping stays a deliberate step).
+  `bump` is intentionally NOT wired into `deno task release` (bumping stays a deliberate step:
+  the owner gives the level, workspace release-process.md § 2 step 7; `deno task publish` until
+  2026-11-10).
   Don't add `dependencies` to `package.json`; don't use `nodeModulesDir: "auto"` (Windows
   junction failures).
 - 🔒 **VERSIONS ARE PLAIN SEMANTIC VERSIONING 2.0.0 (owner, 2026-09-20; workspace letter H6,

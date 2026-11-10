@@ -57,7 +57,7 @@
     "upstream:install": "deno task upstream:link && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.upstream.json --force -n wasmtk-upstream main.ts",
     "install": "deno task update-version && deno task cache && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.json --force -n wasmtk main.ts",
     "compile": "deno compile -A --output wasmtk main.ts",
-    "publish": "bun scripts/publish.ts"
+    "release": "bun scripts/release.ts"
   },
   "nodeModulesDir": "none",
   "minimumDependencyAge": "PT1M",
