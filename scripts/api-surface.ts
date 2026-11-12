@@ -640,15 +640,26 @@ if (import.meta.main) {
     }
     console.log(`✅ ${tag}: the compatibility gate holds on the tagged tree`);
   } else if (mode === "--verify-release") {
-    // The release candidate on `main`, BEFORE CI tags it: the tag must not exist yet, and the
-    // previous tag is the last one reachable from HEAD.
+    // The release candidate on `main`, BEFORE CI tags it: the previous tag is the last one
+    // reachable from HEAD. A re-run of the bump commit's run RESUMES (review round 4): the tag the
+    // first attempt made is then fetched, AT this commit — the previous tag is the one before it.
+    // A tag at ANOTHER commit is refused (a tag never moves).
     const version = JSON.parse(await readFile(`${root}/deno.json`, "utf8")).version;
     const tag = `v${version}`;
+    let base = "HEAD";
     if ((await git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`])).code === 0) {
-      console.error(`❌ ${tag} already exists: this tree is not a new release`);
-      process.exit(1);
+      const at = (await git(["rev-parse", `refs/tags/${tag}^{commit}`])).out.trim();
+      const head = (await git(["rev-parse", "HEAD"])).out.trim();
+      if (at !== head) {
+        console.error(`❌ ${tag} already exists at ${at}, not HEAD ${head}: not a new release`);
+        process.exit(1);
+      }
+      console.log(
+        `(${tag} is already at HEAD — a re-run resuming; checked against the tag before it)`,
+      );
+      base = `${tag}^`;
     }
-    const problems = await verifyTag(root, tag, "HEAD");
+    const problems = await verifyTag(root, tag, base);
     if (problems.length > 0) {
       for (const p of problems) console.error(`❌ ${tag}: ${p}`);
       process.exit(1);

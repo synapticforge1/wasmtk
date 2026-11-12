@@ -4,7 +4,7 @@
  * (cmem/workflow.md § The release flow, U4). Review rounds 1–2, 2026-11-12.
  *
  * The review record (guard 0g, `reviewsRecorded` / `reviewRecordProblem`) — the STRICT form
- *   "**Security review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).":
+ *   "**Security review (v<version>):** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).":
  *   R1  both in the form → no problem          R2  no entry → refused
  *   R3  only the security review → the hardening review named as missing
  *   R5  another version's records do not count R6  `### 4.0.0-rc.1` is not 4.0.0
@@ -12,8 +12,6 @@
  *       a denial after the phrase) → each refused
  *   R8  the template's own placeholder "(round n, date)" → refused
  *   R9  last round ≠ round count; an impossible date; text after the final period → refused
- *   R10 hidden text does not count: an HTML comment (closed or NOT), a fence (``` / ~~~, a ````
- *       fence closed only by ````, an UNCLOSED fence)
  *   R11 a reviewed entry before, or AFTER, § Release History does not count
  *   R12 a `####` subheading stays inside the entry; R13 CRLF; R14 a record given twice → refused
  * The bump only (guards 0a / 0b, `releaseBlockers`, `bumpOnly`):
@@ -29,31 +27,44 @@
  *   V6  deno.json bumped alone (package.json / VERSION left behind) → refused, each by name
  *   V7  HEAD^ already at the version (a "bump" that bumps nothing) → refused
  *   V8  a merge / V9 a root commit is not a release commit
- *   R16 an inline `<!--` hides nothing   R17 nor one mid-line   R18 a fence in a list item hides
- *   R19 ```x``` is inline code, not a fence   R20 a record indented 4 spaces does not count
- *   R18b a top-level fence stays open past a closer indented 4   R18c a list fence's closer at 5
- *   R21 a `<!--` inside a fence opens no comment   R22 a one-line comment hides only its line
- *   R23 a multi-line comment ends at its `-->`
  *   B6  a VERSION in a comment is not the constant; two constants → refused
+ * Round 4 — the record names its version, and cmem/release.md must be PLAIN Markdown:
+ *   R9d an empty scope; R9e a scope with a backtick / <  → refused
+ *   R10a–p every construct that can hide text (comments, fences — in lists and quotes too —
+ *       `<?`, `<style>`, CDATA, `<!X`, `<!-->`, 4-space / tab indentation) → refused BY LINE
+ *   R11c–e an indented / tab / setext heading → refused   R11f an entry cannot borrow the next
+ *       entry's records (they name their version)   R15 an inline `<!--` is text
+ *   R16 the REAL cmem/release.md is inside the subset
+ *   V10 no cmem/release.md at HEAD   B7 a release file that is not JSON
+ *   X1  the `--verify-commit` COMMAND's exit codes, in a real git repo
  *
  * Usage (from the repo root):  bun scripts/check_release.ts
  */
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   bumpOnly,
   type Git,
   lsRemoteHas,
+  markdownSubsetProblems,
   releaseBlockers,
   reviewsRecorded,
-  stripHidden,
   verifyReleaseCommit,
 } from "./release.ts";
 
-const SEC =
-  "**Security review:** everything since v3.0.0; rounds 3; ended by an empty round (round 3, 2026-12-01).";
-const HARD =
-  "**Hardening review:** the seven axes; rounds 2; ended by an empty round (round 2, 2026-12-01).";
+const secFor = (v: string) =>
+  `**Security review (v${v}):** everything since v3.0.0; rounds 3; ended by an empty round (round 3, 2026-12-01).`;
+const hardFor = (v: string) =>
+  `**Hardening review (v${v}):** the seven axes; rounds 2; ended by an empty round (round 2, 2026-12-01).`;
+const SEC = secFor("4.0.0");
+const HARD = hardFor("4.0.0");
 const both = (v: string) =>
-  `### ${v} — 2026-12-01\n\n**Summary.** Something changed.\n\n${SEC}\n\n${HARD}\n`;
+  `### ${v} — 2026-12-01\n\n**Summary.** Something changed.\n\n${secFor(v)}\n\n${hardFor(v)}\n`;
+const SUBSET =
+  /line \d+: (a code fence|a line starting with "<"|indented 4\+ spaces|a tab|an indented heading|a heading without a space|a "===" \/ "---" line)/;
 const doc = (...entries: string[]) => `# release.md\n\n## Release History\n\n${entries.join("\n")}`;
 const entry = (...paras: string[]) => doc(`### 4.0.0\n\n${paras.join("\n\n")}\n`);
 
@@ -74,32 +85,27 @@ const is = (name: string, ok: boolean, got: string) => {
 // ── the review record ──
 check("R1 both in the strict form", reviewsRecorded(doc(both("4.0.0")), "4.0.0"), null);
 check("R2 no entry", reviewsRecorded(doc(both("3.0.0")), "4.0.0"), /no "### 4\.0\.0" entry/);
-check("R3 hardening missing", reviewsRecorded(entry(SEC), "4.0.0"), /no \*\*Hardening review:\*\*/);
+check("R3 hardening missing", reviewsRecorded(entry(SEC), "4.0.0"), /no \*\*Hardening review/);
 check(
   "R5 another version's records do not count",
   reviewsRecorded(doc("### 4.0.0 — 2026-12-02\n\n**Summary.** none\n", both("3.0.0")), "4.0.0"),
-  /no \*\*Security review:\*\*/,
+  /no \*\*Security review/,
 );
 check(
   "R6 4.0.0-rc.1 is not 4.0.0",
   reviewsRecorded(doc(both("4.0.0-rc.1")), "4.0.0"),
   /no "### 4\.0\.0" entry/,
 );
+const S = "**Security review (v4.0.0):**";
 for (
   const [label, sec] of [
-    [
-      "NOT done … —",
-      "**Security review:** NOT done for v3.0.4 — ended by an empty round (round 2, 2026-12-01).",
-    ],
-    ["hasn't … yet", "**Security review:** it hasn't ended by an empty round (round 2) yet."],
-    ["TODO:", "**Security review:** TODO: ended by an empty round (round 2)."],
-    [
-      "planned to be",
-      "**Security review:** planned to be ended by an empty round (round 2, 2026-12-01).",
-    ],
+    ["NOT done … —", `${S} NOT done for v3.0.4 — ended by an empty round (round 2, 2026-12-01).`],
+    ["hasn't … yet", `${S} it hasn't ended by an empty round (round 2) yet.`],
+    ["TODO:", `${S} TODO: ended by an empty round (round 2).`],
+    ["planned to be", `${S} planned to be ended by an empty round (round 2, 2026-12-01).`],
     [
       "a denial after",
-      "**Security review:** x; rounds 2; ended by an empty round (round 2, 2026-12-01). No — round 2 found 3.",
+      `${S} x; rounds 2; ended by an empty round (round 2, 2026-12-01). No — round 2 found 3.`,
     ],
   ]
 ) {
@@ -112,10 +118,7 @@ for (
 check(
   "R8 the template's placeholder",
   reviewsRecorded(
-    entry(
-      "**Security review:** <scope>; rounds <n>; ended by an empty round (round n, date).",
-      HARD,
-    ),
+    entry(`${S} <scope>; rounds <n>; ended by an empty round (round n, date).`, HARD),
     "4.0.0",
   ),
   /security review is not in the recorded form/,
@@ -123,7 +126,7 @@ check(
 check(
   "R9a last round ≠ round count",
   reviewsRecorded(
-    entry("**Security review:** x; rounds 3; ended by an empty round (round 2, 2026-12-01).", HARD),
+    entry(`${S} x; rounds 3; ended by an empty round (round 2, 2026-12-01).`, HARD),
     "4.0.0",
   ),
   /last round \(2\) is not its round count \(3\)/,
@@ -131,7 +134,7 @@ check(
 check(
   "R9b an impossible date",
   reviewsRecorded(
-    entry("**Security review:** x; rounds 2; ended by an empty round (round 2, 2026-02-30).", HARD),
+    entry(`${S} x; rounds 2; ended by an empty round (round 2, 2026-02-30).`, HARD),
     "4.0.0",
   ),
   /2026-02-30 is not a real date/,
@@ -139,35 +142,69 @@ check(
 check(
   "R9c rounds 0",
   reviewsRecorded(
-    entry("**Security review:** x; rounds 0; ended by an empty round (round 0, 2026-12-01).", HARD),
+    entry(`${S} x; rounds 0; ended by an empty round (round 0, 2026-12-01).`, HARD),
     "4.0.0",
   ),
   /round count \(0\)/,
 );
 check(
-  "R10a inside a closed HTML comment",
-  reviewsRecorded(doc(`<!--\n${both("4.0.0")}\n-->\n`), "4.0.0"),
-  /no "### 4\.0\.0" entry/,
+  "R9d an EMPTY scope → refused",
+  reviewsRecorded(
+    entry(`${S} ; rounds 1; ended by an empty round (round 1, 2026-12-01).`, HARD),
+    "4.0.0",
+  ),
+  /security review is not in the recorded form/,
 );
 check(
-  "R10b inside an UNCLOSED HTML comment",
-  reviewsRecorded(doc(`<!--\n${both("4.0.0")}\n`), "4.0.0"),
-  /no "### 4\.0\.0" entry/,
+  "R9e a scope that is not plain text (a backtick / <) → refused",
+  reviewsRecorded(
+    entry(`${S} the \`x\` tool; rounds 1; ended by an empty round (round 1, 2026-12-01).`, HARD),
+    "4.0.0",
+  ),
+  /scope .* is not plain text/,
 );
+// Round 4: the file must be PLAIN Markdown — every construct that can hide text is refused by
+// line, whether or not it hides the records (rounds 2–3 had emulated CommonMark and missed cases).
+for (
+  const [label, md] of [
+    ["R10a a closed HTML comment", doc(`<!--\n${both("4.0.0")}\n-->\n`)],
+    ["R10b an UNCLOSED HTML comment", doc(`<!--\n${both("4.0.0")}\n`)],
+    ["R10c a ``` fence", entry("```", "", SEC, HARD, "```")],
+    ["R10d a ```` fence", entry("````", "```", SEC, HARD, "```", "````")],
+    ["R10e an UNCLOSED ~~~ fence", entry("~~~", "", SEC, HARD)],
+    ["R10f a comment opened in a LIST ITEM", entry("- <!--", `  ${SEC}`, `  ${HARD}`, "  -->")],
+    ["R10g a fence in a list item", entry("- ```\n  code\n```", SEC, HARD)],
+    ["R10h a <? … ?> block", entry("<?", SEC, HARD, "?>")],
+    ["R10i a <style> block", entry("<style>", SEC, HARD, "</style>")],
+    ["R10j a <![CDATA[ block", entry("<![CDATA[", SEC, HARD, "]]>")],
+    ["R10k a <!X declaration", entry("<!X", SEC, HARD, ">")],
+    ["R10l a record indented 4 spaces", entry(`    ${SEC}`, HARD)],
+    ["R10m a tab-indented line", entry(`\t${SEC}`, HARD)],
+    ["R10n a quoted fence", entry("> ```", SEC, HARD)],
+    ["R10o a <!--> line", entry("<!-->", SEC, HARD)],
+    ["R10p a numbered fence in a paragraph", entry("text\n5. ```", SEC, HARD)],
+  ]
+) check(`${label} → refused by line`, reviewsRecorded(md, "4.0.0"), SUBSET);
+for (
+  const [label, md] of [
+    ["R11c an INDENTED heading", doc("### 4.0.0\n\nNotes.\n\n ### 3.9.9\n", both("3.9.9"))],
+    ["R11d a heading with a TAB", doc("### 4.0.0\n\nNotes.\n\n###\t3.9.9\n", both("3.9.9"))],
+    ["R11e a SETEXT heading", doc("### 4.0.0\n\nNotes.\n\n3.9.9\n-----\n", both("3.9.9"))],
+  ]
+) {
+  check(
+    `${label} → refused by line (an entry could run into it)`,
+    reviewsRecorded(md, "4.0.0"),
+    SUBSET,
+  );
+}
 check(
-  "R10c inside a ``` fence (blank lines inside)",
-  reviewsRecorded(entry("```", "", SEC, HARD, "```"), "4.0.0"),
-  /no \*\*Security review:\*\*/,
-);
-check(
-  "R10d inside a ```` fence holding an inner ``` (closed only by ````)",
-  reviewsRecorded(entry("````", "```", SEC, HARD, "```", "````"), "4.0.0"),
-  /no \*\*Security review:\*\*/,
-);
-check(
-  "R10e inside an UNCLOSED ~~~ fence",
-  reviewsRecorded(entry("~~~", "", SEC, HARD), "4.0.0"),
-  /no \*\*Security review:\*\*/,
+  "R11f the next entry's records NAME its version: an entry cannot borrow them",
+  reviewsRecorded(
+    doc("### 4.0.0\n\nNotes.\n", `#### 3.9.9\n\n${secFor("3.9.9")}\n\n${hardFor("3.9.9")}\n`),
+    "4.0.0",
+  ),
+  /security review is not in the recorded form "\*\*Security review \(v4\.0\.0\):\*\*/,
 );
 check(
   "R11a a reviewed entry BEFORE § Release History",
@@ -175,7 +212,7 @@ check(
     `# r\n\n## Plans\n\n${both("4.0.0")}\n## Release History\n\n### 4.0.0\n\n**Summary.** x\n`,
     "4.0.0",
   ),
-  /no \*\*Security review:\*\*/,
+  /no \*\*Security review/,
 );
 check(
   "R11b a reviewed entry in a section AFTER § Release History",
@@ -196,11 +233,21 @@ check(
   reviewsRecorded(entry(SEC, SEC, HARD), "4.0.0"),
   /security review twice/,
 );
-is(
-  "R15 stripHidden keeps text after a closed comment and a closed fence",
-  stripHidden("a\n<!-- x -->b\n```\nc\n```\nd").split("\n").join("|") === "a|b|d",
-  JSON.stringify(stripHidden("a\n<!-- x -->b\n```\nc\n```\nd")),
+check(
+  "R15 an inline `<!--` mid-line in prose is text (no false refusal)",
+  reviewsRecorded(entry("Note: write `<!--` to hide; text <!-- here too.", SEC, HARD), "4.0.0"),
+  null,
 );
+{
+  // The REAL cmem/release.md is inside the subset (a false refusal would block every release).
+  const here = dirname(fileURLToPath(import.meta.url));
+  const real = markdownSubsetProblems(readFileSync(join(here, "..", "cmem", "release.md"), "utf8"));
+  is(
+    "R16 the real cmem/release.md is plain Markdown",
+    real.length === 0,
+    real.join(" | ") || "yes",
+  );
+}
 
 // ── the bump only ──
 {
@@ -327,7 +374,12 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
   check(
     "V5 the records missing at HEAD",
     verifyReleaseCommit("4.0.0", commitGit({ md: doc("### 4.0.0\n\n**Summary.** none\n") })),
-    /no \*\*Security review:\*\*/,
+    /no \*\*Security review/,
+  );
+  check(
+    "V10 HEAD has NO cmem/release.md → refused (round 4: never reached before)",
+    verifyReleaseCommit("4.0.0", commitGit({ md: null })),
+    /HEAD has no cmem\/release\.md/,
   );
   // Round 3.
   check(
@@ -375,60 +427,64 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
   );
 }
 
-// ── round 3: Markdown-hidden text as CommonMark reads it ──
-check(
-  "R16 an inline `<!--` in prose above the records hides nothing (A4)",
-  reviewsRecorded(
-    `# r\n\nNote: write \`<!--\` to hide.\n\n## Release History\n\n${both("4.0.0")}`,
-    "4.0.0",
-  ),
-  null,
-);
-check(
-  "R17 a `<!--` mid-line (not at a line start) opens no comment",
-  reviewsRecorded(doc(`text <!-- not a comment block\n\n${both("4.0.0")}`), "4.0.0"),
-  null,
-);
-check(
-  "R18 a fence opened inside a list item hides its content",
-  reviewsRecorded(entry("- ```", "", SEC, HARD, "  ```"), "4.0.0"),
-  /no \*\*Security review:\*\*/,
-);
-check(
-  "R19 ```x``` (inline code: a backtick in the info string) is not a fence",
-  reviewsRecorded(entry("```x``` is inline code", SEC, HARD), "4.0.0"),
-  null,
-);
-check(
-  "R18c a list item's fence closes at its closer indented 5 (≤ content column 3 + 3): records count",
-  reviewsRecorded(entry("1. ```\n   x\n     ```", SEC, HARD), "4.0.0"),
-  null,
-);
-check(
-  "R18b a top-level fence is NOT closed by a ``` indented 4 spaces (that is code inside it)",
-  reviewsRecorded(entry("```", "    ```", "", SEC, HARD), "4.0.0"),
-  /no \*\*Security review:\*\*/,
-);
-check(
-  "R20 a record indented 4 spaces is a code block, not a record",
-  reviewsRecorded(entry(`    ${SEC}`, HARD), "4.0.0"),
-  /no \*\*Security review:\*\*/,
-);
-check(
-  "R21 a `<!--` INSIDE a fence opens no comment: the records after the fence count",
-  reviewsRecorded(entry("```", "<!--", "```", SEC, HARD), "4.0.0"),
-  null,
-);
-check(
-  "R22 a one-line comment block hides only its line",
-  reviewsRecorded(entry("<!-- note -->", SEC, HARD), "4.0.0"),
-  null,
-);
-check(
-  "R23 a MULTI-line comment ends at its -->: the records after it count",
-  reviewsRecorded(entry("<!--\nnote\n-->", SEC, HARD), "4.0.0"),
-  null,
-);
+// ── round 4: what the suites had not reached ──
+{
+  const valid = JSON.stringify({ name: "@x/y", version: "3.0.0" }, null, 2) + "\n";
+  const broken = bumpOnly("package.json", valid, "{ broken", "4.0.0");
+  is(
+    "B7 a release file that is not valid JSON after the bump → refused",
+    /package\.json is not valid JSON/.test(broken),
+    broken || "accepted",
+  );
+}
+{
+  // X1: the `--verify-commit` COMMAND, as CI runs it — its exit code is the gate (round 4: a
+  // mutant making it exit 0 on a refusal left every case green). A real git repo in a temp folder.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), "wasmtk-check-release-"));
+  try {
+    const g = (...a: string[]) =>
+      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], {
+        cwd: dir,
+        encoding: "utf8",
+      });
+    const put = (p: string, s: string) => {
+      mkdirSync(dirname(join(dir, p)), { recursive: true });
+      writeFileSync(join(dir, p), s);
+    };
+    const files = (v: string) => {
+      put("deno.json", JSON.stringify({ name: "@x/y", version: v }, null, 2) + "\n");
+      put("package.json", JSON.stringify({ name: "@x/y", version: v }, null, 2) + "\n");
+      put("src/utils.ts", `export const VERSION = "${v}";\n`);
+    };
+    g("init", "-q", "-b", "main");
+    files("3.0.0");
+    put("cmem/release.md", doc(both("4.0.0")));
+    for (const f of ["release.ts", "publish-workflow.ts"]) {
+      cpSync(join(here, f), join(dir, "scripts", f));
+    }
+    g("add", "-A");
+    g("commit", "-q", "-m", "base");
+    files("4.0.0");
+    g("commit", "-q", "-am", "bump to v4.0.0");
+    const run = () =>
+      spawnSync("bun", ["scripts/release.ts", "--verify-commit"], { cwd: dir, encoding: "utf8" });
+    const ok = run();
+    put("README.md", "x\n");
+    g("add", "-A");
+    g("commit", "-q", "-m", "not a bump");
+    const bad = run();
+    is(
+      "X1 `release.ts --verify-commit`: exit 0 on a bump commit, exit 1 with ::error:: on another",
+      ok.status === 0 && bad.status === 1 && /::error::v4\.0\.0: HEAD's subject/.test(bad.stderr),
+      `bump → exit ${ok.status}; non-bump → exit ${bad.status} ${
+        (ok.status === 0 ? bad.stderr : ok.stderr + ok.stdout).trim().split("\n")[0]
+      }`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 {
   const h = '// export const VERSION = "3.0.0";\nexport const VERSION = "3.0.0";\n';
   const commentOnly = bumpOnly(
