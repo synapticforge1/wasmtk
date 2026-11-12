@@ -9,12 +9,16 @@
  * publish the package to the registry". The local `deno task release` pushes `main` only; this
  * file is every CI step after that:
  *
- *   bun scripts/publish-workflow.ts is-release            # U5: HEAD = GITHUB_SHA; is v<version> new?
+ *   bun scripts/publish-workflow.ts is-release            # U5: HEAD = GITHUB_SHA; the tag AND JSR
  *   bun scripts/publish-workflow.ts tag <tag>             # U6: CI creates the annotated tag, reads back
  *   bun scripts/publish-workflow.ts release <tag>         # U7: the Release page FROM the tag
- *   bun scripts/publish-workflow.ts oidc-check            # U8 diagnostic: OIDC env present?
- *   bun scripts/publish-workflow.ts jsr-has <version>     # U8: present=true|false (a re-run skips)
+ *   deno run … publish-workflow.ts oidc-check             # U8 diagnostic: OIDC env present?
+ *   deno run … publish-workflow.ts jsr-has <version>      # U8: present=true|false (a re-run skips)
  *   bun scripts/publish-workflow.ts provenance <version>  # U8 read-back, fatal: JSR's Rekor entry
+ *
+ * The two `deno run` lines run in the `jsr` job, beside its OIDC token, so nothing but Deno and
+ * this first-party file is installed or run there (review round 1, finding E); they take only the
+ * permissions publish.yml grants them.
  *
  * `tag` and `release` follow H32's discipline: nothing is written before the state on GitHub is
  * read, an existing result is done (re-runs write nothing — U12), a tag is never moved, and every
@@ -45,11 +49,17 @@ export function jsrVersionUrl(pkg: string, version: string): string {
   return `https://api.jsr.io/scopes/${scope}/packages/${name}/versions/${version}`;
 }
 
-/** JSR's version record → its Rekor log id, or "" while (or when) there is none. */
+/**
+ * JSR's version record → its Rekor log id, or "" while (or when) there is none. Only a non-empty
+ * string of digits or a positive integer counts: `null`, `0`, `false`, "" or "null" are absence
+ * (review round 1: `0` / `false` had counted as present).
+ */
 export function jsrRekor(body: string): string {
   try {
-    const id = (JSON.parse(body) as { rekorLogId?: string | number | null }).rekorLogId;
-    return id === null || id === undefined ? "" : String(id);
+    const id = (JSON.parse(body) as { rekorLogId?: unknown }).rekorLogId;
+    if (typeof id === "string" && /^\d+$/.test(id.trim())) return id.trim();
+    if (typeof id === "number" && Number.isInteger(id) && id > 0) return String(id);
+    return "";
   } catch {
     return "";
   }
@@ -67,23 +77,50 @@ function writeOutput(...lines: string[]): number {
 
 // ── U5: is this a release? ───────────────────────────────────────────────────────────────────
 
+/** A git call's result: `out` is STDOUT only (the only thing parsed), `err` its stderr. */
+export type Git = (args: string[]) => { code: number; out: string; err: string };
+
 /**
- * The checked-out commit must be the run's (`GITHUB_SHA`), and a release is a manifest version
- * whose tag does not exist on origin yet. Returns the outputs to write, or throws.
+ * The checked-out commit must be the run's (`GITHUB_SHA`). Then BOTH places that say "released"
+ * are read — the tag on origin (an exact `refs/tags/v<version>` line of `ls-remote`'s stdout) and
+ * JSR — and must agree:
+ *   tag absent, JSR without it → a release;   tag present, JSR has it → not a release (checks only);
+ *   tag present, JSR WITHOUT it → STRANDED: a release run tagged and then failed — refused loudly
+ *     on every push until it is finished ("Re-run failed jobs" on that run, U12);
+ *   tag absent, JSR HAS it → published outside this flow — refused (CI would otherwise tag and
+ *     page this commit and pass provenance on the old record).
+ * Review round 1, 2026-11-12 (findings C and D): the tag alone decided, so a stranded release went
+ * green forever, and a git warning on stderr read as "tag present".
  */
-export function isRelease(
+export async function isRelease(
   sha: string,
   version: string,
-  git: (args: string[]) => { code: number; out: string },
-): { release: boolean; version: string; tag: string } {
+  git: Git,
+  jsr: (version: string) => Promise<"true" | "false">,
+): Promise<{ release: boolean; version: string; tag: string }> {
   const head = git(["rev-parse", "HEAD"]);
   if (head.code !== 0 || head.out.trim() !== sha) {
     throw new Error(`HEAD is ${head.out.trim() || "unknown"}, not this run's commit ${sha}`);
   }
   const tag = `v${version}`;
-  const remote = git(["ls-remote", "--tags", "origin", `refs/tags/${tag}`]);
-  if (remote.code !== 0) throw new Error(`could not read origin's tags: ${remote.out.trim()}`);
-  return { release: remote.out.trim() === "", version, tag };
+  const ref = `refs/tags/${tag}`;
+  const remote = git(["ls-remote", "--tags", "origin", ref]);
+  if (remote.code !== 0) {
+    throw new Error(`could not read origin's tags: ${(remote.err + remote.out).trim()}`);
+  }
+  const tagged = remote.out.split("\n").some((l) => l.trim().split(/\s+/)[1] === ref);
+  const published = (await jsr(version)) === "true";
+  if (tagged && !published) {
+    throw new Error(
+      `STRANDED RELEASE: ${tag} is on origin but JSR does not serve ${version}. The release run that made the tag did not finish: open it and "Re-run failed jobs" (never a new tag, never "Re-run all jobs").`,
+    );
+  }
+  if (!tagged && published) {
+    throw new Error(
+      `JSR already serves ${version} but ${tag} is not on origin: it was published outside this flow. Bump to the next version; never tag a commit for a version JSR already has.`,
+    );
+  }
+  return { release: !tagged, version, tag };
 }
 
 // ── U6 / U7: the GitHub side, through the REST API ──────────────────────────────────────────────
@@ -275,6 +312,12 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
   const waitS = Number(process.env.PROVENANCE_WAIT_S ?? 15);
   const runId = process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`;
   console.log(`Checking ${url}`);
+  // Three different failures, named apart (review round 1, finding C): JSR served the record but
+  // with no Rekor id (published WITHOUT provenance); JSR answered 404 every time (the publish never
+  // happened); JSR never answered usably (an error status or no answer — nothing is known).
+  let seen = false; // a 200 at least once
+  let all404 = true; // every read was a 404
+  let last = "";
   // JSR ingests asynchronously, so poll rather than reading once.
   for (let i = 1; i <= tries; i++) {
     // The JSR version endpoint is CACHED, and attestation is written a few seconds AFTER publish,
@@ -287,9 +330,16 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
       const res = await call(f, `${url}?cb=${runId}-${i}`, {
         headers: { Accept: "application/json", "Cache-Control": "no-cache" },
       });
-      if (res.ok) body = await res.text();
-    } catch {
+      last = `HTTP ${res.status}`;
+      if (res.status !== 404) all404 = false;
+      if (res.ok) {
+        seen = true;
+        body = await res.text();
+      }
+    } catch (e) {
       // A network error or timeout is one more failed attempt, as `curl -sf … || true` was.
+      all404 = false;
+      last = `no answer (${(e as Error).message})`;
     }
     const rekor = jsrRekor(body);
     if (rekor) {
@@ -298,6 +348,18 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
     }
     console.log(`  attempt ${i}: no provenance yet, retrying in ${waitS}s`);
     await sleep(waitS);
+  }
+  if (!seen && all404) {
+    console.log(
+      `::error::${pkg}@${version} is NOT ON JSR at all (404 on every read): the publish did not happen — read the jsr job's \`deno publish\` step. This is not a provenance outage.`,
+    );
+    return 1;
+  }
+  if (!seen) {
+    console.log(
+      `::error::JSR could not be read for ${pkg}@${version} (last: ${last}): neither provenance nor its absence is known. Re-run this job; it is not evidence of a provenance outage.`,
+    );
+    return 1;
   }
   console.log(
     `::error::${pkg}@${version} was published WITHOUT provenance (no Sigstore/Rekor entry). The last outage (v1.11.3 to v2.0.0, 2026-07-08 to 07-30) was SCOPE-WIDE, outside this repo: every @jrmarcum publish in that window lacked provenance (measured 2026-10-23, cmem/design-decisions.md). Check other packages' recent publishes before looking for a cause here; the OIDC step above only proves the token prerequisite.`,
@@ -328,14 +390,14 @@ if (import.meta.main) {
         process.exit(2);
       }
       try {
-        const r = isRelease(e.GITHUB_SHA, denoJson.version, (args) => {
+        const r = await isRelease(e.GITHUB_SHA, denoJson.version, (args) => {
           const o = spawnSync("git", args, { encoding: "utf8" });
-          return { code: o.status ?? 1, out: (o.stdout ?? "") + (o.stderr ?? "") };
-        });
+          return { code: o.status ?? 1, out: o.stdout ?? "", err: o.stderr ?? "" };
+        }, jsrHas);
         console.log(
           r.release
-            ? `${r.tag} is not on origin: this push is the release of ${r.version}`
-            : `${r.tag} already exists: not a release (checks only)`,
+            ? `${r.tag} is not on origin and JSR does not serve it: this push is the release of ${r.version}`
+            : `${r.tag} exists and JSR serves it: not a release (checks only)`,
         );
         process.exit(writeOutput(`release=${r.release}`, `version=${r.version}`, `tag=${r.tag}`));
       } catch (err) {

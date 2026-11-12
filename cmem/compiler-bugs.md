@@ -350,6 +350,49 @@ same day, after the first tally's 2 were fixed, and that 0 carried the warning b
 audit then CONFIRMED 28 more by running them (table below). The count is only as good as the
 entries: a silent-wrong bug nobody has found is not in it.
 
+## Review round 1 — the release tooling (2026-11-12): 5 silent + 3 loud tool rows, CONFIRMED BY RUNNING, FIXED
+
+Owner: "review", then "A-E" (cmem/review-process.md; workspace review standard, H35). Scope: the
+release / dev tooling since 2026-11-05 (`ce8af1ef..f33a4cfe`: `scripts/release.ts`,
+`scripts/publish-workflow.ts`, `scripts/api-surface.ts --verify-release`, `publish.yml`, the two
+self-tests). Three fresh read-only reviewers: A the local release half, B the CI half, C the
+self-tests. Every finding re-run against the real code before any change (scratch probe), fixed as
+its class, each part with a test that fails without it: `check_release.ts` 20 cases,
+`check_publish_workflow.ts` 24 cases, 17 mutants each caught by its own case (one test, R10b, was
+itself vacuous and was rewritten until its mutant died), plus an end-to-end rehearsal against a
+scratch bare origin (a negated record and a ride-along edit refused with nothing pushed; a clean
+bump released, no tag).
+
+| row | class | the defect (measured) | fix |
+| --- | --- | --- | --- |
+| **sw194** | A — the review gate | `deno task release` accepted "**Security review:** … NOT yet ended by an empty round", a "**Security review pending**" label, and an entry under a section other than § Release History (it matched the bare words "empty round" anywhere) — a release without its required reviews (H35) | `endedByEmptyRound`: the recorded form "ended by an empty round (round n", in a clause with no negating / deferring word; the exact `**Security review:**` label; only § Release History; HTML comments and fenced code ignored |
+| **sw195** | B — the bump only | any edit inside `deno.json` / `package.json` / `src/utils.ts`, and a rename onto one, rode along in the `bump to` commit (import pins, `publish.include`, shipped code) | `bumpOnly`: the JSON manifests equal but for `version`, `src/utils.ts` equal but for its `VERSION` line; `releaseBlockers` passes only a plain modification (`" M"`, `"M "`, `"MM"`) |
+| **sw196** | C — the release state | a release run that tagged and then failed left a tag without a JSR version, and every later push called it "not a release" and went GREEN — nothing ever reported it | `is-release` reads BOTH the tag and JSR: tag without the version = **STRANDED RELEASE**, refused by name on every push until finished |
+| **sw197** | C — the release state | JSR already serving the version with no tag → CI would tag and page this commit and pass provenance on the OLD record | refused by name ("published outside this flow") |
+| **sw198** | D — git's stderr | `is-release` joined git's stderr to stdout: one `ls-remote` warning line made a real release a green "not a release" run | stdout only, the EXACT `refs/tags/v<version>` line |
+| ld119 | A | a `####` subheading inside an entry ended it, refusing a correct record | the entry ends at `##` / `###` only |
+| ld120 | D | locally the same stderr join: a git warning read as "the tag exists on origin", or as a path left out of the release; `--version` matched by substring (`v3.0.1` in `v3.0.10`) | `capture` keeps stderr apart (shown, never parsed); `lsRemoteHas`; the version matched as a whole word |
+| ld121 | C | a version never published (404 throughout) was reported as a "SCOPE-WIDE provenance outage"; `rekorLogId` `0` / `false` counted as an id | three outcomes named apart: no provenance / NOT ON JSR / JSR unreadable; only a digit string or a positive integer is an id |
+
+**Hardening, fixed (E):** the pinned `setup-bun` takes the job's `GITHUB_TOKEN` by default (its
+`action.yml`, read) — the tag and release jobs hold a WRITE token: every `setup-bun` now gets
+`token: ""`. The `jsr` job (`id-token: write`) installs nothing but Deno: `jsr-has` and `oidc-check`
+run this repo's own script under `deno run --no-config` with named permissions only; the fatal
+provenance read-back moved to a new token-less `verify` job. **Test gaps, fixed with them (G):** the
+provenance read-back had no test (P1–P5 now); the timeout case now measures (≈200 ms against
+`HTTP_TIMEOUT_MS`) and every case has its own deadline; the fake git answers only the exact ref it
+is asked; refusals are matched by message, so a crash cannot pass as one; the mock answers 422 for an
+existing ref, as GitHub does.
+
+**Found and NOT fixed (owner chose A–E):** **F** — GitHub cancels a PENDING run when a newer one
+queues in the same concurrency group, so a push right after `deno task release` can cancel the bump
+commit's run and the release then lands on the later commit (documented GitHub behaviour, not run);
+**H** — the "bump already committed" branch of `release.ts` cannot work as described; the cold-check
+temp folder leaks when a cold check fails (`refuse` exits inside `try`; two leaked here); `releaseStep`
+accepts `3.0.01` / `3.0.1e0`; a draft release is invisible to the existing-page check; `POST
+/releases` marks every page "Latest"; Deno `v2.x` unpinned between the dry run and the publish; a
+tag-ref race fails instead of re-reading. Next: round 2 on these fixes, briefed fresh.
+
 ## H12 Phase 0b, audit round 1 (2026-09-28): 28 silent-wrong + 8 loud, CONFIRMED BY RUNNING
 
 **Class:** SILENT-WRONG (29, incl. sw29 from the owner's ruling) / LOUD (8) · **Status:** OPEN · **Scope:** compiler

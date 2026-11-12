@@ -336,9 +336,11 @@ commands".
    `main`, equal to `origin/main`; the tag absent locally and on origin; JSR without the version;
    COLD `deno check main.ts` and `deno publish --dry-run` in an empty `DENO_DIR`; `main.ts
    --version` names the version and `--help` exits 0; (since 2026-11-12, H35) the version's entry
-   in release.md records the security and the hardening review, each ended by an empty round
-   (`bun scripts/check_release.ts`, 7 cases, 3 mutants; rehearsed: no entry / one review →
-   refused, nothing pushed; both → released). Then it commits `bump to vX.Y.Z`, pushes
+   in release.md records the security and the hardening review, each ended by an empty round —
+   affirmatively, in § Release History, labelled exactly; and (since review round 1, 2026-11-12)
+   the three release files change NOTHING but their version line, and git's stderr is never
+   parsed (`bun scripts/check_release.ts`, 20 cases; rehearsed: a negated record, a ride-along
+   edit → refused, nothing pushed; a clean bump → released). Then it commits `bump to vX.Y.Z`, pushes
    `main` as a user and reads it back with `git ls-remote` — **and makes no tag.** Rehearsed
    2026-11-10 in a scratch clone against a scratch bare origin (11 cases: each guard refused with
    nothing pushed; the real run pushed `main` = the `bump to` commit with its three files and NO
@@ -350,21 +352,25 @@ commands".
 
    | slot | job | token | what it runs |
    | --- | --- | --- | --- |
-   | U5 | `checks` | `contents: read` | `is-release` (HEAD = `github.sha`; `v<version>` not on origin); for a release `api-surface.ts --verify-release` (the floor on the untagged candidate); `deno check main.ts`; `deno publish --dry-run` on exactly the jsr job's sparse tree |
+   | U5 | `checks` | `contents: read` | `is-release` (HEAD = `github.sha`; the tag on origin AND JSR must agree — a tag without the JSR version is a STRANDED release, refused on every push until finished; JSR without the tag is refused); for a release `api-surface.ts --verify-release` (the floor on the untagged candidate); `deno check main.ts`; `deno publish --dry-run` on exactly the jsr job's sparse tree |
    | U6 | `tag` | `contents: write` | CI creates the ANNOTATED tag on `github.sha` (REST API; already there at this commit = done, elsewhere = refused — a tag never moves), reads it back |
    | U7 | `release` | `contents: write` | the page FROM the tag: it peels to the run's commit → an existing page = done → `POST` on the tag with the JSR link → read back; never `gh` |
-   | U8 | `jsr` | `id-token` | LAST: sparse checkout of `publish.include` + `deno.lock` + the workflow script, nothing installed; `jsr-has` (skip if JSR has it); OIDC check; `deno publish` DIRECTLY; the Rekor id read back, FATAL |
+   | U8 | `jsr` | `id-token` | LAST: sparse checkout of `publish.include` + `deno.lock` + the workflow script; NOTHING but Deno beside the OIDC token (`jsr-has`, `oidc-check` under `deno run --no-config` with named permissions); `deno publish` DIRECTLY |
+   | U8 | `verify` | `contents: read` | the Rekor id read back, FATAL — named apart: no provenance / NOT ON JSR / JSR unreadable; runs whatever `jsr` did |
+
+   Every `setup-bun` has `token: ""` (the action otherwise takes the job's token — review round 1).
 
    A bot-made tag in the same run DOES publish to JSR with provenance — measured on binaryang
    3.0.3 / 3.0.4 (2026-11-11; re-read by wasmtk 2026-11-12: annotated tags by
    `github-actions[bot]`, JSR Rekor 3814264552 / 3815373888); wasmtk's own tag → page → publish
    half is still unmeasured until its first release in this order. Tests do not run in `checks` yet (Deno-exit P7). If publish-workflow.ts changed:
-   `bun scripts/check_publish_workflow.ts` (16 cases on a mock GitHub / JSR / git) and REHEARSE the
+   `bun scripts/check_publish_workflow.ts` (24 cases on a mock GitHub / JSR / git) and REHEARSE the
    changed job as the runner lays it out (best-practices 7.22): a release-job bug costs a version.
 8. **U12 Failure: "Re-run failed jobs"** — `checks`' outputs are kept; the tag, the page and the
-   upload each skip what is done. Never "Re-run all jobs" (a fresh `checks` would see the tag the
-   first attempt made and call the commit not a release), never a new tag for the same code, never
-   a moved tag.
+   upload each skip what is done. Never "Re-run all jobs": a fresh `checks` meets the tag the
+   first attempt made without the JSR version and FAILS as a STRANDED release (since review round
+   1 — before it, it went green and nothing reported the missing version). Never a new tag for the
+   same code, never a moved tag.
 9. **U10 Read back as a user:** the Rekor id (`bun scripts/publish-workflow.ts provenance <tag>`);
    `deno run -A --minimum-dependency-age=0 jsr:@jrmarcum/wasmtk@X.Y.Z --version` in a scratch
    folder; the page (`GET https://api.github.com/repos/synapticforge1/wasmtk/releases/tags/<tag>`

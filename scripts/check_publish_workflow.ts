@@ -5,12 +5,17 @@
  * Re-run it whenever publish-workflow.ts changes; the real API is exercised only by a real release.
  *
  * The version tag IS the release (owner, 2026-11-10): the page is made ON the tag, and no branch
- * is ever written. The mock refuses a page that names a `target_commitish`, and records every
- * write, so a stray write turns a case red.
+ * is ever written. The mock refuses a page that names a `target_commitish`, answers 422 for a ref
+ * that already exists (as GitHub does), and records every write, so a stray write turns a case red.
+ * Every refusal is checked by its MESSAGE (a crash, also exit 1, cannot pass as one), and every case
+ * has a deadline (a hang fails, it does not stall the suite) — review round 1, 2026-11-12.
  *
- *   U5 is-release
- *     S1  the tag is not on origin → release; S2 it is → not a release;
- *     S3  HEAD is not GITHUB_SHA → refused
+ *   U5 is-release (a fake git that answers only the exact ref it is asked for; stderr kept apart)
+ *     S1  no tag, JSR without it → release        S2  tag + JSR → not a release
+ *     S3  HEAD is not GITHUB_SHA → refused         S4  a git WARNING on stderr is not a tag
+ *     S5  only a different tag (v9.8.70) → release
+ *     S6  tag without the JSR version → STRANDED, refused
+ *     S7  JSR has it, no tag → refused (published outside the flow)
  *   U6 tag
  *     T1  absent → an annotated tag object + its ref (2 writes), read back peels to the commit
  *     T2  a re-run: already at this commit → 0 writes
@@ -22,16 +27,25 @@
  *     C   lightweight tag: peels without a tag object
  *     D   tag missing on GitHub: refused, 0 writes (POST /releases would CREATE the tag)
  *     E   tag peels to another commit: refused, 0 writes
- *     G   a leftover `release/<tag>` branch elsewhere (the old flow's): ignored, page on the tag
  *     H   page POST "succeeds" but cannot be read back: refused
- *     I   a call that never answers: times out, refused (HTTP_TIMEOUT_MS)
+ *     I   a call that never answers: ends at HTTP_TIMEOUT_MS (measured), refused, no write
  *   U8 jsr-has
  *     K   200 → "true", 404 → "false", 500 → an error (never "absent", which would re-attempt an
  *         immutable upload)
+ *   U8 provenance (the read-back the file calls "the only evidence")
+ *     P1  a Rekor id → pass    P2 null → WITHOUT provenance    P3 0 is absence, not an id
+ *     P4  404 throughout → NOT ON JSR (named apart)    P5 500 throughout → JSR could not be read
  *
  * Usage (from the repo root):  bun scripts/check_publish_workflow.ts
  */
-import { createTag, type GitHubEnv, isRelease, jsrHas, release } from "./publish-workflow.ts";
+import {
+  createTag,
+  type GitHubEnv,
+  isRelease,
+  jsrHas,
+  provenance,
+  release,
+} from "./publish-workflow.ts";
 
 const SHA = "a".repeat(40);
 const OTHER = "b".repeat(40);
@@ -93,7 +107,9 @@ function mockFetch(w: World) {
       const body = JSON.parse(String(init.body));
       w.writes.push(`ref ${body.ref}`);
       if (body.ref.startsWith("refs/tags/")) {
-        if (!w.dropTagRefOnPost) w.tags[body.ref.slice(10)] = { type: "tag", sha: body.sha };
+        const name = body.ref.slice(10);
+        if (w.tags[name]) return res(422, { message: "Reference already exists" });
+        if (!w.dropTagRefOnPost) w.tags[name] = { type: "tag", sha: body.sha };
       } else {
         w.branches[body.ref.replace("refs/heads/", "")] = body.sha;
       }
@@ -133,29 +149,58 @@ const report = (name: string, ok: boolean, got: string, detail = "") => {
   console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${got}${ok || !detail ? "" : `\n     ${detail}`}`);
 };
 
+/** Captures what `fn` prints; a case that runs longer than `deadlineMs` FAILS instead of hanging. */
+async function quiet<T>(
+  fn: () => Promise<T>,
+  deadlineMs = 10_000,
+): Promise<{ v: T; lines: string[]; ms: number }> {
+  const log = console.log;
+  const lines: string[] = [];
+  console.log = (...a: unknown[]) => lines.push(a.join(" "));
+  const t0 = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const v = await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`case exceeded its ${deadlineMs} ms deadline`)),
+          deadlineMs,
+        );
+      }),
+    ]);
+    return { v, lines, ms: Date.now() - t0 };
+  } finally {
+    clearTimeout(timer);
+    console.log = log;
+  }
+}
+
 async function check(
   name: string,
   run: (f: ReturnType<typeof mockFetch>) => Promise<number>,
   w: World,
-  want: { code: number; writes: string[]; page?: boolean; tagAt?: string },
+  want: { code: number; writes: string[]; page?: boolean; tagAt?: string; msg?: RegExp },
 ) {
-  const log = console.log;
-  const lines: string[] = [];
-  console.log = (...a: unknown[]) => lines.push(a.join(" "));
-  let code: number;
+  let code = -1;
+  let lines: string[] = [];
   try {
-    code = await run(mockFetch(w));
-  } finally {
-    console.log = log;
+    ({ v: code, lines } = await quiet(() => run(mockFetch(w))));
+  } catch (e) {
+    lines = [`THREW: ${(e as Error).message}`];
   }
   const page = TAG in w.releases;
   const tagObj = w.tags[TAG];
   const tagAt = tagObj
     ? (tagObj.type === "tag" ? w.tagObjects[tagObj.sha]?.sha ?? "?" : tagObj.sha)
     : "";
+  // A refusal must be the RIGHT refusal: its message is matched, so a crash (also exit 1) or the
+  // mock's 599 for an unexpected call cannot pass as one (review round 1, finding G).
+  const said = lines.join("\n");
   const ok = code === want.code && JSON.stringify(w.writes) === JSON.stringify(want.writes) &&
     (want.page === undefined || page === want.page) &&
-    (want.tagAt === undefined || tagAt === want.tagAt);
+    (want.tagAt === undefined || tagAt === want.tagAt) &&
+    (want.msg === undefined || want.msg.test(said)) && !/HTTP 599|network:/.test(said);
   report(
     name,
     ok,
@@ -164,35 +209,69 @@ async function check(
   );
 }
 
-// ── U5 is-release, with a fake git ──
-const fakeGit = (head: string, remoteHasTag: boolean) => (args: string[]) => {
-  if (args[0] === "rev-parse") return { code: 0, out: `${head}\n` };
+// ── U5 is-release: a fake git that ANSWERS ITS ARGUMENTS (only the exact ref it is asked for),
+//    keeps stderr apart, and a mock JSR ──
+const fakeGit = (head: string, remoteTags: string[], stderr = "") => (args: string[]) => {
+  if (args[0] === "rev-parse") return { code: 0, out: `${head}\n`, err: stderr };
   if (args[0] === "ls-remote") {
-    return { code: 0, out: remoteHasTag ? `${SHA}\trefs/tags/v9.8.7\n` : "" };
+    const asked = args[args.length - 1];
+    const lines = remoteTags.filter((t) => `refs/tags/${t}` === asked)
+      .map((t) => `${SHA}\trefs/tags/${t}`);
+    return { code: 0, out: lines.length ? lines.join("\n") + "\n" : "", err: stderr };
   }
-  return { code: 1, out: "fake git: unexpected" };
+  return { code: 1, out: "", err: "fake git: unexpected" };
 };
-{
-  const r1 = isRelease(SHA, "9.8.7", fakeGit(SHA, false));
-  report(
-    "S1 tag not on origin → release",
-    r1.release === true && r1.tag === TAG,
-    JSON.stringify(r1),
-  );
-  const r2 = isRelease(SHA, "9.8.7", fakeGit(SHA, true));
-  report("S2 tag on origin → not a release", r2.release === false, JSON.stringify(r2));
-  let threw = "";
+const jsrSays = (has: boolean) => () => Promise.resolve(has ? "true" as const : "false" as const);
+async function decide(
+  name: string,
+  git: ReturnType<typeof fakeGit>,
+  jsrHasIt: boolean,
+  want: boolean | RegExp,
+) {
+  let got = "";
+  let ok = false;
   try {
-    isRelease(SHA, "9.8.7", fakeGit(OTHER, false));
+    const r = await isRelease(SHA, "9.8.7", git, jsrSays(jsrHasIt));
+    got = JSON.stringify(r);
+    ok = typeof want === "boolean" && r.release === want && r.tag === TAG;
   } catch (e) {
-    threw = (e as Error).message;
+    got = `refused: ${(e as Error).message}`;
+    ok = want instanceof RegExp && want.test(got);
   }
-  report(
-    "S3 HEAD is not GITHUB_SHA → refused",
-    /not this run's commit/.test(threw),
-    threw || "no error",
-  );
+  report(name, ok, got);
 }
+await decide("S1 no tag, JSR without it → release", fakeGit(SHA, []), false, true);
+await decide("S2 tag on origin, JSR has it → not a release", fakeGit(SHA, ["v9.8.7"]), true, false);
+await decide(
+  "S3 HEAD is not GITHUB_SHA → refused",
+  fakeGit(OTHER, []),
+  false,
+  /not this run's commit/,
+);
+await decide(
+  "S4 a git warning on stderr is NOT a tag",
+  fakeGit(SHA, [], "warning: redirecting to https://example.test/r.git/\n"),
+  false,
+  true,
+);
+await decide(
+  "S5 only a DIFFERENT tag on origin (v9.8.70) → release",
+  fakeGit(SHA, ["v9.8.70"]),
+  false,
+  true,
+);
+await decide(
+  "S6 tag on origin, JSR WITHOUT it → stranded, refused",
+  fakeGit(SHA, ["v9.8.7"]),
+  false,
+  /STRANDED RELEASE/,
+);
+await decide(
+  "S7 JSR has it, no tag → refused",
+  fakeGit(SHA, []),
+  true,
+  /published outside this flow/,
+);
 
 // ── U6 tag ──
 const tagWrites = [`tag object ${TAG}`, `ref refs/tags/${TAG}`];
@@ -200,47 +279,55 @@ await check(
   "T1 tag absent → created, read back",
   (f) => createTag(TAG, env, f),
   world({ tags: {} }),
-  {
-    code: 0,
-    writes: tagWrites,
-    tagAt: SHA,
-  },
+  { code: 0, writes: tagWrites, tagAt: SHA, msg: /tag v9\.8\.7 created/ },
 );
 await check("T2 re-run, tag at this commit", (f) => createTag(TAG, env, f), world(), {
   code: 0,
   writes: [],
   tagAt: SHA,
+  msg: /already at/,
 });
 await check(
   "T3 tag at another commit → refused",
   (f) => createTag(TAG, env, f),
   world({ tags: { [TAG]: { type: "commit", sha: OTHER } } }),
-  { code: 1, writes: [], tagAt: OTHER },
+  { code: 1, writes: [], tagAt: OTHER, msg: /a tag never moves/ },
 );
 await check(
   "T4 created but not readable back → refused",
   (f) => createTag(TAG, env, f),
   world({ tags: {}, dropTagRefOnPost: true }),
-  { code: 1, writes: tagWrites },
+  { code: 1, writes: tagWrites, msg: /read back: tag v9\.8\.7 peels to nothing/ },
 );
 
 // ── U7 release ──
 const rel = (f: ReturnType<typeof mockFetch>) => release(TAG, env, f);
 const page = [`release ${TAG}`];
-await check("A fresh annotated tag", rel, world(), { code: 0, writes: page, page: true });
+await check("A fresh annotated tag", rel, world(), {
+  code: 0,
+  writes: page,
+  page: true,
+  msg: /created by/,
+});
 await check(
   "B re-run, page there",
   rel,
   world({
     releases: { [TAG]: { tag_name: TAG, html_url: "x", author: { login: "github-actions[bot]" } } },
   }),
-  { code: 0, writes: [] },
+  { code: 0, writes: [], msg: /already exists/ },
 );
 await check("C lightweight tag", rel, world({ tags: { [TAG]: { type: "commit", sha: SHA } } }), {
   code: 0,
   writes: page,
+  msg: /created by/,
 });
-await check("D tag missing", rel, world({ tags: {} }), { code: 1, writes: [], page: false });
+await check("D tag missing", rel, world({ tags: {} }), {
+  code: 1,
+  writes: [],
+  page: false,
+  msg: /does not exist on GitHub/,
+});
 await check(
   "E tag peels elsewhere",
   rel,
@@ -249,22 +336,38 @@ await check(
     code: 1,
     writes: [],
     page: false,
+    msg: /peels to b{40}, not this run's commit/,
   },
-);
-await check(
-  "G leftover release branch elsewhere is ignored",
-  rel,
-  world({ branches: { [`release/${TAG}`]: OTHER } }),
-  { code: 0, writes: page, page: true },
 );
 await check("H page not readable back", rel, world({ dropReleaseOnPost: true }), {
   code: 1,
   writes: page,
   page: false,
+  msg: /read back v9\.8\.7: HTTP 404/,
 });
-process.env.HTTP_TIMEOUT_MS = "200";
-await check("I a call that never answers", rel, world({ hang: true }), { code: 1, writes: [] });
-delete process.env.HTTP_TIMEOUT_MS;
+{
+  // I: the PER-REQUEST limit is what ends a hung call — measured: it must end near
+  // HTTP_TIMEOUT_MS (200 ms), long before the 30 s default, and never hang the suite.
+  process.env.HTTP_TIMEOUT_MS = "200";
+  const w = world({ hang: true });
+  let code = -1;
+  let ms = 0;
+  let said = "";
+  try {
+    const r = await quiet(() => rel(mockFetch(w)), 5_000);
+    code = r.v;
+    ms = r.ms;
+    said = r.lines.join(" ");
+  } catch (e) {
+    said = (e as Error).message;
+  }
+  delete process.env.HTTP_TIMEOUT_MS;
+  report(
+    "I a call that never answers times out at HTTP_TIMEOUT_MS",
+    code === 1 && ms < 2_000 && /network:/.test(said) && w.writes.length === 0,
+    `exit ${code} after ${ms} ms: ${said.slice(0, 120)}`,
+  );
+}
 
 // ── U8 jsr-has ──
 {
@@ -278,6 +381,48 @@ delete process.env.HTTP_TIMEOUT_MS;
     }
   }
   report("K jsr-has 200 / 404 / 500", got.join(",") === "true,false,error", got.join(", "));
+}
+
+// ── U8 the provenance read-back (the step the file calls "the only evidence") ──
+{
+  process.env.PROVENANCE_TRIES = "2";
+  process.env.PROVENANCE_WAIT_S = "0";
+  const answers = (status: number, body: unknown) => () =>
+    Promise.resolve(new Response(JSON.stringify(body), { status }));
+  const runs: [string, ReturnType<typeof answers>, number, RegExp][] = [
+    [
+      "P1 a Rekor id → pass",
+      answers(200, { rekorLogId: "3439121339" }),
+      0,
+      /Provenance recorded — Rekor log ID: 3439121339/,
+    ],
+    [
+      "P2 rekorLogId null → published WITHOUT provenance",
+      answers(200, { rekorLogId: null }),
+      1,
+      /WITHOUT provenance/,
+    ],
+    [
+      "P3 rekorLogId 0 is absence, not an id",
+      answers(200, { rekorLogId: 0 }),
+      1,
+      /WITHOUT provenance/,
+    ],
+    [
+      "P4 404 throughout → NOT ON JSR (not a provenance outage)",
+      answers(404, {}),
+      1,
+      /NOT ON JSR at all/,
+    ],
+    ["P5 500 throughout → JSR could not be read", answers(500, {}), 1, /could not be read/],
+  ];
+  for (const [name, f, wantCode, wantMsg] of runs) {
+    const r = await quiet(() => provenance("9.8.7", f));
+    const said = r.lines.join(" ");
+    report(name, r.v === wantCode && wantMsg.test(said), `exit ${r.v}: ${said.slice(-110)}`);
+  }
+  delete process.env.PROVENANCE_TRIES;
+  delete process.env.PROVENANCE_WAIT_S;
 }
 
 console.log(failed ? `\n${failed} of ${cases} case(s) FAILED` : `\nall ${cases} cases pass`);
