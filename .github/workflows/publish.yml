@@ -5,23 +5,33 @@
 # The local `deno task release` (scripts/release.ts, U4) pushes `main` with the `bump to vX.Y.Z`
 # commit and NO tag. Every push to `main` runs this workflow:
 #
-#   checks   contents: read    U5: HEAD = github.sha; "is this a release?" (v<deno.json version>
-#                              not on origin); for a release, the surface floor on the untagged
-#                              candidate (api-surface.ts --verify-release); the type check; the
-#                              publish dry run on exactly the tree the jsr job publishes
+#   checks   contents: read    U5: HEAD = github.sha; "is this a release?" — the tag on origin AND
+#                              JSR must agree (absent / absent = a release; present / present = not;
+#                              a tag without the JSR version = a STRANDED release, refused on every
+#                              push until finished; JSR without the tag = refused); for a release,
+#                              the surface floor on the untagged candidate (api-surface.ts
+#                              --verify-release); the type check; the publish dry run on exactly
+#                              the tree the jsr job publishes
 #   tag      contents: write   U6: CI creates the annotated tag on github.sha (an existing one at
 #                              this commit = done; elsewhere = refused, a tag never moves), reads back
 #   release  contents: write   U7: the GitHub Release page FROM the tag — REST API, never `gh`; an
 #                              existing page = done; read back
-#   jsr      id-token: write   U8, LAST: the published files only, nothing installed; skips if JSR
-#                              already has the version; `deno publish` DIRECTLY; the Rekor id read
-#                              back, FATAL
+#   jsr      id-token: write   U8, LAST: the published files only; NOTHING but Deno and this repo's
+#                              own script beside the OIDC token (no Bun, no other action than
+#                              checkout / setup-deno); skips if JSR already has the version;
+#                              `deno publish` DIRECTLY
+#   verify   contents: read    U8's read-back, FATAL, without the OIDC token: JSR's Rekor id (a 404
+#                              throughout = the publish never happened, said so by name)
+#
+# Every `setup-bun` gets `token: ""`: the action otherwise takes the job's GITHUB_TOKEN (its
+# default, read in its pinned action.yml — review round 1, 2026-11-12, finding E), and the tag and
+# release jobs hold a WRITE token. Bun's version is pinned, so the action needs no API lookup.
 #
 # A push that is not a release runs `checks` only. A failure: "Re-run failed jobs" — `checks`'
 # outputs are kept, the tag, the page and the upload each skip what is already done (U12); never a
-# new tag for the same code, never a moved tag, never "Re-run all jobs" (a fresh `checks` would see
-# the tag made by the first attempt and call it not a release). The version tag IS the release
-# (owner, 2026-11-10): no `release/<tag>` branch.
+# new tag for the same code, never a moved tag. "Re-run all jobs" (or any later push) instead meets
+# the tag without the JSR version and FAILS as a stranded release, by name — it is never green.
+# The version tag IS the release (owner, 2026-11-10): no `release/<tag>` branch.
 #
 # A tag made by github-actions[bot] in the same run DOES publish to JSR with provenance: measured
 # on binaryang's 3.0.3 and 3.0.4 (2026-11-11, released in this order; re-read by wasmtk 2026-11-12:
@@ -75,6 +85,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
+          token: "" # never the job's GITHUB_TOKEN (the action's default)
 
       # Deno for `deno doc` (the surface JSR sees), the type check and `deno publish` only.
       # DO NOT pin the Deno version to chase JSR provenance: tried 2026-07-30 and RULED OUT (the
@@ -84,7 +95,7 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Is this a release? (HEAD = github.sha; the version's tag not on origin)
+      - name: Is this a release? (HEAD = github.sha; the tag on origin and JSR must agree)
         id: rel
         run: bun scripts/publish-workflow.ts is-release
 
@@ -143,6 +154,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
+          token: "" # never the job's GITHUB_TOKEN (the action's default)
 
       - name: Create the annotated tag on this commit (REST API), read back
         env:
@@ -175,6 +187,7 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
+          token: "" # never the job's GITHUB_TOKEN (the action's default)
 
       # The tag peels to this commit → an existing page = done → the page ON the tag → read back.
       # Tested against a mock API by scripts/check_publish_workflow.ts.
@@ -189,12 +202,13 @@ jobs:
     needs: [checks, release]
     if: needs.checks.outputs.release == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
 
     steps:
-      # What deno.json publishes, and the one script this job runs. Nothing else, nothing installed.
+      # What deno.json publishes, and the one script this job runs. Nothing else.
       - name: Checkout the published files and the workflow script
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -211,28 +225,32 @@ jobs:
             /LICENSE-APACHE
             /scripts/publish-workflow.ts
 
+      # Deno is the ONLY tool installed beside the OIDC token (no Bun here; review round 1,
+      # finding E). The two script steps run this repo's own file under Deno with only the
+      # permissions named, and `--no-config` (no import map, no lockfile write).
       - name: Install Deno
         uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: "1.4.4"
 
       # A re-run finds the version there and skips the upload.
       - name: Does JSR already have this version?
         id: jsr
         env:
           VERSION: ${{ needs.checks.outputs.version }}
-        run: bun scripts/publish-workflow.ts jsr-has "$VERSION"
+        run: >-
+          deno run --no-config --allow-net=api.jsr.io
+          --allow-env=GITHUB_OUTPUT,HTTP_TIMEOUT_MS --allow-write="$GITHUB_OUTPUT"
+          scripts/publish-workflow.ts jsr-has "$VERSION"
 
       # Provenance requires a GitHub OIDC token; `id-token: write` above injects it. If it is absent
       # despite the permission, an org/enterprise Actions OIDC policy blocks it and `deno publish`
       # silently skips provenance. The PREREQUISITE only — a diagnostic, not evidence.
       - name: Check OIDC availability (prerequisite, not proof)
-        run: bun scripts/publish-workflow.ts oidc-check
+        run: >-
+          deno run --no-config
+          --allow-env=ACTIONS_ID_TOKEN_REQUEST_URL,ACTIONS_ID_TOKEN_REQUEST_TOKEN
+          scripts/publish-workflow.ts oidc-check
 
       # `deno publish` called DIRECTLY: through a task or a wrapper it runs as a subprocess, which
       # can lose provenance (binaryang's measurement). scripts/** is outside publish.include.
@@ -240,10 +258,37 @@ jobs:
         if: steps.jsr.outputs.present == 'false'
         run: deno publish
 
+  # U8's read-back, in its own job WITHOUT the OIDC token. It runs whatever `jsr` did (a failure
+  # after the upload included), and FAILS when JSR records no provenance — or, by name, when JSR
+  # does not serve the version at all (the publish never happened).
+  verify:
+    name: Verify ${{ needs.checks.outputs.tag }} on JSR
+    needs: [checks, jsr]
+    if: ${{ !cancelled() && needs.checks.outputs.release == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout the workflow script and the manifest only
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /deno.json
+            /scripts/publish-workflow.ts
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+          token: "" # never the job's GITHUB_TOKEN (the action's default)
+
       # THE evidence, FATAL (U8): JSR's `rekorLogId` (the poll, its cache-bust and their history:
-      # scripts/publish-workflow.ts). It runs even when `deno publish` failed after its upload.
+      # scripts/publish-workflow.ts).
       - name: Verify provenance was recorded on JSR
-        if: ${{ !cancelled() }}
         env:
           VERSION: ${{ needs.checks.outputs.version }}
         run: bun scripts/publish-workflow.ts provenance "$VERSION"

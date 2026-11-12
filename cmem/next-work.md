@@ -5,6 +5,21 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-12 — review round 1, the release tooling (owner: "review", then "A-E")
+
+- **Round 1 DONE, groups A–E FIXED** — record and rows in compiler-bugs.md § "Review round 1"
+  (sw194–sw198, ld119–ld121, hardening E, test gaps G). Three fresh reviewers (local release half,
+  CI half, self-tests); every finding re-run before any change; 44 self-test cases, 17 mutants each
+  caught by its own case, an end-to-end rehearsal against a scratch bare origin.
+- **NEXT: round 2 on these fixes**, fresh reviewers (review-process.md § 1.4), until a round finds
+  nothing.
+- **OPEN, the owner's call:** F — a queued run can be cancelled by a newer push, landing the
+  release on a later commit (options: per-commit concurrency group with the tag job's "elsewhere =
+  refused" settling races loudly, or `release.ts` waiting for its run); H — the low items listed
+  in the round's record.
+- **UNMEASURED until the next push:** `setup-bun` with `token: ""` (the `checks` job runs it on
+  every push to `main`); the `jsr` / `verify` split until the first release in this order.
+
 ## 2026-11-12 — workspace items for wasmtk (owner: same words as 2026-11-10)
 
 - **H35 (one review process, every project) — DONE:** the three words ("review", "security
