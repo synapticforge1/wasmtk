@@ -300,7 +300,11 @@ assumed. **The version tag IS the release** (owner): CI makes it after its check
 commands".
 
 1. **U1 Owner: the go and the level** — "release", with patch / minor / major (asked for if not
-   given; no tool defaults it).
+   given; no tool defaults it). 🔒 **Not ready until the two required reviews are done** (owner,
+   2026-11-12, letter H35): a "security review" and a "hardening review"
+   ([review-process.md](review-process.md)), each run to its empty round on everything since the
+   last release, recorded in the release's entry in [release.md](release.md) with the release
+   notes (step 2) — `deno task release` refuses otherwise (guard 0g).
 2. **U2 Merge first — release notes:** `CHANGELOG.md` § X.Y.Z (user-facing; lead with impact) and
    roadmap.md's unreleased block marked released, on a local branch `release/X.Y.Z`; the gate on
    the committed tree; `git merge --no-ff` into `main`; push `main` UNBUMPED (a normal push: CI's
@@ -329,7 +333,10 @@ commands".
    publish`). Guards: a clean tree but for the bump's three files, untracked files counted; on
    `main`, equal to `origin/main`; the tag absent locally and on origin; JSR without the version;
    COLD `deno check main.ts` and `deno publish --dry-run` in an empty `DENO_DIR`; `main.ts
-   --version` names the version and `--help` exits 0. Then it commits `bump to vX.Y.Z`, pushes
+   --version` names the version and `--help` exits 0; (since 2026-11-12, H35) the version's entry
+   in release.md records the security and the hardening review, each ended by an empty round
+   (`bun scripts/check_release.ts`, 7 cases, 3 mutants; rehearsed: no entry / one review →
+   refused, nothing pushed; both → released). Then it commits `bump to vX.Y.Z`, pushes
    `main` as a user and reads it back with `git ls-remote` — **and makes no tag.** Rehearsed
    2026-11-10 in a scratch clone against a scratch bare origin (11 cases: each guard refused with
    nothing pushed; the real run pushed `main` = the `bump to` commit with its three files and NO
