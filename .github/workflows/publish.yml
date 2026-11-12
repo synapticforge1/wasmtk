@@ -6,10 +6,11 @@
 # commit and NO tag. Every push to `main` runs this workflow:
 #
 #   checks   contents: read    U5: HEAD = github.sha; the release tooling's self-tests; "is this a
-#                              release?" — only the bump commit's own run, pushed alone, releases;
-#                              the tag on origin AND JSR must agree (absent / absent = a release, a
-#                              tag alone in that run = resume; JSR without the tag = refused; an
-#                              unreleased version on main past the grace window = refused); for a release,
+#            actions: read     release?" — only the bump commit's own run, pushed alone, over a
+#                              released previous version, releases (a tag already at this commit =
+#                              resume / re-verify; JSR without the tag = refused); any other push
+#                              meeting an unreleased version reads the bump run: running = a
+#                              warning, finished or missing = refused by name); for a release,
 #                              the surface floor on the untagged candidate (api-surface.ts
 #                              --verify-release); the type check; the publish dry run on exactly
 #                              the tree the jsr job publishes
@@ -29,10 +30,12 @@
 # release jobs hold a WRITE token. Bun's version is pinned, so the action needs no API lookup.
 #
 # A push that is not a release runs `checks` only. A failure: "Re-run failed jobs" (or "Re-run all
-# jobs") on the BUMP COMMIT's run — `is-release` resumes there, and the tag, the page and the
-# upload each skip what is already done (U12); never a new tag for the same code, never a moved
-# tag. A LATER push meets the half-finished version and FAILS, by name — it is never green. Stuck:
-# re-run the bump run; if that is impossible, revert the version line with a commit, then bump again.
+# jobs") on the BUMP COMMIT's run — `is-release` resumes there (all jobs: `verify` runs again even
+# when JSR already has the version), and the tag, the page and the upload each skip what is already
+# done (U12); never a new tag for the same code, never a moved tag. A LATER push meets the
+# half-finished version and FAILS by name once the bump run has finished — it is never green; and
+# the next bump is refused until the version before it is released. Stuck: re-run the bump run; if
+# that is impossible, revert the version line to the last released version, then bump the NEXT one.
 # The version tag IS the release (owner, 2026-11-10): no `release/<tag>` branch.
 #
 # A tag made by github-actions[bot] in the same run DOES publish to JSR with provenance: measured
@@ -40,8 +43,9 @@
 # both tags annotated, tagger github-actions[bot]; JSR Rekor 3814264552 / 3815373888). Nothing
 # here waits for a tag trigger (the jobs chain with `needs:`), so the OIDC identity is this run's.
 # wasmtk's own first release in this order is still the first measurement of THIS file's tag →
-# page → publish half. Tests are NOT run in `checks` yet: wasmtk's gate is local (installed
-# `wasmtk`, Go, Zig, standalone engines); a CI gate is Deno-exit plan P7.
+# page → publish half. The compiler's tests are NOT run in `checks` yet: wasmtk's gate is local
+# (installed `wasmtk`, Go, Zig, standalone engines); a CI gate is Deno-exit plan P7. The release
+# tooling's own self-tests are (review round 3).
 #
 # Every action is pinned to a commit hash; the comment names its release. Move a pin by reading
 # the release tag's commit with `git ls-remote` (verified 2026-11-10 for the three below).
@@ -63,7 +67,7 @@ permissions: {}
 # of the same commit still waits for the first (C30 (2): no half-run between tag and publish).
 # A release happens only in the run of the bump commit itself (scripts/publish-workflow.ts
 # isRelease): a later push never releases a version it did not bump, and an unreleased version on
-# main past the grace window fails every later push, by name, until it is released or reverted.
+# main fails every later push by name once the bump run has finished, until released or reverted.
 concurrency:
   group: release-${{ github.sha }}
   cancel-in-progress: false
@@ -75,6 +79,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      actions: read # is-release reads the bump commit's own run state (review round 4)
     outputs:
       release: ${{ steps.rel.outputs.release }}
       version: ${{ steps.rel.outputs.version }}
@@ -136,12 +141,16 @@ jobs:
         working-directory: jsr-tree
         run: deno publish --dry-run
 
-      # A release only in the run of the bump commit, pushed ALONE (BEFORE = its parent); a
-      # re-run of that run resumes a half-finished release. workflow_dispatch never releases.
+      # A release only in the run of the bump commit, pushed ALONE (BEFORE = its parent), over a
+      # released previous version; a re-run of that run resumes (or re-verifies) it.
+      # workflow_dispatch never releases. Any other push meeting an unreleased version reads the
+      # bump commit's own run (the token below: contents + actions READ only): running → a
+      # warning; finished, or no run at all → refused by name.
       - name: Is this a release? (the bump commit's own run; the tag on origin and JSR agree)
         id: rel
         env:
           BEFORE: ${{ github.event.before }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: bun scripts/publish-workflow.ts is-release
 
       # The local `deno task bump` ran the compatibility gate; this repeats it on the pushed

@@ -15,12 +15,16 @@
  *       that passes `verifyReleaseCommit` (a bump already committed, e.g. by the owner's "commit");
  *   0c. the tag absent locally and on origin (a tag that exists has been, or will be, released);
  *   0d. JSR does not already serve the version (a version number is immutable there);
- *   0e. COLD checks, in a temporary WORKTREE of exactly what will be committed (HEAD + the bump) and
- *       an empty DENO_DIR, as publish.yml's `checks` runs them: `deno check main.ts`, `deno publish
- *       --dry-run`, then `--version` names this version and `--help` exits 0 — so an ignored or
- *       skip-worktree file the working copy has but the commit lacks cannot make them pass;
+ *   0h. the version it bumps FROM (origin/main's) is released: its tag on origin and on JSR;
+ *   0e. COLD checks on exactly what will be committed (`git archive HEAD` unpacked to a temp folder,
+ *       plus the bump) with an empty DENO_DIR, as publish.yml's `checks` runs them: `deno check
+ *       main.ts`, `deno publish --dry-run`, then `--version` names this version and `--help` exits
+ *       0 — so an ignored or skip-worktree file the working copy has but the commit lacks cannot
+ *       make them pass; nothing is registered in .git, and Ctrl-C removes the temp folders;
  *   0g. the version's entry in `cmem/release.md` records BOTH required reviews in the strict form
- *       (`reviewRecordProblem`; 🔒 owner 2026-11-12, workspace `review-process.md` § 0, letter H35).
+ *       naming the version (`reviewRecordProblem`), the file plain Markdown throughout
+ *       (`markdownSubsetProblems`; 🔒 owner 2026-11-12, workspace `review-process.md` § 0, H35).
+ * The push is `--no-follow-tags`.
  * Then: commit RELEASE_FILES as `bump to vX.Y.Z` (unless already committed), push `main` as a user,
  * and read it back with `git ls-remote`. **It makes and pushes NO tag** (U4): CI checks the pushed
  * commit, then CI creates the tag, then the Release page from the tag, then publishes to JSR.
@@ -35,11 +39,12 @@
  * on 2026-11-10, which had none of the guards, force-moved a local tag and pushed twice.
  */
 import { spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import denoJson from "../deno.json" with { type: "json" };
-import { jsrHas, lsRemoteHas } from "./publish-workflow.ts";
+import { jsrHas, lsRemoteHas, lsRemotePeeled, versionAt } from "./publish-workflow.ts";
 
 /** What `deno task bump` writes (deno.json + scripts/sync-version.ts's two mirrors). */
 export const RELEASE_FILES = ["deno.json", "package.json", "src/utils.ts"];
@@ -50,80 +55,65 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export type Git = (args: string[]) => { code: number; out: string; err: string };
 
 /**
- * Removes what Markdown does not render as text, ONE line scanner in document order, the way
- * CommonMark reads blocks (review round 3, 2026-11-12: comments had been stripped before fences and
- * with no notion of inline code, so a `` `<!--` `` in prose hid the rest of the file):
- *   – a FENCED block: an opener of ≥3 backticks or tildes, indented ≤3 spaces or after a list
- *     marker, whose info string has no backtick (```` ```x``` ```` is inline code, not a fence);
- *     closed only by the SAME character at least as long, alone on its line, indented ≤3 spaces
- *     past the content column (0 at top level, the list item's otherwise); a deeper "closer" is
- *     code and the fence stays open; unclosed, it runs to the end. Inside a fence nothing else
- *     counts, a `<!--` included;
- *   – an HTML comment BLOCK: a line that starts (≤3 spaces) with `<!--`, up to the line holding
- *     `-->`; unclosed, it runs to the end. A `<!--` elsewhere on a line is text.
+ * Guard 0g reads `cmem/release.md` only as PLAIN Markdown, and refuses anything else (review round
+ * 4, 2026-11-12). Rounds 2–3 had emulated CommonMark's hiding rules, and every round found another
+ * construct the emulation missed (a comment in a list item, a fence ended by its item, `<?…?>` /
+ * `<style>` / CDATA blocks, indented and setext headings) or wrongly applied (`<!-->`). So instead
+ * of deciding what Markdown hides, the gate accepts only a subset in which NOTHING hides text and
+ * every heading is spelled one way; a failure is a refusal by line, never a pass. Refused lines:
+ *   – a tab in the indentation, or 4+ leading spaces (indented code);
+ *   – after any list / quote markers, a line that starts with ``` / ~~~ (a fence) or `<` (an HTML
+ *     block — comments, `<?`, `<!X`, `<![CDATA[`, `<style>` …);
+ *   – a heading not at column 0 or not followed by a space, and a `===` / `---` line (a setext
+ *     underline). Returns "line N: why" for each.
  */
-export function stripHidden(text: string): string {
+export function markdownSubsetProblems(text: string): string[] {
   const out: string[] = [];
-  let fence: { ch: string; n: number; indent: number } | null = null;
-  let comment = false;
-  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
-    if (fence) {
-      const close = /^( *)(`{3,}|~{3,})\s*$/.exec(line);
-      if (
-        close && close[1].length <= fence.indent && close[2][0] === fence.ch &&
-        close[2].length >= fence.n
-      ) fence = null;
-      continue;
-    }
-    if (comment) {
-      const j = line.indexOf("-->");
-      if (j >= 0) {
-        comment = false;
-        if (line.slice(j + 3).trim() !== "") out.push(line.slice(j + 3)); // text after `-->` shows
-      }
-      continue;
-    }
-    const open = /^( {0,3}| *(?:[-*+]|\d+[.)]) +)(`{3,}|~{3,})(.*)$/.exec(line);
-    if (open && !(open[2][0] === "`" && open[3].includes("`"))) {
-      // A closer may be indented up to 3 spaces past the item's content column (0 at top level);
-      // deeper, it is code inside the fence, and the fence stays open (CommonMark).
-      const base = /[-*+.)]/.test(open[1]) ? open[1].length : 0;
-      fence = { ch: open[2][0], n: open[2].length, indent: base + 3 };
-      continue;
-    }
-    if (/^ {0,3}<!--/.test(line)) {
-      const rest = line.slice(line.indexOf("<!--") + 4);
-      const j = rest.indexOf("-->");
-      if (j < 0) comment = true;
-      else if (rest.slice(j + 3).trim() !== "") out.push(rest.slice(j + 3)); // text after `-->` shows
-      continue;
-    }
-    out.push(line);
-  }
-  return out.join("\n");
+  text.replace(/\r\n/g, "\n").split("\n").forEach((line, i) => {
+    const at = `cmem/release.md line ${i + 1}`;
+    if (/^ *\t/.test(line)) return out.push(`${at}: a tab in the indentation`);
+    if (/^ {4,}\S/.test(line)) return out.push(`${at}: indented 4+ spaces (a code block)`);
+    const body = line.replace(/^(?: {0,3}(?:>|[-*+]|\d{1,9}[.)])(?= |$) ?)+/, "").trimStart();
+    if (/^(`{3,}|~{3,})/.test(body)) return out.push(`${at}: a code fence`);
+    if (body.startsWith("<")) return out.push(`${at}: a line starting with "<" (an HTML block)`);
+    if (/^ {1,3}#{1,6}(\s|$)/.test(line)) return out.push(`${at}: an indented heading`);
+    if (/^#{1,6}(\t|$)/.test(line)) return out.push(`${at}: a heading without a space`);
+    if (/^ {0,3}(=+|-+) *$/.test(line)) return out.push(`${at}: a "===" / "---" line`);
+  });
+  return out;
 }
 
 /**
  * THE record of a required review, and nothing else (cmem/review-process.md § 3):
  *
- *   **Security review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
+ *   **Security review (v<version>):** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
  *
- * The whole paragraph must be exactly this (whitespace and line breaks normalised): the last round
- * is the empty one (both numbers equal), the date is real, and nothing follows the final period.
- * Review round 2, 2026-11-12 (finding R2-A): round 1 had searched free prose for the phrase and a
- * list of negating words — five more phrasings of an UNFINISHED review still passed ("hasn't …",
- * "TODO: …", "planned to be …", a denial after the phrase), and a correct record with a dash was
- * refused. A strict form cannot be half-matched. Returns the problem, or "".
+ * The whole paragraph must be exactly this (whitespace and line breaks normalised): the version is
+ * the release's (round 4: an entry could borrow the records of the release below it), the scope is
+ * plain text, the last round is the empty one (both numbers equal), the date is real, and nothing
+ * follows the final period. Round 2 (R2-A): free prose with negating words had let five phrasings
+ * of an UNFINISHED review pass; a strict form cannot be half-matched. Returns the problem, or "".
  */
-export function reviewRecordProblem(paragraph: string, kind: "Security" | "Hardening"): string {
+export function reviewRecordProblem(
+  paragraph: string,
+  kind: "Security" | "Hardening",
+  version: string,
+): string {
   const p = paragraph.replace(/\s+/g, " ").trim();
   const re = new RegExp(
-    `^\\*\\*${kind} review:\\*\\* (\\S[^;]*?); rounds (\\d+); ended by an empty round \\(round (\\d+), (\\d{4})-(\\d{2})-(\\d{2})\\)\\.$`,
+    `^\\*\\*${kind} review \\(v${
+      escapeRe(version)
+    }\\):\\*\\* ([^\\s;][^;]*?); rounds (\\d+); ended by an empty round \\(round (\\d+), (\\d{4})-(\\d{2})-(\\d{2})\\)\\.$`,
   );
   const m = re.exec(p);
   const form =
-    `"**${kind} review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>)."`;
+    `"**${kind} review (v${version}):** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>)."`;
   if (!m) return `the ${kind.toLowerCase()} review is not in the recorded form ${form}`;
+  if (/[<`\\]/.test(m[1])) {
+    return `the ${kind.toLowerCase()} review's scope "${
+      m[1]
+    }" is not plain text (no <, backtick or backslash)`;
+  }
   const [, , rounds, last, y, mo, d] = m;
   if (Number(rounds) < 1 || rounds !== last) {
     return `the ${kind.toLowerCase()} review's last round (${last}) is not its round count (${rounds}): the empty round ends it`;
@@ -137,36 +127,43 @@ export function reviewRecordProblem(paragraph: string, kind: "Security" | "Harde
 
 /**
  * Guard 0g: the problems with `version`'s entry in `cmem/release.md` (empty = it records both
- * required reviews). Only the `## Release History` section counts (up to the next `## `), hidden
- * text is removed first (`stripHidden`), and the entry is the `### X.Y.Z` section up to the next
- * `##` / `###` heading (a `####` subheading stays inside it). It must hold exactly one paragraph
- * beginning `**Security review:**` and one beginning `**Hardening review:**`, each in the strict
- * recorded form (`reviewRecordProblem`).
+ * required reviews). The WHOLE file must be plain Markdown (`markdownSubsetProblems`), so nothing
+ * in it can hide text. Only the `## Release History` section counts (up to the next `#` / `##`
+ * heading); the entry is the `### X.Y.Z` section up to the next `#`–`###` heading (a `####`
+ * subheading stays inside it). It must hold exactly one paragraph beginning `**Security review`
+ * and one beginning `**Hardening review` at column 0, each in the strict recorded form naming
+ * this version (`reviewRecordProblem`).
  */
 export function reviewsRecorded(releaseMd: string, version: string): string[] {
-  const lines = stripHidden(releaseMd).split("\n");
+  const subset = markdownSubsetProblems(releaseMd);
+  if (subset.length) {
+    return [
+      ...subset,
+      "the release gate reads cmem/release.md only as plain Markdown (headings at column 0, paragraphs, lists) — write those lines another way",
+    ];
+  }
+  const lines = releaseMd.replace(/\r\n/g, "\n").split("\n");
   const hist = lines.findIndex((l) => /^## Release History\s*$/.test(l));
   if (hist < 0) return ['cmem/release.md has no "## Release History" section'];
   let histEnd = hist + 1;
-  while (histEnd < lines.length && !/^## /.test(lines[histEnd])) histEnd++;
+  while (histEnd < lines.length && !/^#{1,2} /.test(lines[histEnd])) histEnd++;
   const head = new RegExp(`^### ${escapeRe(version)}(\\s|$)`);
   let start = -1;
   for (let i = hist + 1; i < histEnd && start < 0; i++) if (head.test(lines[i])) start = i;
   if (start < 0) return [`cmem/release.md has no "### ${version}" entry in its Release History`];
   let end = start + 1;
-  while (end < histEnd && !/^#{2,3} /.test(lines[end])) end++;
-  const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n\s*\n/);
+  while (end < histEnd && !/^#{1,3} /.test(lines[end])) end++;
+  const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n\s*\n/)
+    .map((x) => x.replace(/^\n+/, ""));
   const problems: string[] = [];
   for (const kind of ["Security", "Hardening"] as const) {
-    // A paragraph indented 4+ spaces (or a tab) is an indented code block, not a record (round 3).
-    const lead = new RegExp(`^ {0,3}\\*\\*${kind} review:\\*\\*`);
-    const ps = paragraphs.filter((x) => lead.test(x.replace(/^\n+/, "")));
+    const ps = paragraphs.filter((x) => x.startsWith(`**${kind} review`));
     if (ps.length === 0) {
-      problems.push(`the ${version} entry records no **${kind} review:** paragraph`);
+      problems.push(`the ${version} entry records no **${kind} review (v${version}):** paragraph`);
     } else if (ps.length > 1) {
       problems.push(`the ${version} entry records the ${kind.toLowerCase()} review twice`);
     } else {
-      const p = reviewRecordProblem(ps[0], kind);
+      const p = reviewRecordProblem(ps[0], kind, version);
       if (p) problems.push(`the ${version} entry: ${p}`);
     }
   }
@@ -437,24 +434,71 @@ if (import.meta.main) {
     refuse("could not ask JSR whether it has this version.", (e as Error).message);
   }
 
-  // 0e. Cold checks on EXACTLY what will be committed: a temporary worktree of HEAD plus the bump,
-  //     an empty DENO_DIR. Cleanup always runs before a refusal (review round 1, H: the temp folder
-  //     leaked when a cold check refused inside `try`).
+  // 0h. The version this bumps FROM (origin/main's) is released — tag on origin AND on JSR. A bump
+  //     over a stranded or refused version would bury it for good (review round 4; CI refuses the
+  //     same in is-release).
+  const prev = versionAt(git, upstream);
+  if (prev !== null && prev !== version) {
+    const pref = `refs/tags/v${prev}`;
+    const prevTag = git(["ls-remote", "origin", pref, `${pref}^{}`]);
+    if (prevTag.code !== 0) refuse("could not read origin's tags.", said(prevTag));
+    let prevJsr: string;
+    try {
+      prevJsr = await jsrHas(prev);
+    } catch (e) {
+      refuse(
+        `could not ask JSR whether it has the previous version ${prev}.`,
+        (e as Error).message,
+      );
+    }
+    const tagged = lsRemotePeeled(prevTag.out, pref) !== "";
+    if (!tagged || prevJsr !== "true") {
+      refuse(
+        `the previous version ${prev} was never released (tag v${prev} on origin: ${
+          tagged ? "yes" : "no"
+        }; on JSR: ${prevJsr === "true" ? "yes" : "no"}).`,
+        "Finish it first (re-run its bump commit's run on GitHub), or revert the version line to the",
+        "last RELEASED version in a normal commit and bump from there.",
+      );
+    }
+  }
+
+  // 0e. Cold checks on EXACTLY what will be committed: `git archive HEAD` unpacked into a temp
+  //     folder, plus the bump, and an empty DENO_DIR. Round 4: a `git worktree` had registered
+  //     itself in .git and, on Ctrl-C, stayed registered; an archive registers nothing. Cleanup
+  //     always runs before a refusal (round 1, H), and on Ctrl-C too.
   const tree = await mkdtemp(join(tmpdir(), "wasmtk-release-tree-"));
   const cold = await mkdtemp(join(tmpdir(), "wasmtk-release-cold-"));
+  const cleanup = () => {
+    for (const d of [tree, cold]) {
+      try {
+        rmSync(d, { recursive: true, force: true });
+      } catch { /* best effort */ }
+    }
+  };
+  const onSignal = () => {
+    cleanup();
+    console.error(`\nInterrupted: nothing committed or pushed; the temp folders removed.`);
+    process.exit(130);
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
   let failure: string[] | null = null;
   let reported = "";
   try {
-    const added = git(["worktree", "add", "--detach", "--force", tree, "HEAD"]);
-    if (added.code !== 0) {
-      failure = ["could not create a worktree for the cold checks.", said(added)];
+    const tar = join(cold, "tree.tar");
+    const archived = git(["archive", "--format=tar", "-o", tar, "HEAD"]);
+    const unpacked = archived.code === 0 ? capture(["tar", "-xf", tar, "-C", tree]) : archived;
+    await rm(tar, { force: true });
+    if (unpacked.code !== 0) {
+      failure = ["could not unpack HEAD for the cold checks.", said(unpacked)];
     } else {
       if (!committed) {
         for (const f of RELEASE_FILES) await cp(f, join(tree, f));
       }
       const env = { ...process.env, DENO_DIR: cold };
       for (const args of [["check", "main.ts"], ["publish", "--dry-run", "--allow-dirty"]]) {
-        console.log(`$ (worktree, DENO_DIR=<empty>) deno ${args.join(" ")}   (cold)`);
+        console.log(`$ (HEAD + the bump, DENO_DIR=<empty>) deno ${args.join(" ")}   (cold)`);
         const r = capture(["deno", ...args], { env, cwd: tree });
         if (r.code !== 0) {
           failure = [
@@ -481,14 +525,12 @@ if (import.meta.main) {
       }
     }
   } finally {
-    // Only OUR worktree is removed: a `git worktree prune` here had also dropped the owner's other
-    // worktrees whose folders were briefly unreachable (review round 3).
-    git(["worktree", "remove", "--force", tree]);
-    await rm(tree, { recursive: true, force: true }).catch(() => {});
-    await rm(cold, { recursive: true, force: true }).catch(() => {});
+    cleanup();
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
   }
   if (failure) refuse(failure[0], ...failure.slice(1));
-  console.log(`$ main.ts --version → ${reported}; --help → exit 0 (in the worktree)`);
+  console.log(`$ main.ts --version → ${reported}; --help → exit 0 (on HEAD + the bump)`);
 
   // 1. Commit the bump (unless already committed and gated above).
   if (!committed) {
@@ -504,8 +546,10 @@ if (import.meta.main) {
   }
 
   // 2. Push main — and NO tag: CI tags after its checks pass on this commit (U4, U6).
+  //    `--no-follow-tags`: a `push.followTags` setting would otherwise push every local annotated
+  //    tag on main's history along with it (review round 4).
   const bumped = git(["rev-parse", "HEAD"]).out.trim();
-  run(["git", "push", "origin", "main"]);
+  run(["git", "push", "--no-follow-tags", "origin", "main"]);
 
   // 3. Read it back.
   const back = git(["ls-remote", "origin", "refs/heads/main"]).out.split("\n")

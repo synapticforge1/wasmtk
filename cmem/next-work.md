@@ -5,6 +5,15 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-12 — review round 4, the round-3 fixes (owner: "all")
+
+- **Round 4 DONE, every group FIXED** — compiler-bugs.md § "Review round 4" (sw208–sw212,
+  ld128–ld131, 11 test gaps). The review record now names its version and release.md must be
+  plain Markdown (review-process.md § 3); a bump over an unreleased version is refused; a later
+  push reads the bump commit's own run instead of a time window.
+- **UNMEASURED until a push:** `is-release` reading the Actions API with `actions: read`.
+- **NEXT: round 5 on these fixes**, fresh reviewers, until a round finds nothing.
+
 ## 2026-11-12 — review round 3, the round-2 fixes + F (owner: "all and include F")
 
 - **Round 3 DONE, every group FIXED, F included** — compiler-bugs.md § "Review round 3"
@@ -14,7 +23,7 @@ branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 - **MEASURED on GitHub** (run 43290071765, `21a54042`, green): the self-test step passed on
   ubuntu-latest; `is-release` with `BEFORE` read a non-bump push as "not a release"; the
   per-commit group ran it. The F path end to end is unmeasured until the next release.
-- **NEXT: round 4 on these fixes**, fresh reviewers, until a round finds nothing.
+- Round 4 followed (above).
 
 ## 2026-11-12 — review round 2, the round-1 fixes (owner: "all")
 

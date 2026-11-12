@@ -350,6 +350,38 @@ same day, after the first tally's 2 were fixed, and that 0 carried the warning b
 audit then CONFIRMED 28 more by running them (table below). The count is only as good as the
 entries: a silent-wrong bug nobody has found is not in it.
 
+## Review round 4 — the round-3 fixes (2026-11-12): 5 silent + 4 loud tool rows + 11 test gaps, CONFIRMED BY RUNNING, FIXED
+
+Owner: "all" (with the recommended approach for B: a plain-Markdown subset, the version in the
+record). Three fresh reviewers on `21a54042`; every finding re-run here before any change (the CI
+reviewer's probe, the tests reviewer's 12 mutants — 11 survived, the local reviewer's CommonMark
+0.31.2 probes). Tests now: `check_release.ts` 63, `check_publish_workflow.ts` 63; 39 round-4
+mutants (6 of them round-2/3 parts re-expressed for the rewritten code) each caught by its own
+case, and round 3's still-applicable ones re-run; rehearsal H1–H4 against a scratch bare origin.
+One reviewer's `bun add` landed in the owner's home folder and was removed (the home
+`bun.lock` was regenerated — reported to the owner).
+
+| row | class | the defect (measured) | fix |
+| --- | --- | --- | --- |
+| **sw208** | A — a version buried | a bump over a version that never finished (tagged, not on JSR; or refused) released the new one, and nothing ever reported the old again | the previous version must be released (tag + JSR) — CI's `is-release` and the local guard 0h refuse otherwise, naming the way out |
+| **sw209** | A — provenance hidden by a re-run | after `verify` failed, "Re-run all jobs" saw tag + JSR and skipped every job: green, provenance never checked again | in the bump commit's own run, the tag AT THIS COMMIT + JSR is a release again: the jobs skip what is done and `verify` runs; a version-line revert (tag elsewhere) stays "done" |
+| **sw210** | B — records hidden in Markdown | a comment in a list item, a fence ended by its list item, `<?…?>` / `<style>` / `<!X` / CDATA blocks all hid records that counted; indented / tab / setext headings let an entry borrow the next release's records | `cmem/release.md` must be PLAIN Markdown — every hiding construct and odd heading refused BY LINE (`markdownSubsetProblems`); the record names its version: `**Security review (vX.Y.Z):** …` |
+| **sw211** | D — the commit gate untested where it fails open | `--verify-commit` exiting 0 on a refusal, and a bump commit with NO `cmem/release.md`, left every case green | X1 runs the COMMAND in a real git repo (exit codes); V10 |
+| **sw212** | A — a resume refused | `api-surface.ts --verify-release` refused any existing tag, so a re-run of the bump run (the tag fetched) failed the compatibility gate — found while fixing sw209 | a tag AT HEAD is a resume, checked against the tag before it; elsewhere refused (rehearsed) |
+| ld128 | A | the 60-min grace counted from the COMMIT date: a bump committed long before its push failed later pushes while still releasing; a bump pushed under a later commit (no run of its own) warned for an hour and advised re-running a run that does not exist | the grace window is gone: a later push reads the bump commit's own run through the Actions API (`checks` gets `actions: read`) — running = a warning, finished = refused, none = refused at once |
+| ld129 | A | the provenance cache-bust repeated across re-runs (`GITHUB_RUN_ID` is the same per attempt) | the attempt is part of the cache-bust |
+| ld130 | B | false refusals: a `<!-->` line, list-marker-like text in a paragraph or code | now refused deliberately, by line, with the reason (the subset) |
+| ld131 | C | `git push origin main` followed `push.followTags`, pushing local annotated tags; a Ctrl-C during the cold checks left a worktree registered | `--no-follow-tags` (rehearsed with a stray tag); the cold checks run on `git archive HEAD` in a temp folder — nothing registered — with a SIGINT / SIGTERM cleanup (the signal path is UNMEASURED: Windows cannot deliver it to a script) |
+
+**Test gaps closed (D):** V10, X1, S30 (no bump found), K3 (JSR_HAS_TRIES unset, as CI runs it),
+H2 (no write before the page state is read), H3 (the read-back tag name), R9d (empty scope), B7
+(invalid JSON); the CLI grace default and the fence-character / `-->` survivors went with the code
+they tested. **Rehearsal H1–H4:** an untagged previous version → refused; a code fence in
+release.md → refused by line; `push.followTags` + a stray annotated tag → released, the tag stayed
+local, no worktree registered; `--verify-release` with the tag at HEAD → resumes, elsewhere →
+refused. **UNMEASURED until a push / release:** the Actions-API read on GitHub (`actions: read`);
+the Ctrl-C cleanup. Next: round 5 on these fixes.
+
 ## Review round 3 — the round-2 fixes + the owner's F (2026-11-12): 5 silent + 3 loud tool rows, CONFIRMED BY RUNNING, FIXED
 
 Owner: "all and include F". Three fresh reviewers on `1a52ee8c` (the local half, the CI half, the

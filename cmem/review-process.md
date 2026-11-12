@@ -104,18 +104,23 @@ what is next). **A claim found wrong:** corrected where it stands, marked 🔁 w
 row that found it.
 
 **Before every release (the H35 gate):** the release's entry in [release.md](release.md) (§
-"Release History", `### X.Y.Z`) carries exactly two record paragraphs, each EXACTLY in this form
-(line breaks inside a paragraph are fine), and nothing after the final period:
+"Release History", `### X.Y.Z`) carries exactly two record paragraphs at column 0, each EXACTLY
+in this form (line breaks inside a paragraph are fine), and nothing after the final period:
 
 ```
-**Security review:** <scope, with the findings rows>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
+**Security review (vX.Y.Z):** <scope, with the findings rows>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
 
-**Hardening review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
+**Hardening review (vX.Y.Z):** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
 ```
 
-The last round IS the empty one, so both numbers are equal; the date is a real date. The scope
-may not contain a `;`. `deno task release` (`scripts/release.ts`, guard 0g) refuses unless both
-are there in this form, and CI repeats the check on the pushed bump commit
-(`release.ts --verify-commit`). **Strict on purpose** (review round 2, 2026-11-12): round 1 read
-free prose for "ended by an empty round" with a list of negating words, and round 2 found five
-more phrasings of an UNFINISHED review that still passed — a fixed form cannot be half-matched.
+`vX.Y.Z` is the entry's own version (review round 4: an entry could otherwise borrow the records
+of the release below it). The last round IS the empty one, so both numbers are equal; the date is
+a real date. The scope is plain text: no `;`, `<`, backtick or backslash. release.md itself must
+stay plain Markdown (release.md's header lists what the gate refuses). `deno task release`
+(`scripts/release.ts`, guard 0g) refuses unless both are there in this form, and CI repeats the
+check on the pushed bump commit (`release.ts --verify-commit`). **Strict on purpose** (review round
+2, 2026-11-12): round 1 read free prose for "ended by an empty round" with a list of negating
+words, and round 2 found five more phrasings of an UNFINISHED review that still passed — a fixed
+form cannot be half-matched. **Plain Markdown on purpose** (round 4): rounds 2–3 emulated what
+Markdown hides, and each round found another construct; refusing every hiding construct by line
+cannot be half-matched either.
