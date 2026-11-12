@@ -25,6 +25,16 @@
  *   V1  a `bump to` commit, version lines only, both records → passes
  *   V2  a wrong subject; V3 a fourth file in the commit; V4 a ride-along inside deno.json;
  *   V5  the records missing at HEAD → each refused, by name
+ * Round 3:
+ *   V6  deno.json bumped alone (package.json / VERSION left behind) → refused, each by name
+ *   V7  HEAD^ already at the version (a "bump" that bumps nothing) → refused
+ *   V8  a merge / V9 a root commit is not a release commit
+ *   R16 an inline `<!--` hides nothing   R17 nor one mid-line   R18 a fence in a list item hides
+ *   R19 ```x``` is inline code, not a fence   R20 a record indented 4 spaces does not count
+ *   R18b a top-level fence stays open past a closer indented 4   R18c a list fence's closer at 5
+ *   R21 a `<!--` inside a fence opens no comment   R22 a one-line comment hides only its line
+ *   R23 a multi-line comment ends at its `-->`
+ *   B6  a VERSION in a comment is not the constant; two constants → refused
  *
  * Usage (from the repo root):  bun scripts/check_release.ts
  */
@@ -250,19 +260,34 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
 // ── the commit gate CI repeats ──
 {
   const MD = `# r\n\n## Release History\n\n${both("4.0.0")}`;
+  const PJ = JSON.stringify({ name: "@x/y", version: "3.0.0", type: "module" }, null, 2) + "\n";
+  const UT = 'export const VERSION = "3.0.0";\nexport const X = 1;\n';
+  // All three release files, bumped (round 3: the gate now reads every one, changed or not).
+  const BUMPED: Record<string, [string, string]> = {
+    "deno.json": [DJ, bumpV(DJ)],
+    "package.json": [PJ, bumpV(PJ)],
+    "src/utils.ts": [UT, bumpV(UT)],
+  };
   const commitGit = (o: {
     subject?: string;
     diff?: string;
     files?: Record<string, [string, string]>;
     md?: string | null;
+    parents?: number;
   } = {}): Git => {
-    const files = o.files ?? { "deno.json": [DJ, bumpV(DJ)] };
+    const files = { ...BUMPED, ...o.files };
     return (args) => {
+      if (args[0] === "rev-list") {
+        const ids = ["1", "2", "3"].slice(0, o.parents ?? 1).map((c) => c.repeat(40));
+        return { code: 0, out: `${"f".repeat(40)} ${ids.join(" ")}`.trim() + "\n", err: "" };
+      }
       if (args[0] === "log") return { code: 0, out: `${o.subject ?? "bump to v4.0.0"}\n`, err: "" };
       if (args[0] === "diff") {
         return {
           code: 0,
-          out: o.diff ?? Object.keys(files).map((f) => `M\t${f}`).join("\n") + "\n",
+          out: o.diff ??
+            Object.keys(files).filter((f) => files[f][0] !== files[f][1]).map((f) => `M\t${f}`)
+                .join("\n") + "\n",
           err: "",
         };
       }
@@ -303,6 +328,121 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
     "V5 the records missing at HEAD",
     verifyReleaseCommit("4.0.0", commitGit({ md: doc("### 4.0.0\n\n**Summary.** none\n") })),
     /no \*\*Security review:\*\*/,
+  );
+  // Round 3.
+  check(
+    "V6 deno.json bumped ALONE (package.json / VERSION left behind) → refused (A1)",
+    verifyReleaseCommit(
+      "4.0.0",
+      commitGit({ files: { "package.json": [PJ, PJ], "src/utils.ts": [UT, UT] } }),
+    ),
+    /package\.json's version is 3\.0\.0, not 4\.0\.0/,
+  );
+  {
+    const v6b = verifyReleaseCommit(
+      "4.0.0",
+      commitGit({ files: { "package.json": [PJ, PJ], "src/utils.ts": [UT, UT] } }),
+    );
+    check("V6b … and VERSION too, by name", v6b, /src\/utils\.ts's VERSION constant is 3\.0\.0/);
+  }
+  {
+    const at4 = bumpV(DJ);
+    check(
+      "V7 HEAD^ already at the version: a 'bump' that bumps nothing → refused (B1)",
+      verifyReleaseCommit(
+        "4.0.0",
+        commitGit({
+          diff: "M\tdeno.json\n",
+          files: {
+            "deno.json": [at4, at4],
+            "package.json": [bumpV(PJ), bumpV(PJ)],
+            "src/utils.ts": [bumpV(UT), bumpV(UT)],
+          },
+        }),
+      ),
+      /HEAD\^ is already at 4\.0\.0/,
+    );
+  }
+  check(
+    "V8 a MERGE commit is not a release commit",
+    verifyReleaseCommit("4.0.0", commitGit({ parents: 2 })),
+    /HEAD has 2 parent\(s\)/,
+  );
+  check(
+    "V9 a root commit is not a release commit",
+    verifyReleaseCommit("4.0.0", commitGit({ parents: 0 })),
+    /HEAD has 0 parent\(s\)/,
+  );
+}
+
+// ── round 3: Markdown-hidden text as CommonMark reads it ──
+check(
+  "R16 an inline `<!--` in prose above the records hides nothing (A4)",
+  reviewsRecorded(
+    `# r\n\nNote: write \`<!--\` to hide.\n\n## Release History\n\n${both("4.0.0")}`,
+    "4.0.0",
+  ),
+  null,
+);
+check(
+  "R17 a `<!--` mid-line (not at a line start) opens no comment",
+  reviewsRecorded(doc(`text <!-- not a comment block\n\n${both("4.0.0")}`), "4.0.0"),
+  null,
+);
+check(
+  "R18 a fence opened inside a list item hides its content",
+  reviewsRecorded(entry("- ```", "", SEC, HARD, "  ```"), "4.0.0"),
+  /no \*\*Security review:\*\*/,
+);
+check(
+  "R19 ```x``` (inline code: a backtick in the info string) is not a fence",
+  reviewsRecorded(entry("```x``` is inline code", SEC, HARD), "4.0.0"),
+  null,
+);
+check(
+  "R18c a list item's fence closes at its closer indented 5 (≤ content column 3 + 3): records count",
+  reviewsRecorded(entry("1. ```\n   x\n     ```", SEC, HARD), "4.0.0"),
+  null,
+);
+check(
+  "R18b a top-level fence is NOT closed by a ``` indented 4 spaces (that is code inside it)",
+  reviewsRecorded(entry("```", "    ```", "", SEC, HARD), "4.0.0"),
+  /no \*\*Security review:\*\*/,
+);
+check(
+  "R20 a record indented 4 spaces is a code block, not a record",
+  reviewsRecorded(entry(`    ${SEC}`, HARD), "4.0.0"),
+  /no \*\*Security review:\*\*/,
+);
+check(
+  "R21 a `<!--` INSIDE a fence opens no comment: the records after the fence count",
+  reviewsRecorded(entry("```", "<!--", "```", SEC, HARD), "4.0.0"),
+  null,
+);
+check(
+  "R22 a one-line comment block hides only its line",
+  reviewsRecorded(entry("<!-- note -->", SEC, HARD), "4.0.0"),
+  null,
+);
+check(
+  "R23 a MULTI-line comment ends at its -->: the records after it count",
+  reviewsRecorded(entry("<!--\nnote\n-->", SEC, HARD), "4.0.0"),
+  null,
+);
+{
+  const h = '// export const VERSION = "3.0.0";\nexport const VERSION = "3.0.0";\n';
+  const commentOnly = bumpOnly(
+    "src/utils.ts",
+    h,
+    h.replace('// export const VERSION = "3.0.0"', '// export const VERSION = "4.0.0"'),
+    "4.0.0",
+  );
+  const twice = 'export const VERSION = "3.0.0";\nexport const VERSION = "3.0.0";\n';
+  const two = bumpOnly("src/utils.ts", twice, twice.replace(/3\.0\.0/g, "4.0.0"), "4.0.0");
+  is(
+    "B6 a VERSION in a COMMENT is not the constant; two constants → refused",
+    /VERSION constant is 3\.0\.0/.test(commentOnly) && /2 VERSION constants/.test(two),
+    `${commentOnly} / ${two}`,
   );
 }
 

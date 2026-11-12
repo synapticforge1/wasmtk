@@ -5,6 +5,15 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-12 — review round 3, the round-2 fixes + F (owner: "all and include F")
+
+- **Round 3 DONE, every group FIXED, F included** — compiler-bugs.md § "Review round 3"
+  (sw203–sw207, ld125–ld127). F: one run per commit, and only the bump commit's own push run
+  releases (a re-run resumes; a later push warns for 60 min, then refuses "UNRELEASED VERSION").
+  The stuck-release way out is in workflow.md § The release flow.
+- **UNMEASURED until a push:** the self-test step in `checks`; per-commit concurrency.
+- **NEXT: round 4 on these fixes**, fresh reviewers, until a round finds nothing.
+
 ## 2026-11-12 — review round 2, the round-1 fixes (owner: "all")
 
 - **Round 2 DONE, every group FIXED** — compiler-bugs.md § "Review round 2" (sw199–sw202,
@@ -13,7 +22,7 @@ branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
   hand-pushed bump is refused rather than released unguarded.
 - **Round 1's `checks` half MEASURED on GitHub** (run 43283407126, `fb5aab64`): `setup-bun` with
   `token: ""` works; `is-release` read 3.0.0's tag and JSR as agreeing.
-- **NEXT: round 3 on these fixes**, fresh reviewers, until a round finds nothing. **OPEN (owner):** F.
+- Round 3 followed (above); F was included there.
 
 ## 2026-11-12 — review round 1, the release tooling (owner: "review", then "A-E")
 

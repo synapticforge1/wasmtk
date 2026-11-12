@@ -50,28 +50,52 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export type Git = (args: string[]) => { code: number; out: string; err: string };
 
 /**
- * Removes what Markdown does not render as text: HTML comments (an unclosed `<!--` hides the rest
- * of the file) and fenced code blocks as CommonMark reads them — an opener of ≥3 backticks or tildes
- * indented ≤3 spaces, closed only by the SAME character at least as long, an unclosed fence running
- * to the end of the file (review round 2, finding R2-E: a ```` fence was closed by an inner ```).
+ * Removes what Markdown does not render as text, ONE line scanner in document order, the way
+ * CommonMark reads blocks (review round 3, 2026-11-12: comments had been stripped before fences and
+ * with no notion of inline code, so a `` `<!--` `` in prose hid the rest of the file):
+ *   – a FENCED block: an opener of ≥3 backticks or tildes, indented ≤3 spaces or after a list
+ *     marker, whose info string has no backtick (```` ```x``` ```` is inline code, not a fence);
+ *     closed only by the SAME character at least as long, alone on its line, indented ≤3 spaces
+ *     past the content column (0 at top level, the list item's otherwise); a deeper "closer" is
+ *     code and the fence stays open; unclosed, it runs to the end. Inside a fence nothing else
+ *     counts, a `<!--` included;
+ *   – an HTML comment BLOCK: a line that starts (≤3 spaces) with `<!--`, up to the line holding
+ *     `-->`; unclosed, it runs to the end. A `<!--` elsewhere on a line is text.
  */
 export function stripHidden(text: string): string {
-  let t = text.replace(/\r\n/g, "\n");
-  for (let i = t.indexOf("<!--"); i >= 0; i = t.indexOf("<!--")) {
-    const j = t.indexOf("-->", i + 4);
-    t = j < 0 ? t.slice(0, i) : t.slice(0, i) + t.slice(j + 3);
-  }
   const out: string[] = [];
-  let fence: { ch: string; n: number } | null = null;
-  for (const line of t.split("\n")) {
+  let fence: { ch: string; n: number; indent: number } | null = null;
+  let comment = false;
+  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
     if (fence) {
-      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
-      if (close && close[1][0] === fence.ch && close[1].length >= fence.n) fence = null;
+      const close = /^( *)(`{3,}|~{3,})\s*$/.exec(line);
+      if (
+        close && close[1].length <= fence.indent && close[2][0] === fence.ch &&
+        close[2].length >= fence.n
+      ) fence = null;
       continue;
     }
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (open) {
-      fence = { ch: open[1][0], n: open[1].length };
+    if (comment) {
+      const j = line.indexOf("-->");
+      if (j >= 0) {
+        comment = false;
+        if (line.slice(j + 3).trim() !== "") out.push(line.slice(j + 3)); // text after `-->` shows
+      }
+      continue;
+    }
+    const open = /^( {0,3}| *(?:[-*+]|\d+[.)]) +)(`{3,}|~{3,})(.*)$/.exec(line);
+    if (open && !(open[2][0] === "`" && open[3].includes("`"))) {
+      // A closer may be indented up to 3 spaces past the item's content column (0 at top level);
+      // deeper, it is code inside the fence, and the fence stays open (CommonMark).
+      const base = /[-*+.)]/.test(open[1]) ? open[1].length : 0;
+      fence = { ch: open[2][0], n: open[2].length, indent: base + 3 };
+      continue;
+    }
+    if (/^ {0,3}<!--/.test(line)) {
+      const rest = line.slice(line.indexOf("<!--") + 4);
+      const j = rest.indexOf("-->");
+      if (j < 0) comment = true;
+      else if (rest.slice(j + 3).trim() !== "") out.push(rest.slice(j + 3)); // text after `-->` shows
       continue;
     }
     out.push(line);
@@ -134,7 +158,9 @@ export function reviewsRecorded(releaseMd: string, version: string): string[] {
   const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n\s*\n/);
   const problems: string[] = [];
   for (const kind of ["Security", "Hardening"] as const) {
-    const ps = paragraphs.filter((x) => x.trimStart().startsWith(`**${kind} review:**`));
+    // A paragraph indented 4+ spaces (or a tab) is an indented code block, not a record (round 3).
+    const lead = new RegExp(`^ {0,3}\\*\\*${kind} review:\\*\\*`);
+    const ps = paragraphs.filter((x) => lead.test(x.replace(/^\n+/, "")));
     if (ps.length === 0) {
       problems.push(`the ${version} entry records no **${kind} review:** paragraph`);
     } else if (ps.length > 1) {
@@ -182,7 +208,14 @@ export function bumpOnly(file: string, head: string, now: string, version: strin
       ? ""
       : `${file} changes more than its version line`;
   }
-  const VERSION = /(export const VERSION\s*=\s*)"([^"]*)"/;
+  // Anchored at a line start, and exactly one: a `// export const VERSION = "x"` comment above
+  // the real line had been read as the constant (review round 3).
+  const VERSION = /^(export const VERSION\s*=\s*)"([^"]*)"/m;
+  const all = n.match(/^export const VERSION\s*=/gm) ?? [];
+  if (all.length !== 1) return `${file} has ${all.length} VERSION constants, not exactly one`;
+  if ((h.match(/^export const VERSION\s*=/gm) ?? []).length !== 1) {
+    return `${file} had no single VERSION constant before the bump`;
+  }
   const got = VERSION.exec(n)?.[2];
   if (got !== version) return `${file}'s VERSION constant is ${got ?? "missing"}, not "${version}"`;
   return h.replace(VERSION, `$1"${version}"`) === n
@@ -198,9 +231,23 @@ export { lsRemoteHas };
  * locally for a bump already committed: the subject is `bump to v<version>`; against HEAD^ it
  * changes only RELEASE_FILES, each by its version line alone (`bumpOnly`); and HEAD's
  * `cmem/release.md` records both required reviews. Returns the problems (empty = it passes).
+ * Review round 3: HEAD must have ONE parent (a merge is not a bump); EVERY release file is
+ * compared at HEAD^ and HEAD, changed or not, so a deno.json-only bump that leaves package.json /
+ * VERSION behind is refused (A1); HEAD^ must be at a different version, so a "bump" that bumps
+ * nothing is refused (B1).
  */
 export function verifyReleaseCommit(version: string, git: Git): string[] {
   const problems: string[] = [];
+  const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]);
+  if (parents.code !== 0) return [`could not read HEAD's parents: ${parents.err.trim()}`];
+  const ids = parents.out.trim().split(/\s+/);
+  if (ids.length !== 2) {
+    return [
+      `HEAD has ${
+        ids.length - 1
+      } parent(s) — a release commit is one ordinary commit on main, not a merge or a root`,
+    ];
+  }
   const subject = git(["log", "-1", "--format=%s", "HEAD"]);
   if (subject.code !== 0) return [`could not read HEAD: ${(subject.err + subject.out).trim()}`];
   if (subject.out.trim() !== `bump to v${version}`) {
@@ -223,8 +270,7 @@ export function verifyReleaseCommit(version: string, git: Git): string[] {
   if (!changed.some(([, p]) => p === "deno.json")) {
     problems.push("the release commit does not change deno.json's version");
   }
-  for (const [status, path] of changed) {
-    if (status !== "M" || !RELEASE_FILES.includes(path)) continue;
+  for (const path of RELEASE_FILES) {
     const before = git(["show", `HEAD^:${path}`]), after = git(["show", `HEAD:${path}`]);
     if (before.code !== 0 || after.code !== 0) {
       problems.push(`could not read ${path} at HEAD^ / HEAD`);
@@ -232,6 +278,18 @@ export function verifyReleaseCommit(version: string, git: Git): string[] {
     }
     const p = bumpOnly(path, before.out, after.out, version);
     if (p) problems.push(p);
+  }
+  const was = git(["show", "HEAD^:deno.json"]);
+  if (was.code === 0) {
+    let prev: unknown;
+    try {
+      prev = (JSON.parse(was.out) as { version?: unknown }).version;
+    } catch {
+      prev = undefined;
+    }
+    if (prev === version) {
+      problems.push(`HEAD^ is already at ${version} — the release commit bumps nothing`);
+    }
   }
   const md = git(["show", "HEAD:cmem/release.md"]);
   if (md.code !== 0) problems.push("HEAD has no cmem/release.md");
@@ -423,8 +481,9 @@ if (import.meta.main) {
       }
     }
   } finally {
+    // Only OUR worktree is removed: a `git worktree prune` here had also dropped the owner's other
+    // worktrees whose folders were briefly unreachable (review round 3).
     git(["worktree", "remove", "--force", tree]);
-    git(["worktree", "prune"]);
     await rm(tree, { recursive: true, force: true }).catch(() => {});
     await rm(cold, { recursive: true, force: true }).catch(() => {});
   }
@@ -435,6 +494,13 @@ if (import.meta.main) {
   if (!committed) {
     run(["git", "add", ...RELEASE_FILES]);
     run(["git", "commit", "-m", `bump to ${tag}`]);
+    // The commit just made is what CI will gate: re-run the same gate on it now (a hook, a staged
+    // index entry or a racing edit could have changed it — review round 3). On failure, undo it.
+    const made = verifyReleaseCommit(version, git);
+    if (made.length) {
+      git(["reset", "--soft", "HEAD^"]);
+      refuse("the commit just made does not pass the commit gate (undone; changes kept).", ...made);
+    }
   }
 
   // 2. Push main — and NO tag: CI tags after its checks pass on this commit (U4, U6).

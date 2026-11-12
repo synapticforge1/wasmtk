@@ -350,6 +350,40 @@ same day, after the first tally's 2 were fixed, and that 0 carried the warning b
 audit then CONFIRMED 28 more by running them (table below). The count is only as good as the
 entries: a silent-wrong bug nobody has found is not in it.
 
+## Review round 3 — the round-2 fixes + the owner's F (2026-11-12): 5 silent + 3 loud tool rows, CONFIRMED BY RUNNING, FIXED
+
+Owner: "all and include F". Three fresh reviewers on `1a52ee8c` (the local half, the CI half, the
+tests); every finding re-run against the pushed code before any change (e.g. a deno.json-only
+bump and a bump that bumps nothing both PASSED `verifyReleaseCommit`; an inline `` `<!--` `` in
+prose hid the records below it). Tests now: `check_release.ts` 52, `check_publish_workflow.ts` 51,
+and BOTH run in CI's `checks` job; 37 round-3 mutants (8 of them round-2 parts re-expressed for the
+rewritten code), each caught by its own case; rehearsal G1–G4 against a scratch bare origin.
+
+| row | class | the defect (measured) | fix |
+| --- | --- | --- | --- |
+| **sw203** | F — a release lost to a cancelled run | the concurrency group was per REF: GitHub keeps one pending run per group, so a third push while a release ran CANCELLED the pending bump run; and a later push then released the version itself, on a commit that was not the bump | the group is per COMMIT (`release-${{ github.sha }}`), so nothing cancels anything; `isRelease` decides by the BUMP COMMIT (one parent whose parent's version differs): only that commit's own push run, pushed ALONE (`before` = its parent), releases; a re-run of it RESUMES (an existing tag at this commit / page = done); `workflow_dispatch` never releases; a later push meets an unreleased version as a warning for `RELEASE_GRACE_MIN` (60) minutes after the bump, then refuses by name ("UNRELEASED VERSION on main", the bump commit, the way out); a merge is never the bump |
+| **sw204** | R3-A — the commit gate | a deno.json-only bump passed (package.json / VERSION left behind: only CHANGED files were compared); a "bump" whose parent was already at the version passed; a merge passed | every release file is compared at HEAD^ and HEAD, changed or not; HEAD^ must be at another version; HEAD has exactly one parent |
+| **sw205** | R3-A — hidden text | comments were stripped before fences and anywhere on a line, so an inline `` `<!--` `` hid the rest of the file (a false refusal) and a `<!--` inside a fence opened a comment; a fence in a list item, or a closer indented under one, was not seen; a record indented 4+ spaces (a code block) counted | one line scanner in document order: fences first (top level ≤3 spaces or after a list marker; an info string with a backtick is inline code; the closer ≤3 spaces past the content column), then a comment BLOCK only at a line start (text after its `-->` stays); a record paragraph must start within 3 spaces |
+| **sw206** | R3-B — VERSION | `bumpOnly` took the first `export const VERSION` anywhere, a comment included | anchored at a line start, and exactly one constant before and after |
+| **sw207** | R3-B — the local commit | the commit `deno task release` made was never re-checked: a hook, a staged entry or a racing edit could push something the gate had not passed | the commit gate re-runs on the commit just made; on failure the commit is undone (`reset --soft`, changes kept) and nothing is pushed (rehearsed: a commit-msg hook) |
+| ld125 | R3-C | the local release ran `git worktree prune`, dropping the owner's OTHER worktrees whose folders were briefly unreachable | only its own worktree is removed (rehearsed: an unrelated prunable worktree survives a release) |
+| ld126 | R3-C | the release tooling's self-tests ran only by hand, so a broken gate could release; `checks` had no time limit | both self-tests run in `checks` (fakes and a local mock only); `checks` 30 min |
+| ld127 | R3-D | a Rekor id with leading zeros (`"007"`) counted; a NaN / negative wait was used as given | a canonical positive integer only; `seconds()` falls back on anything not finite ≥ 0 |
+
+**Tests (R3-D):** S4 / S5 had gone vacuous again under F (with JSR empty the bump run releases tag
+or no tag) — both now run with JSR HAVING the version, so a phantom tag turns "refused" into "done";
+the JSR mock refuses a REPEATED cache-bust (each attempt must bust anew), not just a missing one;
+new S11–S23 (the bump pushed with others, dispatch, released / in grace / past grace / a shorter
+grace, a merge, the first deno.json, `releaseOutputs`, `findBump`, `seconds`; S24 a version-line
+revert to a released version pushed with others is "done", not refused — found while writing the
+way out below), V6–V9, R16–R23,
+R18b/c, B6, P14. **Rehearsal G1–G4:** a hook-altered commit refused and undone (HEAD = origin/main,
+the bump kept staged), nothing pushed; the same bump released (origin main = `bump to v4.0.0`, no
+tag) with an unrelated prunable worktree still registered; `--verify-commit` passes it; a
+deno.json-only bump commit refused, naming package.json and VERSION. **UNMEASURED until a push:**
+the self-test step and per-commit concurrency on GitHub; the F path end to end (the next release).
+Next: round 4 on these fixes.
+
 ## Review round 2 — the round-1 fixes (2026-11-12): 4 silent + 3 loud tool rows, CONFIRMED BY RUNNING, FIXED
 
 Owner: "all" (every group). Three fresh reviewers on `fb5aab64` (the local half, the CI half, the
