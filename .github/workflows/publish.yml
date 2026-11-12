@@ -95,17 +95,7 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Is this a release? (HEAD = github.sha; the tag on origin and JSR must agree)
-        id: rel
-        run: bun scripts/publish-workflow.ts is-release
-
-      # The local `deno task bump` ran the compatibility gate; this repeats it on the pushed
-      # commit before CI tags it (H6, Rule 3): the snapshot matches, one SemVer step at or above
-      # the floor since the previous tag, no removal without a deprecation release (Rule 4).
-      - name: Compatibility gate on the release candidate
-        if: steps.rel.outputs.release == 'true'
-        run: bun scripts/api-surface.ts --verify-release
-
+      # The code checks come FIRST, so a JSR outage cannot hide them (review round 2, R2-D).
       - name: Type-check
         run: deno check main.ts
 
@@ -130,6 +120,24 @@ jobs:
       - name: JSR dry run, on the tree the jsr job publishes
         working-directory: jsr-tree
         run: deno publish --dry-run
+
+      - name: Is this a release? (HEAD = github.sha; the tag on origin and JSR must agree)
+        id: rel
+        run: bun scripts/publish-workflow.ts is-release
+
+      # The local `deno task bump` ran the compatibility gate; this repeats it on the pushed
+      # commit before CI tags it (H6, Rule 3): the snapshot matches, one SemVer step at or above
+      # the floor since the previous tag, no removal without a deprecation release (Rule 4).
+      - name: Compatibility gate on the release candidate
+        if: steps.rel.outputs.release == 'true'
+        run: bun scripts/api-surface.ts --verify-release
+
+      # `deno task release`'s commit-level gate, repeated on the pushed commit, so a bump pushed
+      # by hand (or any push that changes the version) is not released without it (review round 2,
+      # R2-B): the subject `bump to v<version>`, version lines only, both reviews recorded.
+      - name: Release commit gate (the bump commit, both reviews recorded)
+        if: steps.rel.outputs.release == 'true'
+        run: bun scripts/release.ts --verify-commit
 
   tag:
     name: Tag ${{ needs.checks.outputs.tag }}
@@ -240,7 +248,8 @@ jobs:
           VERSION: ${{ needs.checks.outputs.version }}
         run: >-
           deno run --no-config --allow-net=api.jsr.io
-          --allow-env=GITHUB_OUTPUT,HTTP_TIMEOUT_MS --allow-write="$GITHUB_OUTPUT"
+          --allow-env=GITHUB_OUTPUT,HTTP_TIMEOUT_MS,JSR_HAS_TRIES,JSR_HAS_WAIT_S
+          --allow-write="$GITHUB_OUTPUT"
           scripts/publish-workflow.ts jsr-has "$VERSION"
 
       # Provenance requires a GitHub OIDC token; `id-token: write` above injects it. If it is absent
@@ -264,9 +273,12 @@ jobs:
   verify:
     name: Verify ${{ needs.checks.outputs.tag }} on JSR
     needs: [checks, jsr]
-    if: ${{ !cancelled() && needs.checks.outputs.release == 'true' && github.ref == 'refs/heads/main' }}
+    # Only when `jsr` RAN (succeeded or failed; a re-run whose upload was skipped still ran it):
+    # when an earlier job failed, `jsr` is skipped and there is nothing to read back — the failure
+    # is the earlier job's, not "the publish did not happen" (review round 2, R2-D).
+    if: ${{ !cancelled() && needs.jsr.result != 'skipped' && needs.checks.outputs.release == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
 

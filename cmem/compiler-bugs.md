@@ -350,6 +350,39 @@ same day, after the first tally's 2 were fixed, and that 0 carried the warning b
 audit then CONFIRMED 28 more by running them (table below). The count is only as good as the
 entries: a silent-wrong bug nobody has found is not in it.
 
+## Review round 2 — the round-1 fixes (2026-11-12): 4 silent + 3 loud tool rows, CONFIRMED BY RUNNING, FIXED
+
+Owner: "all" (every group). Three fresh reviewers on `fb5aab64` (the local half, the CI half, the
+tests). Every finding re-run against the pushed code first. Tests now: `check_release.ts` 36,
+`check_publish_workflow.ts` 36; 39 mutants, one per fix part, each caught by its own case; an
+end-to-end rehearsal against a scratch bare origin (F1–F4 below). The pushed `fb5aab64` also ran on
+GitHub (run 43283407126): `setup-bun` with `token: ""` installed Bun; `is-release` read the tag and
+JSR as agreeing for 3.0.0 — the `checks` half of round 1 measured.
+
+| row | class | the defect (measured) | fix |
+| --- | --- | --- | --- |
+| **sw199** | R2-A — the review record | round 1's negating-word heuristic still accepted five UNFINISHED phrasings ("NOT done for v3.0.4 — ended by …" [the `.` in the version cut the clause], "hasn't … yet", "TODO: …", "planned to be …", a denial after the phrase) and refused a correct record written with a dash | the STRICT form `**<Kind> review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).` — the whole paragraph, nothing after the period, both numbers equal, a real date, one record each (`reviewRecordProblem`); stated identically in review-process.md § 3 and release.md |
+| **sw200** | R2-B — the gate bypassed by a push | with the bump committed, `deno task release` refused with "push first" — and CI releases ANY pushed version change, so following that message (or any hand push) released with none of the local guards | CI repeats the commit-level gate on a release push (`release.ts --verify-commit`: subject `bump to v<version>`, only the version lines of the three files, both records); `release.ts` accepts origin/main + one such commit itself |
+| **sw201** | R2-C — the record hidden in Markdown | a ```` fence was closed by an inner ```, and an UNCLOSED fence or `<!--` hid nothing, so a record Markdown renders as code or hides counted | `stripHidden`: CommonMark fences (same character, at least as long; unclosed runs to the end) and comments (unclosed hides the rest) |
+| **sw202** | R2-C — the ref parse | `lsRemoteHas` accepted a warning line that merely named the ref; `jsrRekor` accepted `"0"` / `"000"` | a ref line is a 40-hex id and the ref, nothing else (one parser, shared by both scripts); a Rekor id string has a non-zero digit |
+| ld122 | R2-D | `verify` ran after an EARLIER job failed (checks, tag, page) and blamed "the publish did not happen" | `verify` runs only when `jsr` ran |
+| ld123 | R2-D | one JSR error turned every push to `main` red, and `is-release` ran before the type check, hiding it | `jsrHas` retries (3, 5 s apart); `checks` runs the code checks first; JSR unreadable on a TAGGED version = "not a release" with a warning (untagged = refused: cannot decide) |
+| ld124 | R2-E | `bumpOnly` required `VERSION = "x"` spacing exactly; a 200-without-id then failed reads was called "WITHOUT provenance"; `PROVENANCE_TRIES=0` read nothing and claimed "404 on every read"; `verify`'s budget was tighter than its own poll | spacing-tolerant; the LAST read decides; an invalid count falls back to the default; no sleep after the last attempt; `verify` 15 min |
+
+**Hardening, fixed (R2-E):** the local cold checks and `--version` / `--help` now run in a temporary
+WORKTREE of exactly what will be committed (HEAD + the bump), so a gitignored or skip-worktree file
+the working copy has but the commit lacks cannot pass (rehearsed: an ignored file `main.ts` imports
+→ refused at the cold check); cleanup always runs before a refusal (the temp folder no longer leaks;
+the two leaked by round 1's runs were removed). **Tests (R2-C):** S4 / S5 had been vacuous (a fake git
+that answered only the asked ref) — now it lists every tag and its stderr looks like a ref line;
+new: an `ls-remote` failure, JSR unreadable with and without the tag, retries, a numeric id, `"null"`
+/ `"000"`, mixed read sequences, an invalid count, a JSR mock that checks the URL and the cache-bust;
+env vars restored even when a case throws. One test regex was itself wrong (P11) and was fixed to
+match the real message. Rehearsal F1–F4: a prose record refused; an ignored-file dependency refused
+at the worktree cold check; a bump already committed released through the commit gate, no tag; CI's
+`--verify-commit` passes it and refuses a non-bump commit. **Still open (owner, unchanged):** F (a
+queued run cancelled by a newer push). Next: round 3 on these fixes.
+
 ## Review round 1 — the release tooling (2026-11-12): 5 silent + 3 loud tool rows, CONFIRMED BY RUNNING, FIXED
 
 Owner: "review", then "A-E" (cmem/review-process.md; workspace review standard, H35). Scope: the

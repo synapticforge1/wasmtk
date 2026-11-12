@@ -8,14 +8,18 @@
  * is ever written. The mock refuses a page that names a `target_commitish`, answers 422 for a ref
  * that already exists (as GitHub does), and records every write, so a stray write turns a case red.
  * Every refusal is checked by its MESSAGE (a crash, also exit 1, cannot pass as one), and every case
- * has a deadline (a hang fails, it does not stall the suite) — review round 1, 2026-11-12.
+ * has a deadline (a hang fails, it does not stall the suite) — review round 1, 2026-11-12. The JSR
+ * mock checks every request's path and cache-bust, and env vars are always restored — round 2.
  *
- *   U5 is-release (a fake git that answers only the exact ref it is asked for; stderr kept apart)
+ *   U5 is-release (a fake git whose ls-remote lists EVERY tag it holds; stderr kept apart)
  *     S1  no tag, JSR without it → release        S2  tag + JSR → not a release
- *     S3  HEAD is not GITHUB_SHA → refused         S4  a git WARNING on stderr is not a tag
- *     S5  only a different tag (v9.8.70) → release
+ *     S3  HEAD is not GITHUB_SHA → refused         S4  stderr that LOOKS like the ref line is not a tag
+ *     S5  only OTHER tags (v9.8.70, v1.0.0) → release
  *     S6  tag without the JSR version → STRANDED, refused
  *     S7  JSR has it, no tag → refused (published outside the flow)
+ *     S8  ls-remote fails → refused (never "no tag")
+ *     S9  JSR unreadable, tag on origin → not a release, with a warning
+ *     S10 JSR unreadable, no tag → refused (cannot decide)
  *   U6 tag
  *     T1  absent → an annotated tag object + its ref (2 writes), read back peels to the commit
  *     T2  a re-run: already at this commit → 0 writes
@@ -30,11 +34,15 @@
  *     H   page POST "succeeds" but cannot be read back: refused
  *     I   a call that never answers: ends at HTTP_TIMEOUT_MS (measured), refused, no write
  *   U8 jsr-has
- *     K   200 → "true", 404 → "false", 500 → an error (never "absent", which would re-attempt an
- *         immutable upload)
- *   U8 provenance (the read-back the file calls "the only evidence")
- *     P1  a Rekor id → pass    P2 null → WITHOUT provenance    P3 0 is absence, not an id
+ *     K1  200 → "true", 404 → "false", 500 every time → an error (never "absent", which would
+ *         re-attempt an immutable upload)       K2  a 503, then no answer, then 200 → retried, "true"
+ *   U8 provenance (the read-back the file calls "the only evidence"; the LAST read decides)
+ *     P1  a Rekor id (string) → pass    P2 null → WITHOUT provenance    P3 0 (number) is absence
  *     P4  404 throughout → NOT ON JSR (named apart)    P5 500 throughout → JSR could not be read
+ *     P6  a numeric id → pass    P7 "null" / P8 "000" (strings) are absence
+ *     P9  404, then the id → pass    P10 500 then 404 → could not be read (not "not on JSR")
+ *     P11 no answer throughout → could not be read   P12 200 without id, then 500 → could not be read
+ *     P13 PROVENANCE_TRIES=0 → the default 12 reads, not none
  *
  * Usage (from the repo root):  bun scripts/check_publish_workflow.ts
  */
@@ -209,31 +217,41 @@ async function check(
   );
 }
 
-// ── U5 is-release: a fake git that ANSWERS ITS ARGUMENTS (only the exact ref it is asked for),
-//    keeps stderr apart, and a mock JSR ──
-const fakeGit = (head: string, remoteTags: string[], stderr = "") => (args: string[]) => {
-  if (args[0] === "rev-parse") return { code: 0, out: `${head}\n`, err: stderr };
+// ── U5 is-release: a fake git whose ls-remote lists EVERY tag it holds (so only the exact-ref
+//    parse can pick the right one — review round 2: a fake that answered only the asked ref made
+//    S5 vacuous), whose stderr can look exactly like a ref line, and a mock JSR ──
+const fakeGit = (
+  head: string,
+  remoteTags: string[],
+  o: { stderr?: string; lsRemoteCode?: number } = {},
+) =>
+(args: string[]) => {
+  if (args[0] === "rev-parse") return { code: 0, out: `${head}\n`, err: o.stderr ?? "" };
   if (args[0] === "ls-remote") {
-    const asked = args[args.length - 1];
-    const lines = remoteTags.filter((t) => `refs/tags/${t}` === asked)
-      .map((t) => `${SHA}\trefs/tags/${t}`);
-    return { code: 0, out: lines.length ? lines.join("\n") + "\n" : "", err: stderr };
+    if (o.lsRemoteCode) return { code: o.lsRemoteCode, out: "", err: "fatal: unable to access" };
+    const lines = remoteTags.map((t) => `${SHA}\trefs/tags/${t}`);
+    return { code: 0, out: lines.length ? lines.join("\n") + "\n" : "", err: o.stderr ?? "" };
   }
   return { code: 1, out: "", err: "fake git: unexpected" };
 };
-const jsrSays = (has: boolean) => () => Promise.resolve(has ? "true" as const : "false" as const);
+const jsrSays = (has: boolean | "throws") => () =>
+  has === "throws"
+    ? Promise.reject(new Error("JSR answered HTTP 503 (3 tries)"))
+    : Promise.resolve(has ? "true" as const : "false" as const);
 async function decide(
   name: string,
   git: ReturnType<typeof fakeGit>,
-  jsrHasIt: boolean,
+  jsrHasIt: boolean | "throws",
   want: boolean | RegExp,
+  wantWarning = false,
 ) {
   let got = "";
   let ok = false;
   try {
     const r = await isRelease(SHA, "9.8.7", git, jsrSays(jsrHasIt));
     got = JSON.stringify(r);
-    ok = typeof want === "boolean" && r.release === want && r.tag === TAG;
+    ok = typeof want === "boolean" && r.release === want && r.tag === TAG &&
+      Boolean(r.warning) === wantWarning;
   } catch (e) {
     got = `refused: ${(e as Error).message}`;
     ok = want instanceof RegExp && want.test(got);
@@ -249,14 +267,14 @@ await decide(
   /not this run's commit/,
 );
 await decide(
-  "S4 a git warning on stderr is NOT a tag",
-  fakeGit(SHA, [], "warning: redirecting to https://example.test/r.git/\n"),
+  "S4 stderr that LOOKS like the ref line is not a tag",
+  fakeGit(SHA, [], { stderr: `${SHA}\trefs/tags/v9.8.7\n` }),
   false,
   true,
 );
 await decide(
-  "S5 only a DIFFERENT tag on origin (v9.8.70) → release",
-  fakeGit(SHA, ["v9.8.70"]),
+  "S5 only OTHER tags on origin (v9.8.70, v1.0.0) → release",
+  fakeGit(SHA, ["v9.8.70", "v1.0.0"]),
   false,
   true,
 );
@@ -271,6 +289,25 @@ await decide(
   fakeGit(SHA, []),
   true,
   /published outside this flow/,
+);
+await decide(
+  "S8 ls-remote fails → refused (never read as 'no tag')",
+  fakeGit(SHA, ["v9.8.7"], { lsRemoteCode: 128 }),
+  false,
+  /could not read origin's tags/,
+);
+await decide(
+  "S9 JSR unreadable, tag on origin → not a release, with a WARNING",
+  fakeGit(SHA, ["v9.8.7"]),
+  "throws",
+  false,
+  true,
+);
+await decide(
+  "S10 JSR unreadable, no tag → refused (cannot decide)",
+  fakeGit(SHA, []),
+  "throws",
+  /cannot be decided/,
 );
 
 // ── U6 tag ──
@@ -369,61 +406,154 @@ await check("H page not readable back", rel, world({ dropReleaseOnPost: true }),
   );
 }
 
+/**
+ * A mock JSR that answers a SEQUENCE (the last answer repeats; "throw" = no answer) and checks
+ * every request: the version record's exact path for @jrmarcum/wasmtk@9.8.7 and a cache-bust `cb=`
+ * parameter — a wrong URL or a missing cache-bust answers 599 (review round 2: every mock had
+ * ignored the URL, so a swapped scope / name survived). `seen` records the request count.
+ */
+function jsrMock(answers: Array<[number, unknown] | "throw">) {
+  const state = { n: 0, bad: "" };
+  const f = (url: string) => {
+    const u = new URL(url);
+    const a = answers[Math.min(state.n++, answers.length - 1)];
+    if (
+      u.pathname !== "/scopes/jrmarcum/packages/wasmtk/versions/9.8.7" || !u.searchParams.get("cb")
+    ) {
+      state.bad = url;
+      return Promise.resolve(new Response("{}", { status: 599 }));
+    }
+    if (a === "throw") return Promise.reject(new Error("no answer"));
+    return Promise.resolve(new Response(JSON.stringify(a[1]), { status: a[0] }));
+  };
+  return { f, state };
+}
+
+/** Sets env vars for one block and ALWAYS restores them (a failing case cannot leak them). */
+async function withEnv(vars: Record<string, string>, fn: () => Promise<void>) {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, vars);
+  try {
+    await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
 // ── U8 jsr-has ──
-{
-  const jsr = (status: number) => () => Promise.resolve(new Response("{}", { status }));
+await withEnv({ JSR_HAS_TRIES: "3", JSR_HAS_WAIT_S: "0" }, async () => {
   const got: string[] = [];
   for (const s of [200, 404, 500]) {
     try {
-      got.push(await jsrHas("9.8.7", jsr(s)));
+      got.push(await jsrHas("9.8.7", jsrMock([[s, {}]]).f));
     } catch {
       got.push("error");
     }
   }
-  report("K jsr-has 200 / 404 / 500", got.join(",") === "true,false,error", got.join(", "));
-}
+  report("K1 jsr-has 200 / 404 / 500×3", got.join(",") === "true,false,error", got.join(", "));
+  const m = jsrMock([[503, {}], "throw", [200, {}]]);
+  let k2 = "";
+  try {
+    k2 = await jsrHas("9.8.7", m.f);
+  } catch (e) {
+    k2 = `error: ${(e as Error).message}`;
+  }
+  report(
+    "K2 a 503 then no answer, then 200 → retried to 'true'",
+    k2 === "true" && m.state.n === 3,
+    `${k2} after ${m.state.n} requests`,
+  );
+});
 
 // ── U8 the provenance read-back (the step the file calls "the only evidence") ──
-{
-  process.env.PROVENANCE_TRIES = "2";
-  process.env.PROVENANCE_WAIT_S = "0";
-  const answers = (status: number, body: unknown) => () =>
-    Promise.resolve(new Response(JSON.stringify(body), { status }));
-  const runs: [string, ReturnType<typeof answers>, number, RegExp][] = [
+await withEnv({ PROVENANCE_TRIES: "3", PROVENANCE_WAIT_S: "0" }, async () => {
+  const runs: [string, Array<[number, unknown] | "throw">, number, RegExp][] = [
     [
-      "P1 a Rekor id → pass",
-      answers(200, { rekorLogId: "3439121339" }),
+      "P1 a Rekor id (string) → pass",
+      [[200, { rekorLogId: "3439121339" }]],
       0,
-      /Provenance recorded — Rekor log ID: 3439121339/,
+      /Rekor log ID: 3439121339/,
     ],
     [
       "P2 rekorLogId null → published WITHOUT provenance",
-      answers(200, { rekorLogId: null }),
+      [[200, { rekorLogId: null }]],
       1,
       /WITHOUT provenance/,
     ],
-    [
-      "P3 rekorLogId 0 is absence, not an id",
-      answers(200, { rekorLogId: 0 }),
-      1,
-      /WITHOUT provenance/,
-    ],
+    ["P3 rekorLogId 0 (number) is absence", [[200, { rekorLogId: 0 }]], 1, /WITHOUT provenance/],
     [
       "P4 404 throughout → NOT ON JSR (not a provenance outage)",
-      answers(404, {}),
+      [[404, {}]],
       1,
       /NOT ON JSR at all/,
     ],
-    ["P5 500 throughout → JSR could not be read", answers(500, {}), 1, /could not be read/],
+    ["P5 500 throughout → JSR could not be read", [[500, {}]], 1, /could not be read/],
+    [
+      "P6 a Rekor id as a NUMBER → pass",
+      [[200, { rekorLogId: 3439121339 }]],
+      0,
+      /Rekor log ID: 3439121339/,
+    ],
+    [
+      'P7 rekorLogId "null" (a string) is absence',
+      [[200, { rekorLogId: "null" }]],
+      1,
+      /WITHOUT provenance/,
+    ],
+    [
+      'P8 rekorLogId "0" / "000" is absence',
+      [[200, { rekorLogId: "000" }]],
+      1,
+      /WITHOUT provenance/,
+    ],
+    [
+      "P9 404, then the id → pass (JSR ingests late)",
+      [[404, {}], [200, { rekorLogId: "5" }]],
+      0,
+      /Rekor log ID: 5/,
+    ],
+    [
+      "P10 500, then 404 → could not be read (not 'not on JSR')",
+      [[500, {}], [404, {}]],
+      1,
+      /could not be read/,
+    ],
+    [
+      "P11 no answer throughout → could not be read",
+      ["throw"],
+      1,
+      /could not be read for \S+ \(last: no answer/,
+    ],
+    [
+      "P12 200 without id, then 500 → could not be read (the last read decides)",
+      [[200, { rekorLogId: null }], [500, {}]],
+      1,
+      /could not be read .*earlier read showed the version without a Rekor id/,
+    ],
   ];
-  for (const [name, f, wantCode, wantMsg] of runs) {
-    const r = await quiet(() => provenance("9.8.7", f));
+  for (const [name, answers, wantCode, wantMsg] of runs) {
+    const m = jsrMock(answers);
+    const r = await quiet(() => provenance("9.8.7", m.f));
     const said = r.lines.join(" ");
-    report(name, r.v === wantCode && wantMsg.test(said), `exit ${r.v}: ${said.slice(-110)}`);
+    report(
+      name,
+      r.v === wantCode && wantMsg.test(said) && m.state.bad === "",
+      `exit ${r.v}: ${said.slice(-110)}${m.state.bad ? ` BAD URL ${m.state.bad}` : ""}`,
+    );
   }
-  delete process.env.PROVENANCE_TRIES;
-  delete process.env.PROVENANCE_WAIT_S;
-}
+  // P13: an invalid PROVENANCE_TRIES is not "zero reads": the default 12 applies.
+  process.env.PROVENANCE_TRIES = "0";
+  const m = jsrMock([[404, {}]]);
+  const r = await quiet(() => provenance("9.8.7", m.f));
+  report(
+    "P13 PROVENANCE_TRIES=0 → the default 12 reads, not none",
+    r.v === 1 && m.state.n === 12,
+    `exit ${r.v} after ${m.state.n} reads`,
+  );
+});
 
 console.log(failed ? `\n${failed} of ${cases} case(s) FAILED` : `\nall ${cases} cases pass`);
 process.exit(failed ? 1 : 0);

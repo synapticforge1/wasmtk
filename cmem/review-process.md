@@ -103,14 +103,19 @@ and NOT fixed. **The round's record:** [next-work.md](next-work.md) (reviewers, 
 what is next). **A claim found wrong:** corrected where it stands, marked 🔁 with the date and the
 row that found it.
 
-**Before every release (the H35 gate):** the release's entry in [release.md](release.md) carries
-two paragraphs, each beginning with its label and naming the round that ended it empty:
+**Before every release (the H35 gate):** the release's entry in [release.md](release.md) (§
+"Release History", `### X.Y.Z`) carries exactly two record paragraphs, each EXACTLY in this form
+(line breaks inside a paragraph are fine), and nothing after the final period:
 
 ```
-**Security review:** <scope — everything since vA.B.C>; rounds <n>; ended by an empty round
-(round <n>, <date>); findings <rows in compiler-bugs.md>.
-**Hardening review:** <the same, for the seven axes>; ended by an empty round (round <n>, <date>).
+**Security review:** <scope, with the findings rows>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
+
+**Hardening review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
 ```
 
-`deno task release` (`scripts/release.ts`) refuses the release unless the entry for the version
-being released exists and both paragraphs are there, each containing "empty round".
+The last round IS the empty one, so both numbers are equal; the date is a real date. The scope
+may not contain a `;`. `deno task release` (`scripts/release.ts`, guard 0g) refuses unless both
+are there in this form, and CI repeats the check on the pushed bump commit
+(`release.ts --verify-commit`). **Strict on purpose** (review round 2, 2026-11-12): round 1 read
+free prose for "ended by an empty round" with a list of negating words, and round 2 found five
+more phrasings of an UNFINISHED review that still passed — a fixed form cannot be half-matched.
