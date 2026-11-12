@@ -103,7 +103,9 @@ Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full
    answer with them.
 
 **For the 2.2.0 → 3.0.x bump (a MAJOR; binaryang's ledger C43, read into our tree by them
-2026-11-09 — a claim until re-measured here):** predicted unaffected — the binaryen facade's type
+2026-11-09 — a claim until re-measured here). Target 3.0.4** (JSR `latest`, read 2026-11-12):
+3.0.3 and 3.0.4 are the SAME package as 3.0.2 (binaryang CHANGELOG: release-order and CI changes
+only), so the list below is unchanged: predicted unaffected — the binaryen facade's type
 ids, `Features` bits, a new module's default features and shrink level now follow binaryen.js 132,
 but we compare types by name (`witgen.ts`), set features from `Features.All` and set the shrink
 level ourselves; `i64.const` now throws on a second argument (we pass one); `wasm-objdump -d` is
@@ -353,9 +355,10 @@ commands".
    | U7 | `release` | `contents: write` | the page FROM the tag: it peels to the run's commit → an existing page = done → `POST` on the tag with the JSR link → read back; never `gh` |
    | U8 | `jsr` | `id-token` | LAST: sparse checkout of `publish.include` + `deno.lock` + the workflow script, nothing installed; `jsr-has` (skip if JSR has it); OIDC check; `deno publish` DIRECTLY; the Rekor id read back, FATAL |
 
-   ⚠️ UNMEASURED until the first release in this order: `deno publish` after a bot-made tag, in a
-   run started by a push to `main` (binaryang re-measures the JSR side first — release-process.md
-   U6). Tests do not run in `checks` yet (Deno-exit P7). If publish-workflow.ts changed:
+   A bot-made tag in the same run DOES publish to JSR with provenance — measured on binaryang
+   3.0.3 / 3.0.4 (2026-11-11; re-read by wasmtk 2026-11-12: annotated tags by
+   `github-actions[bot]`, JSR Rekor 3814264552 / 3815373888); wasmtk's own tag → page → publish
+   half is still unmeasured until its first release in this order. Tests do not run in `checks` yet (Deno-exit P7). If publish-workflow.ts changed:
    `bun scripts/check_publish_workflow.ts` (16 cases on a mock GitHub / JSR / git) and REHEARSE the
    changed job as the runner lays it out (best-practices 7.22): a release-job bug costs a version.
 8. **U12 Failure: "Re-run failed jobs"** — `checks`' outputs are kept; the tag, the page and the

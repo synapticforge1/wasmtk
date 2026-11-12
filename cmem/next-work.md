@@ -21,6 +21,13 @@ branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
   re-derived on each `origin/main`.
 - **C46** (S3D → workspace) is H35's source, not addressed to wasmtk. H6 (H6.5b), H10, H12 as
   before; H19, H27, H28, H30–H34, C30, C34, C43, C44 answered, waiting on their creators.
+- **Pushed** `a44ed8a0` (CI run 43279478676 green, `checks` only). **Seen in the workspace the same
+  day (`projects.md`), re-read here:** binaryang 3.0.3 / 3.0.4 released 2026-11-11 in the owner's
+  order — the bot-made tag published to JSR with provenance, which answers wasmtk's U6 caveat
+  (publish.yml / workflow.md updated); 3.0.3 and 3.0.4 are the same package as 3.0.2, so the next
+  binaryang bump targets **3.0.4** with C43's list unchanged (workflow.md § Bumping). The workspace's
+  card for wasmtk in `release-process.md` § 7 still shows the pre-convergence state (measured before
+  `ff9cff07`) — the H33 answer has the per-slot status; the card is the workspace's to refresh.
 
 ## 2026-11-10 — workspace items for wasmtk (owner: "review workspace for items needing this project's attention and make the requested fixes")
 
@@ -56,8 +63,10 @@ Every open ledger row naming wasmtk, read; answers in each row's cell.
   (`origin/main` `35301d47`); the NON-release path MEASURED on GitHub:** run 42846020431 (event
   push) — `checks` green (is-release, type check, the dry run on the jsr tree), the release-candidate
   gate skipped, `tag` / `release` / `jsr` skipped, as for a version already tagged (3.0.0).
-  ⚠️ UNMEASURED until the first release in this order: the tag → page → publish half, including
-  `deno publish` after a bot-made tag in a `main`-push run (binaryang re-measures first, U6). **Not converged, recorded:** U3 `bump` does not refuse a dirty
+  UNMEASURED until wasmtk's first release in this order: its own tag → page → publish half. **The
+  U6 question is answered elsewhere (2026-11-12):** binaryang released 3.0.3 / 3.0.4 in this order
+  on 2026-11-11 — annotated tags by `github-actions[bot]`, JSR provenance 3814264552 / 3815373888
+  (re-read by wasmtk), so a bot-made tag in the same run does publish to JSR. **Not converged, recorded:** U3 `bump` does not refuse a dirty
   tree itself (`release.ts` does, before anything is committed) and does not run the previous
   tag's tests (`check_prev_tests.ts`, ~25 min, stays a manual step 5 — a patch / minor needs it);
   U5 no tests in CI (wasmtk's gate is local; Deno-exit P7); U9 Bun and Deno come through their

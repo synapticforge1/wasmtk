@@ -23,11 +23,12 @@
 # the tag made by the first attempt and call it not a release). The version tag IS the release
 # (owner, 2026-11-10): no `release/<tag>` branch.
 #
-# ⚠️ UNMEASURED until the first release under this order: `deno publish` now runs in a run started
-# by a push to `main`, after a tag made by github-actions[bot]. binaryang recorded that a tag
-# PUSHED by the bot could not trigger a JSR publish; here nothing waits for a tag trigger (the jobs
-# chain with `needs:`), and the OIDC identity is this run's — binaryang re-measures it first
-# (release-process.md U6 ⚠️). Tests are NOT run in `checks` yet: wasmtk's gate is local (installed
+# A tag made by github-actions[bot] in the same run DOES publish to JSR with provenance: measured
+# on binaryang's 3.0.3 and 3.0.4 (2026-11-11, released in this order; re-read by wasmtk 2026-11-12:
+# both tags annotated, tagger github-actions[bot]; JSR Rekor 3814264552 / 3815373888). Nothing
+# here waits for a tag trigger (the jobs chain with `needs:`), so the OIDC identity is this run's.
+# wasmtk's own first release in this order is still the first measurement of THIS file's tag →
+# page → publish half. Tests are NOT run in `checks` yet: wasmtk's gate is local (installed
 # `wasmtk`, Go, Zig, standalone engines); a CI gate is Deno-exit plan P7.
 #
 # Every action is pinned to a commit hash; the comment names its release. Move a pin by reading
