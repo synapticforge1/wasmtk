@@ -3,74 +3,124 @@
  * projects; owner's order D1, 2026-11-10). Run after the owner's level was applied with
  * `deno task bump <kind>`:
  *
- *   deno task release      (runs `bun scripts/release.ts`)
+ *   deno task release                       (runs `bun scripts/release.ts`)
+ *   bun scripts/release.ts --verify-commit  (publish.yml's `checks`, on a release push: the same
+ *                                            commit-level gate CI repeats — see below)
  *
  * Guards, before anything is committed — each one a release that went wrong somewhere:
- *   0a. the tree is clean but for the bump's own files, UNTRACKED files counted as dirty (a file
- *       never committed is absent from the release while every local check passes), and those
- *       files change NOTHING but their version line (`bumpOnly`; a rename onto one blocks);
- *   0b. on `main`, and `main` equal to `origin/main` (after a fetch): the push adds the bump only;
+ *   0a. the tree is clean but for the bump's own files, UNTRACKED files counted as dirty, and those
+ *       files plain modifications (a rename / add / delete onto one blocks);
+ *   0b. on `main`, and either `main` = `origin/main` with the bump in the working tree (changing
+ *       NOTHING but the version lines — `bumpOnly`), or `main` = `origin/main` + exactly ONE commit
+ *       that passes `verifyReleaseCommit` (a bump already committed, e.g. by the owner's "commit");
  *   0c. the tag absent locally and on origin (a tag that exists has been, or will be, released);
  *   0d. JSR does not already serve the version (a version number is immutable there);
- *   0e. COLD checks in an empty DENO_DIR, as publish.yml's `checks` runs them: `deno check main.ts`
- *       and `deno publish --dry-run` (a warm cache passes what CI fails);
- *   0f. the published root runs as a user runs it: `--version` names this version, `--help` exits 0;
- *   0g. the version's entry in `cmem/release.md` records BOTH required reviews — a security review
- *       and a hardening review, each ended by an empty round (🔒 owner 2026-11-12, workspace
- *       `review-process.md` § 0, letter H35; the entry is committed with the release notes, U2).
- * Then: commit RELEASE_FILES as `bump to vX.Y.Z` (if anything is staged), push `main` as a user,
+ *   0e. COLD checks, in a temporary WORKTREE of exactly what will be committed (HEAD + the bump) and
+ *       an empty DENO_DIR, as publish.yml's `checks` runs them: `deno check main.ts`, `deno publish
+ *       --dry-run`, then `--version` names this version and `--help` exits 0 — so an ignored or
+ *       skip-worktree file the working copy has but the commit lacks cannot make them pass;
+ *   0g. the version's entry in `cmem/release.md` records BOTH required reviews in the strict form
+ *       (`reviewRecordProblem`; 🔒 owner 2026-11-12, workspace `review-process.md` § 0, letter H35).
+ * Then: commit RELEASE_FILES as `bump to vX.Y.Z` (unless already committed), push `main` as a user,
  * and read it back with `git ls-remote`. **It makes and pushes NO tag** (U4): CI checks the pushed
- * commit, then CI creates the tag, then the Release page from the tag, then publishes to JSR —
- * publish.yml, in the owner's order.
+ * commit, then CI creates the tag, then the Release page from the tag, then publishes to JSR.
+ *
+ * **CI repeats the commit-level gate** (review round 2, 2026-11-12, finding R2-B): a hand-pushed
+ * `bump to` commit — or any push that changes the version — would otherwise be released by CI
+ * with none of these guards. `--verify-commit` checks HEAD: subject `bump to v<version>`, a diff
+ * against HEAD^ that changes only the version lines of RELEASE_FILES, and both review records.
  *
  * Never `deno publish` here (§ 1 rule 3: a local publish uploads WITHOUT provenance, and that
  * version can never be fixed), never `git tag`. Replaced `scripts/publish.ts` / `deno task publish`
  * on 2026-11-10, which had none of the guards, force-moved a local tag and pushed twice.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import denoJson from "../deno.json" with { type: "json" };
-import { jsrHas } from "./publish-workflow.ts";
+import { jsrHas, lsRemoteHas } from "./publish-workflow.ts";
 
 /** What `deno task bump` writes (deno.json + scripts/sync-version.ts's two mirrors). */
 export const RELEASE_FILES = ["deno.json", "package.json", "src/utils.ts"];
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+/** A git call's result: `out` is STDOUT only (the only thing parsed), `err` its stderr. */
+export type Git = (args: string[]) => { code: number; out: string; err: string };
+
 /**
- * Does a review paragraph say, affirmatively, that the review ended by an empty round? It must
- * carry the recorded form "ended by an empty round (round <n>" (cmem/review-process.md § 3), and
- * the clause it stands in must not deny or defer it ("NOT yet ended by …", "will be ended by …").
- * Review round 1, 2026-11-12 (findings A1 / C2): the guard had matched the bare words "empty
- * round", so "not yet ended by an empty round" passed.
+ * Removes what Markdown does not render as text: HTML comments (an unclosed `<!--` hides the rest
+ * of the file) and fenced code blocks as CommonMark reads them — an opener of ≥3 backticks or tildes
+ * indented ≤3 spaces, closed only by the SAME character at least as long, an unclosed fence running
+ * to the end of the file (review round 2, finding R2-E: a ```` fence was closed by an inner ```).
  */
-export function endedByEmptyRound(paragraph: string): boolean {
-  const m = /ended by an empty round \(round \d+/i.exec(paragraph);
-  if (!m) return false;
-  const cut = Math.max(
-    ...[".", ";", "!", "?", "\n"].map((c) => paragraph.lastIndexOf(c, m.index - 1)),
+export function stripHidden(text: string): string {
+  let t = text.replace(/\r\n/g, "\n");
+  for (let i = t.indexOf("<!--"); i >= 0; i = t.indexOf("<!--")) {
+    const j = t.indexOf("-->", i + 4);
+    t = j < 0 ? t.slice(0, i) : t.slice(0, i) + t.slice(j + 3);
+  }
+  const out: string[] = [];
+  let fence: { ch: string; n: number } | null = null;
+  for (const line of t.split("\n")) {
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+      if (close && close[1][0] === fence.ch && close[1].length >= fence.n) fence = null;
+      continue;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (open) {
+      fence = { ch: open[1][0], n: open[1].length };
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/**
+ * THE record of a required review, and nothing else (cmem/review-process.md § 3):
+ *
+ *   **Security review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
+ *
+ * The whole paragraph must be exactly this (whitespace and line breaks normalised): the last round
+ * is the empty one (both numbers equal), the date is real, and nothing follows the final period.
+ * Review round 2, 2026-11-12 (finding R2-A): round 1 had searched free prose for the phrase and a
+ * list of negating words — five more phrasings of an UNFINISHED review still passed ("hasn't …",
+ * "TODO: …", "planned to be …", a denial after the phrase), and a correct record with a dash was
+ * refused. A strict form cannot be half-matched. Returns the problem, or "".
+ */
+export function reviewRecordProblem(paragraph: string, kind: "Security" | "Hardening"): string {
+  const p = paragraph.replace(/\s+/g, " ").trim();
+  const re = new RegExp(
+    `^\\*\\*${kind} review:\\*\\* (\\S[^;]*?); rounds (\\d+); ended by an empty round \\(round (\\d+), (\\d{4})-(\\d{2})-(\\d{2})\\)\\.$`,
   );
-  const clause = paragraph.slice(cut + 1, m.index);
-  return !/\b(not|no|never|yet|pending|without|until|unless|will|would|should|if|once|when)\b/i
-    .test(
-      clause,
-    );
+  const m = re.exec(p);
+  const form =
+    `"**${kind} review:** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>)."`;
+  if (!m) return `the ${kind.toLowerCase()} review is not in the recorded form ${form}`;
+  const [, , rounds, last, y, mo, d] = m;
+  if (Number(rounds) < 1 || rounds !== last) {
+    return `the ${kind.toLowerCase()} review's last round (${last}) is not its round count (${rounds}): the empty round ends it`;
+  }
+  const date = new Date(`${y}-${mo}-${d}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== `${y}-${mo}-${d}`) {
+    return `the ${kind.toLowerCase()} review's date ${y}-${mo}-${d} is not a real date`;
+  }
+  return "";
 }
 
 /**
  * Guard 0g: the problems with `version`'s entry in `cmem/release.md` (empty = it records both
- * required reviews). Only the `## Release History` section counts (not a plan elsewhere in the
- * file), HTML comments and fenced code are ignored, and the entry is the `### X.Y.Z` section up to
- * the next `###` or `##` heading (a `####` subheading stays inside it). It must hold a paragraph
- * beginning exactly `**Security review:**` and one beginning `**Hardening review:**`, each ended
- * by an empty round in the recorded form (`endedByEmptyRound`).
+ * required reviews). Only the `## Release History` section counts (up to the next `## `), hidden
+ * text is removed first (`stripHidden`), and the entry is the `### X.Y.Z` section up to the next
+ * `##` / `###` heading (a `####` subheading stays inside it). It must hold exactly one paragraph
+ * beginning `**Security review:**` and one beginning `**Hardening review:**`, each in the strict
+ * recorded form (`reviewRecordProblem`).
  */
 export function reviewsRecorded(releaseMd: string, version: string): string[] {
-  const text = releaseMd.replace(/\r\n/g, "\n").replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/^(```|~~~)[\s\S]*?^\1[^\n]*$/gm, "");
-  const lines = text.split("\n");
+  const lines = stripHidden(releaseMd).split("\n");
   const hist = lines.findIndex((l) => /^## Release History\s*$/.test(l));
   if (hist < 0) return ['cmem/release.md has no "## Release History" section'];
   let histEnd = hist + 1;
@@ -83,13 +133,15 @@ export function reviewsRecorded(releaseMd: string, version: string): string[] {
   while (end < histEnd && !/^#{2,3} /.test(lines[end])) end++;
   const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n\s*\n/);
   const problems: string[] = [];
-  for (const kind of ["Security", "Hardening"]) {
-    const p = paragraphs.find((x) => x.trimStart().startsWith(`**${kind} review:**`));
-    if (!p) problems.push(`the ${version} entry records no **${kind} review:** paragraph`);
-    else if (!endedByEmptyRound(p)) {
-      problems.push(
-        `the ${version} entry's ${kind.toLowerCase()} review does not record that it ended by an empty round ("ended by an empty round (round n, date)")`,
-      );
+  for (const kind of ["Security", "Hardening"] as const) {
+    const ps = paragraphs.filter((x) => x.trimStart().startsWith(`**${kind} review:**`));
+    if (ps.length === 0) {
+      problems.push(`the ${version} entry records no **${kind} review:** paragraph`);
+    } else if (ps.length > 1) {
+      problems.push(`the ${version} entry records the ${kind.toLowerCase()} review twice`);
+    } else {
+      const p = reviewRecordProblem(ps[0], kind);
+      if (p) problems.push(`the ${version} entry: ${p}`);
     }
   }
   return problems;
@@ -109,10 +161,11 @@ export function releaseBlockers(porcelain: string): string[] {
 }
 
 /**
- * Is `now` the committed `head` with ONLY the version changed to `version`? The JSON manifests are
- * compared as data (everything but `version` equal); `src/utils.ts` as text (identical but for the
- * `export const VERSION = "…"` line). Returns the problem, or "" (review round 1, finding A2: any
- * edit in a release file had ridden along in the `bump to` commit).
+ * Is `now` the earlier `head` with ONLY the version changed to `version`? The JSON manifests are
+ * compared as data (everything but `version` equal, nested values included); `src/utils.ts` as text
+ * (identical but for the `VERSION` constant, whatever its spacing). Returns the problem, or "".
+ * Review round 1 (A2): any edit in a release file had ridden along in the `bump to` commit;
+ * round 2 (R2-E): a `VERSION="x"` spacing was wrongly refused.
  */
 export function bumpOnly(file: string, head: string, now: string, version: string): string {
   const h = head.replace(/\r\n/g, "\n"), n = now.replace(/\r\n/g, "\n");
@@ -129,24 +182,69 @@ export function bumpOnly(file: string, head: string, now: string, version: strin
       ? ""
       : `${file} changes more than its version line`;
   }
-  const versioned = h.replace(/(export const VERSION\s*=\s*)"[^"]*"/, `$1"${version}"`);
-  if (!n.includes(`export const VERSION = "${version}"`)) {
-    return `${file}'s VERSION constant is not "${version}"`;
-  }
-  return versioned === n ? "" : `${file} changes more than its VERSION line`;
+  const VERSION = /(export const VERSION\s*=\s*)"([^"]*)"/;
+  const got = VERSION.exec(n)?.[2];
+  if (got !== version) return `${file}'s VERSION constant is ${got ?? "missing"}, not "${version}"`;
+  return h.replace(VERSION, `$1"${version}"`) === n
+    ? ""
+    : `${file} changes more than its VERSION line`;
 }
 
-/** The exact ref line of `git ls-remote` output for `ref` exists (stdout only, never stderr). */
-export function lsRemoteHas(stdout: string, ref: string): boolean {
-  return stdout.split("\n").some((l) => l.trim().split(/\s+/)[1] === ref);
+// The ref parser is shared with CI's is-release (one definition — scripts/publish-workflow.ts).
+export { lsRemoteHas };
+
+/**
+ * The commit-level release gate, on HEAD — run by CI on every release push (`--verify-commit`) and
+ * locally for a bump already committed: the subject is `bump to v<version>`; against HEAD^ it
+ * changes only RELEASE_FILES, each by its version line alone (`bumpOnly`); and HEAD's
+ * `cmem/release.md` records both required reviews. Returns the problems (empty = it passes).
+ */
+export function verifyReleaseCommit(version: string, git: Git): string[] {
+  const problems: string[] = [];
+  const subject = git(["log", "-1", "--format=%s", "HEAD"]);
+  if (subject.code !== 0) return [`could not read HEAD: ${(subject.err + subject.out).trim()}`];
+  if (subject.out.trim() !== `bump to v${version}`) {
+    problems.push(
+      `HEAD's subject is "${subject.out.trim()}", not "bump to v${version}" — a release is the commit \`deno task release\` makes, and nothing else`,
+    );
+  }
+  const diff = git(["diff", "--name-status", "--no-renames", "HEAD^", "HEAD"]);
+  if (diff.code !== 0) return [...problems, `could not diff HEAD^..HEAD: ${diff.err.trim()}`];
+  const changed = diff.out.split("\n").filter((l) => l.trim() !== "").map((l) => l.split("\t"));
+  for (const [status, path] of changed) {
+    if (status !== "M" || !RELEASE_FILES.includes(path)) {
+      problems.push(
+        `the release commit touches ${path} (${status}) — only the version lines of ${
+          RELEASE_FILES.join(", ")
+        } may change`,
+      );
+    }
+  }
+  if (!changed.some(([, p]) => p === "deno.json")) {
+    problems.push("the release commit does not change deno.json's version");
+  }
+  for (const [status, path] of changed) {
+    if (status !== "M" || !RELEASE_FILES.includes(path)) continue;
+    const before = git(["show", `HEAD^:${path}`]), after = git(["show", `HEAD:${path}`]);
+    if (before.code !== 0 || after.code !== 0) {
+      problems.push(`could not read ${path} at HEAD^ / HEAD`);
+      continue;
+    }
+    const p = bumpOnly(path, before.out, after.out, version);
+    if (p) problems.push(p);
+  }
+  const md = git(["show", "HEAD:cmem/release.md"]);
+  if (md.code !== 0) problems.push("HEAD has no cmem/release.md");
+  else problems.push(...reviewsRecorded(md.out, version));
+  return problems;
 }
 
 const version = denoJson.version;
 const tag = `v${version}`;
 
-function run(cmd: string[]): void {
+function run(cmd: string[], cwd?: string): void {
   console.log(`$ ${cmd.join(" ")}`);
-  const code = spawnSync(cmd[0]!, cmd.slice(1), { stdio: "inherit" }).status ?? 1;
+  const code = spawnSync(cmd[0]!, cmd.slice(1), { stdio: "inherit", cwd }).status ?? 1;
   if (code !== 0) {
     console.error(`\nCommand failed with exit code ${code}: ${cmd.join(" ")}`);
     process.exit(code);
@@ -160,11 +258,12 @@ function run(cmd: string[]): void {
  */
 function capture(
   cmd: string[],
-  env?: NodeJS.ProcessEnv,
+  opts: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ): { code: number; out: string; err: string } {
-  const r = spawnSync(cmd[0]!, cmd.slice(1), { encoding: "utf8", env, maxBuffer: 1 << 26 });
+  const r = spawnSync(cmd[0]!, cmd.slice(1), { encoding: "utf8", maxBuffer: 1 << 26, ...opts });
   return { code: r.status ?? 1, out: r.stdout ?? "", err: r.stderr ?? "" };
 }
+const git: Git = (args) => capture(["git", ...args]);
 const said = (r: { out: string; err: string }) => (r.err + r.out).trim();
 
 function refuse(why: string, ...detail: string[]): never {
@@ -173,11 +272,25 @@ function refuse(why: string, ...detail: string[]): never {
   process.exit(1);
 }
 
+if (import.meta.main && process.argv[2] === "--verify-commit") {
+  // CI (publish.yml `checks`, on a release push): the same gate as a local release, on HEAD.
+  const problems = verifyReleaseCommit(version, git);
+  if (problems.length) {
+    for (const p of problems) console.error(`::error::${tag}: ${p}`);
+    console.error(
+      `::error::${tag} is not released: push the bump only through \`deno task release\`, after both reviews are recorded.`,
+    );
+    process.exit(1);
+  }
+  console.log(`✅ ${tag}: HEAD is the bump commit, version lines only, both reviews recorded`);
+  process.exit(0);
+}
+
 if (import.meta.main) {
   console.log(`Releasing ${tag}\n`);
 
-  // 0a. A clean tree but for the bump.
-  const status = capture(["git", "status", "--porcelain", "--untracked-files=all"]);
+  // 0a. A clean tree but for plain modifications of the release files.
+  const status = git(["status", "--porcelain", "--untracked-files=all"]);
   if (status.code !== 0) refuse("git status failed.", said(status));
   const dirty = releaseBlockers(status.out);
   if (dirty.length > 0) {
@@ -189,28 +302,52 @@ if (import.meta.main) {
       `This script commits ${RELEASE_FILES.join(", ")} only; commit the rest first.`,
     );
   }
-  // …and the release files change NOTHING but their version line.
-  for (const file of RELEASE_FILES) {
-    const head = capture(["git", "show", `HEAD:${file}`]);
-    if (head.code !== 0) refuse(`could not read ${file} at HEAD.`, said(head));
-    const problem = bumpOnly(file, head.out, await readFile(file, "utf8"), version);
-    if (problem) {
+
+  // 0b. On main; HEAD = origin/main with the bump in the working tree, or origin/main + the bump.
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]).out.trim();
+  if (branch !== "main") refuse(`on branch ${branch}, not main (releases go out from main).`);
+  const fetched = git(["fetch", "-q", "origin", "main"]);
+  if (fetched.code !== 0) refuse("could not fetch origin/main.", said(fetched));
+  const local = git(["rev-parse", "HEAD"]).out.trim();
+  const upstream = git(["rev-parse", "origin/main"]).out.trim();
+  const parent = git(["rev-parse", "-q", "--verify", "HEAD^"]).out.trim();
+  let committed = false;
+  if (local === upstream) {
+    for (const file of RELEASE_FILES) {
+      const head = git(["show", `HEAD:${file}`]);
+      if (head.code !== 0) refuse(`could not read ${file} at HEAD.`, said(head));
+      const problem = bumpOnly(file, head.out, await readFile(file, "utf8"), version);
+      if (problem) {
+        refuse(
+          `${problem}.`,
+          "A release commits the bump only (`deno task bump <kind>`); commit any other change first, as its own commit.",
+        );
+      }
+    }
+  } else if (parent === upstream && dirty.length === 0 && status.out.trim() === "") {
+    const problems = verifyReleaseCommit(version, git);
+    if (problems.length) {
       refuse(
-        `${problem}.`,
-        "A release commits the bump only; commit any other change to it first, as its own commit.",
+        "HEAD is one commit ahead of origin/main but is not a releasable bump commit.",
+        ...problems,
       );
     }
+    committed = true;
+    console.log(`(the bump is already committed — ${local.slice(0, 11)} passes the commit gate)`);
+  } else {
+    refuse(
+      `main (${local.slice(0, 11)}) is not origin/main (${
+        upstream.slice(0, 11)
+      }), nor origin/main plus one bump commit.`,
+      "Push or pull the other work first (release-process.md U2: merge first). Never push a",
+      "`bump to` commit by hand: CI releases any pushed version change, and refuses one this gate did not pass.",
+    );
   }
 
-  // 0g. Both required reviews recorded in the release's entry (checked early: it is cheap, and a
-  //     release without them is not ready — workspace review-process.md § 0).
-  let releaseMd = "";
-  try {
-    releaseMd = await readFile("cmem/release.md", "utf8");
-  } catch {
-    refuse("cmem/release.md is missing.");
-  }
-  const unreviewed = reviewsRecorded(releaseMd, version);
+  // 0g. Both required reviews recorded in the release's entry (HEAD's, committed with the notes).
+  const md = git(["show", "HEAD:cmem/release.md"]);
+  if (md.code !== 0) refuse("HEAD has no cmem/release.md.", said(md));
+  const unreviewed = reviewsRecorded(md.out, version);
   if (unreviewed.length > 0) {
     refuse(
       "the security and hardening reviews are not recorded.",
@@ -220,25 +357,11 @@ if (import.meta.main) {
     );
   }
 
-  // 0b. On main, equal to origin/main: the push adds the bump and nothing else.
-  const branch = capture(["git", "rev-parse", "--abbrev-ref", "HEAD"]).out.trim();
-  if (branch !== "main") refuse(`on branch ${branch}, not main (releases go out from main).`);
-  const fetched = capture(["git", "fetch", "-q", "origin", "main"]);
-  if (fetched.code !== 0) refuse("could not fetch origin/main.", said(fetched));
-  const local = capture(["git", "rev-parse", "HEAD"]).out.trim();
-  const upstream = capture(["git", "rev-parse", "origin/main"]).out.trim();
-  if (local !== upstream) {
-    refuse(
-      `main (${local.slice(0, 11)}) is not origin/main (${upstream.slice(0, 11)}).`,
-      "Push or pull the work first (release-process.md U2: merge first), then bump and release.",
-    );
-  }
-
   // 0c. The tag absent locally and on origin.
-  if (capture(["git", "rev-parse", "-q", "--verify", `refs/tags/${tag}`]).code === 0) {
+  if (git(["rev-parse", "-q", "--verify", `refs/tags/${tag}`]).code === 0) {
     refuse(`a local tag ${tag} exists; CI makes the tag — delete the stray local one.`);
   }
-  const remote = capture(["git", "ls-remote", "--tags", "origin", `refs/tags/${tag}`]);
+  const remote = git(["ls-remote", "--tags", "origin", `refs/tags/${tag}`]);
   if (remote.code !== 0) refuse("could not read origin's tags.", said(remote));
   if (lsRemoteHas(remote.out, `refs/tags/${tag}`)) {
     refuse(
@@ -256,51 +379,70 @@ if (import.meta.main) {
     refuse("could not ask JSR whether it has this version.", (e as Error).message);
   }
 
-  // 0e. Cold checks, as publish.yml's `checks` job runs them.
+  // 0e. Cold checks on EXACTLY what will be committed: a temporary worktree of HEAD plus the bump,
+  //     an empty DENO_DIR. Cleanup always runs before a refusal (review round 1, H: the temp folder
+  //     leaked when a cold check refused inside `try`).
+  const tree = await mkdtemp(join(tmpdir(), "wasmtk-release-tree-"));
   const cold = await mkdtemp(join(tmpdir(), "wasmtk-release-cold-"));
+  let failure: string[] | null = null;
+  let reported = "";
   try {
-    const env = { ...process.env, DENO_DIR: cold };
-    for (const args of [["check", "main.ts"], ["publish", "--dry-run", "--allow-dirty"]]) {
-      console.log(`$ DENO_DIR=<empty> deno ${args.join(" ")}   (cold)`);
-      const r = capture(["deno", ...args], env);
-      if (r.code !== 0) {
-        refuse(
-          `the cold \`deno ${
-            args.join(" ")
-          }\` failed — publish.yml would fail the same way, after the tag was public.`,
-          ...said(r).split("\n").slice(-15),
-        );
+    const added = git(["worktree", "add", "--detach", "--force", tree, "HEAD"]);
+    if (added.code !== 0) {
+      failure = ["could not create a worktree for the cold checks.", said(added)];
+    } else {
+      if (!committed) {
+        for (const f of RELEASE_FILES) await cp(f, join(tree, f));
+      }
+      const env = { ...process.env, DENO_DIR: cold };
+      for (const args of [["check", "main.ts"], ["publish", "--dry-run", "--allow-dirty"]]) {
+        console.log(`$ (worktree, DENO_DIR=<empty>) deno ${args.join(" ")}   (cold)`);
+        const r = capture(["deno", ...args], { env, cwd: tree });
+        if (r.code !== 0) {
+          failure = [
+            `the cold \`deno ${
+              args.join(" ")
+            }\` failed on what would be committed — publish.yml would fail the same way.`,
+            ...said(r).split("\n").slice(-15),
+          ];
+          break;
+        }
+      }
+      if (!failure) {
+        const ver = capture(["deno", "run", "-A", "main.ts", "--version"], { cwd: tree });
+        if (ver.code !== 0 || !new RegExp(`(^|\\s)${escapeRe(tag)}(\\s|$)`, "m").test(ver.out)) {
+          failure = [`\`main.ts --version\` does not report exactly ${tag}.`, said(ver)];
+        } else {
+          const help = capture(["deno", "run", "-A", "main.ts", "--help"], { cwd: tree });
+          if (help.code !== 0) {
+            failure = ["`main.ts --help` failed.", said(help).split("\n").slice(-5).join(" ")];
+          } else {
+            reported = ver.out.trim();
+          }
+        }
       }
     }
   } finally {
+    git(["worktree", "remove", "--force", tree]);
+    git(["worktree", "prune"]);
+    await rm(tree, { recursive: true, force: true }).catch(() => {});
     await rm(cold, { recursive: true, force: true }).catch(() => {});
   }
+  if (failure) refuse(failure[0], ...failure.slice(1));
+  console.log(`$ main.ts --version → ${reported}; --help → exit 0 (in the worktree)`);
 
-  // 0f. The published root, run as a user runs it.
-  const ver = capture(["deno", "run", "-A", "main.ts", "--version"]);
-  if (ver.code !== 0 || !new RegExp(`(^|\\s)${escapeRe(tag)}(\\s|$)`, "m").test(ver.out)) {
-    refuse(`\`main.ts --version\` does not report exactly ${tag}.`, said(ver));
-  }
-  const help = capture(["deno", "run", "-A", "main.ts", "--help"]);
-  if (help.code !== 0) {
-    refuse("`main.ts --help` failed.", said(help).split("\n").slice(-5).join(" "));
-  }
-  console.log(`$ main.ts --version → ${ver.out.trim()}; --help → exit 0`);
-
-  // 1. Commit the bump (only if staged: the bump may already be committed).
-  run(["git", "add", ...RELEASE_FILES]);
-  if (spawnSync("git", ["diff", "--cached", "--quiet"]).status !== 0) {
+  // 1. Commit the bump (unless already committed and gated above).
+  if (!committed) {
+    run(["git", "add", ...RELEASE_FILES]);
     run(["git", "commit", "-m", `bump to ${tag}`]);
-  } else {
-    console.log("(the bump is already committed — skipping the commit)");
   }
 
   // 2. Push main — and NO tag: CI tags after its checks pass on this commit (U4, U6).
-  const bumped = capture(["git", "rev-parse", "HEAD"]).out.trim();
+  const bumped = git(["rev-parse", "HEAD"]).out.trim();
   run(["git", "push", "origin", "main"]);
 
   // 3. Read it back.
-  const back = capture(["git", "ls-remote", "origin", "refs/heads/main"]).out.split("\n")
+  const back = git(["ls-remote", "origin", "refs/heads/main"]).out.split("\n")
     .map((l) => l.trim().split(/\s+/)).find((f) => f[1] === "refs/heads/main")?.[0] ?? "";
   if (back !== bumped) {
     refuse(`read back: origin's main is ${back || "unreadable"}, not the pushed ${bumped}.`);

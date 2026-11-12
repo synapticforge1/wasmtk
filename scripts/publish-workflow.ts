@@ -57,7 +57,7 @@ export function jsrVersionUrl(pkg: string, version: string): string {
 export function jsrRekor(body: string): string {
   try {
     const id = (JSON.parse(body) as { rekorLogId?: unknown }).rekorLogId;
-    if (typeof id === "string" && /^\d+$/.test(id.trim())) return id.trim();
+    if (typeof id === "string" && /^0*[1-9]\d*$/.test(id.trim())) return id.trim();
     if (typeof id === "number" && Number.isInteger(id) && id > 0) return String(id);
     return "";
   } catch {
@@ -92,12 +92,29 @@ export type Git = (args: string[]) => { code: number; out: string; err: string }
  * Review round 1, 2026-11-12 (findings C and D): the tag alone decided, so a stranded release went
  * green forever, and a git warning on stderr read as "tag present".
  */
+/**
+ * The exact ref line of `git ls-remote` stdout for `ref` exists: a 40-hex object id, whitespace, the
+ * ref — so a warning that merely MENTIONS the ref is not one (review round 2, R2-C). Shared with
+ * scripts/release.ts, so both halves read a ref the same way.
+ */
+export function lsRemoteHas(stdout: string, ref: string): boolean {
+  return stdout.split("\n").some((l) => {
+    const f = l.trim().split(/\s+/);
+    return f.length === 2 && /^[0-9a-f]{40}$/.test(f[0]) && f[1] === ref;
+  });
+}
+
+/**
+ * … and when JSR cannot be read at all (after `jsrHas`'s retries): a version whose tag is on origin
+ * is treated as "not a release" with a WARNING (a non-release push stays green through a JSR outage
+ * — review round 2, R2-D); an untagged version cannot be decided, so the run is refused.
+ */
 export async function isRelease(
   sha: string,
   version: string,
   git: Git,
   jsr: (version: string) => Promise<"true" | "false">,
-): Promise<{ release: boolean; version: string; tag: string }> {
+): Promise<{ release: boolean; version: string; tag: string; warning?: string }> {
   const head = git(["rev-parse", "HEAD"]);
   if (head.code !== 0 || head.out.trim() !== sha) {
     throw new Error(`HEAD is ${head.out.trim() || "unknown"}, not this run's commit ${sha}`);
@@ -108,8 +125,27 @@ export async function isRelease(
   if (remote.code !== 0) {
     throw new Error(`could not read origin's tags: ${(remote.err + remote.out).trim()}`);
   }
-  const tagged = remote.out.split("\n").some((l) => l.trim().split(/\s+/)[1] === ref);
-  const published = (await jsr(version)) === "true";
+  const tagged = lsRemoteHas(remote.out, ref);
+  let published: boolean;
+  try {
+    published = (await jsr(version)) === "true";
+  } catch (e) {
+    if (!tagged) {
+      throw new Error(
+        `JSR could not be read, so whether ${version} is a new release cannot be decided: ${
+          (e as Error).message
+        }. Re-run when JSR answers.`,
+      );
+    }
+    return {
+      release: false,
+      version,
+      tag,
+      warning: `JSR could not be read (${
+        (e as Error).message
+      }); ${tag} is on origin, so this push is treated as not a release — the stranded-release check did not run.`,
+    };
+  }
   if (tagged && !published) {
     throw new Error(
       `STRANDED RELEASE: ${tag} is on origin but JSR does not serve ${version}. The release run that made the tag did not finish: open it and "Re-run failed jobs" (never a new tag, never "Re-run all jobs").`,
@@ -287,19 +323,41 @@ function oidcCheck(): number {
   return 0;
 }
 
+/** A positive integer from an environment variable, or `fallback` (0, NaN, "abc" are not counts). */
+function count(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 ? n : fallback;
+}
+
 /**
  * Does JSR already serve this version? Writes `present=true|false` to the step's outputs, so a
  * re-run skips `deno publish` (U8, U12). Only 200 and 404 are answers; anything else (or no answer
- * in time) fails the step rather than being read as "absent", which would re-attempt an
- * immutable upload.
+ * in time) is retried (JSR_HAS_TRIES, default 3; JSR_HAS_WAIT_S apart, default 5) and then fails
+ * rather than being read as "absent", which would re-attempt an immutable upload. Review round 2
+ * (R2-D): one request with no retry let a single JSR hiccup fail the step.
  */
 export async function jsrHas(version: string, f: Fetch = fetch): Promise<"true" | "false"> {
-  const res = await call(f, `${jsrVersionUrl(denoJson.name, version)}?cb=has-${Date.now()}`, {
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
-  });
-  if (res.status === 200) return "true";
-  if (res.status === 404) return "false";
-  throw new Error(`JSR answered HTTP ${res.status} for ${denoJson.name}@${version}`);
+  const tries = count(process.env.JSR_HAS_TRIES, 3);
+  const waitS = Number(process.env.JSR_HAS_WAIT_S ?? 5);
+  let last = "";
+  for (let i = 1; i <= tries; i++) {
+    try {
+      const res = await call(
+        f,
+        `${jsrVersionUrl(denoJson.name, version)}?cb=has-${Date.now()}-${i}`,
+        {
+          headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+        },
+      );
+      if (res.status === 200) return "true";
+      if (res.status === 404) return "false";
+      last = `HTTP ${res.status}`;
+    } catch (e) {
+      last = `no answer (${(e as Error).message})`;
+    }
+    if (i < tries) await sleep(waitS);
+  }
+  throw new Error(`JSR answered ${last} for ${denoJson.name}@${version} (${tries} tries)`);
 }
 
 // The OIDC step only proves the PREREQUISITE was met. It passed on every release from v1.11.3
@@ -308,14 +366,17 @@ export async function jsrHas(version: string, f: Fetch = fetch): Promise<"true" 
 export async function provenance(version: string, f: Fetch = fetch): Promise<number> {
   const pkg = denoJson.name;
   const url = jsrVersionUrl(pkg, version);
-  const tries = Number(process.env.PROVENANCE_TRIES ?? 12);
+  const tries = count(process.env.PROVENANCE_TRIES, 12);
   const waitS = Number(process.env.PROVENANCE_WAIT_S ?? 15);
   const runId = process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`;
   console.log(`Checking ${url}`);
   // Three different failures, named apart (review round 1, finding C): JSR served the record but
   // with no Rekor id (published WITHOUT provenance); JSR answered 404 every time (the publish never
   // happened); JSR never answered usably (an error status or no answer — nothing is known).
+  // The verdict follows the LAST read (review round 2, R2-C): a 200 without an id followed only by
+  // failed reads is not "published WITHOUT provenance" — the later reads know nothing.
   let seen = false; // a 200 at least once
+  let lastOk = false; // the last read was a 200
   let all404 = true; // every read was a 404
   let last = "";
   // JSR ingests asynchronously, so poll rather than reading once.
@@ -332,6 +393,7 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
       });
       last = `HTTP ${res.status}`;
       if (res.status !== 404) all404 = false;
+      lastOk = res.ok;
       if (res.ok) {
         seen = true;
         body = await res.text();
@@ -339,6 +401,7 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
     } catch (e) {
       // A network error or timeout is one more failed attempt, as `curl -sf … || true` was.
       all404 = false;
+      lastOk = false;
       last = `no answer (${(e as Error).message})`;
     }
     const rekor = jsrRekor(body);
@@ -346,8 +409,10 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
       console.log(`✅ Provenance recorded — Rekor log ID: ${rekor}`);
       return 0;
     }
-    console.log(`  attempt ${i}: no provenance yet, retrying in ${waitS}s`);
-    await sleep(waitS);
+    if (i < tries) {
+      console.log(`  attempt ${i}: no provenance yet, retrying in ${waitS}s`);
+      await sleep(waitS);
+    }
   }
   if (!seen && all404) {
     console.log(
@@ -355,9 +420,11 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
     );
     return 1;
   }
-  if (!seen) {
+  if (!lastOk) {
     console.log(
-      `::error::JSR could not be read for ${pkg}@${version} (last: ${last}): neither provenance nor its absence is known. Re-run this job; it is not evidence of a provenance outage.`,
+      `::error::JSR could not be read for ${pkg}@${version} (last: ${last}${
+        seen ? "; an earlier read showed the version without a Rekor id" : ""
+      }): neither provenance nor its absence is known. Re-run this job; it is not evidence of a provenance outage.`,
     );
     return 1;
   }
@@ -394,9 +461,12 @@ if (import.meta.main) {
           const o = spawnSync("git", args, { encoding: "utf8" });
           return { code: o.status ?? 1, out: o.stdout ?? "", err: o.stderr ?? "" };
         }, jsrHas);
+        if (r.warning) console.log(`::warning::${r.warning}`);
         console.log(
           r.release
             ? `${r.tag} is not on origin and JSR does not serve it: this push is the release of ${r.version}`
+            : r.warning
+            ? `${r.tag} is on origin: not a release (checks only; JSR unread)`
             : `${r.tag} exists and JSR serves it: not a release (checks only)`,
         );
         process.exit(writeOutput(`release=${r.release}`, `version=${r.version}`, `tag=${r.tag}`));

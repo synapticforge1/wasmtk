@@ -333,14 +333,19 @@ commands".
    written; once out of fixes, write the tested minimum (`deno --version` of the full gate's run).
 6. **U4 `deno task release`** (`scripts/release.ts`, since 2026-11-10; replaced `deno task
    publish`). Guards: a clean tree but for the bump's three files, untracked files counted; on
-   `main`, equal to `origin/main`; the tag absent locally and on origin; JSR without the version;
-   COLD `deno check main.ts` and `deno publish --dry-run` in an empty `DENO_DIR`; `main.ts
-   --version` names the version and `--help` exits 0; (since 2026-11-12, H35) the version's entry
-   in release.md records the security and the hardening review, each ended by an empty round —
-   affirmatively, in § Release History, labelled exactly; and (since review round 1, 2026-11-12)
-   the three release files change NOTHING but their version line, and git's stderr is never
-   parsed (`bun scripts/check_release.ts`, 20 cases; rehearsed: a negated record, a ride-along
-   edit → refused, nothing pushed; a clean bump → released). Then it commits `bump to vX.Y.Z`, pushes
+   `main`, and either `main` = `origin/main` with the bump in the working tree, or `origin/main` +
+   ONE `bump to vX.Y.Z` commit that passes the commit gate (a bump already committed — review round
+   2); the three release files change NOTHING but their version line; the tag absent locally and
+   on origin; JSR without the version; COLD `deno check main.ts`, `deno publish --dry-run`,
+   `--version` (exactly the version) and `--help`, all in a temporary WORKTREE of exactly what
+   will be committed with an empty `DENO_DIR` (an ignored file the commit lacks cannot pass — round
+   2); the version's entry in release.md records the security and the hardening review in the
+   STRICT form (review-process.md § 3; H35, rounds 1–2). git's stderr is never parsed. Tests:
+   `bun scripts/check_release.ts`, 36 cases; rehearsed against a scratch bare origin (a prose
+   record, an ignored-file dependency → refused, nothing pushed; an already-committed bump →
+   released; CI's `--verify-commit` passes it and refuses a non-bump commit). **Never push a `bump
+   to` commit by hand** — CI releases any pushed version change, and since round 2 refuses one that
+   fails the commit gate. Then it commits `bump to vX.Y.Z` (unless already committed), pushes
    `main` as a user and reads it back with `git ls-remote` — **and makes no tag.** Rehearsed
    2026-11-10 in a scratch clone against a scratch bare origin (11 cases: each guard refused with
    nothing pushed; the real run pushed `main` = the `bump to` commit with its three files and NO
@@ -352,11 +357,11 @@ commands".
 
    | slot | job | token | what it runs |
    | --- | --- | --- | --- |
-   | U5 | `checks` | `contents: read` | `is-release` (HEAD = `github.sha`; the tag on origin AND JSR must agree — a tag without the JSR version is a STRANDED release, refused on every push until finished; JSR without the tag is refused); for a release `api-surface.ts --verify-release` (the floor on the untagged candidate); `deno check main.ts`; `deno publish --dry-run` on exactly the jsr job's sparse tree |
+   | U5 | `checks` | `contents: read` | FIRST the code: `deno check main.ts`, `deno publish --dry-run` on exactly the jsr job's sparse tree; then `is-release` (HEAD = `github.sha`; the tag on origin AND JSR must agree — a tag without the JSR version is a STRANDED release, refused on every push until finished; JSR without the tag is refused; JSR unreadable after retries: a tagged version is "not a release" with a warning, an untagged one is refused); for a release `api-surface.ts --verify-release` (the floor on the untagged candidate) and `release.ts --verify-commit` (HEAD is the `bump to` commit, version lines only, both review records) |
    | U6 | `tag` | `contents: write` | CI creates the ANNOTATED tag on `github.sha` (REST API; already there at this commit = done, elsewhere = refused — a tag never moves), reads it back |
    | U7 | `release` | `contents: write` | the page FROM the tag: it peels to the run's commit → an existing page = done → `POST` on the tag with the JSR link → read back; never `gh` |
    | U8 | `jsr` | `id-token` | LAST: sparse checkout of `publish.include` + `deno.lock` + the workflow script; NOTHING but Deno beside the OIDC token (`jsr-has`, `oidc-check` under `deno run --no-config` with named permissions); `deno publish` DIRECTLY |
-   | U8 | `verify` | `contents: read` | the Rekor id read back, FATAL — named apart: no provenance / NOT ON JSR / JSR unreadable; runs whatever `jsr` did |
+   | U8 | `verify` | `contents: read` | the Rekor id read back, FATAL — named apart: no provenance / NOT ON JSR / JSR unreadable (the LAST read decides); runs only when `jsr` ran (succeeded or failed) |
 
    Every `setup-bun` has `token: ""` (the action otherwise takes the job's token — review round 1).
 
@@ -364,7 +369,7 @@ commands".
    3.0.3 / 3.0.4 (2026-11-11; re-read by wasmtk 2026-11-12: annotated tags by
    `github-actions[bot]`, JSR Rekor 3814264552 / 3815373888); wasmtk's own tag → page → publish
    half is still unmeasured until its first release in this order. Tests do not run in `checks` yet (Deno-exit P7). If publish-workflow.ts changed:
-   `bun scripts/check_publish_workflow.ts` (24 cases on a mock GitHub / JSR / git) and REHEARSE the
+   `bun scripts/check_publish_workflow.ts` (36 cases on a mock GitHub / JSR / git) and REHEARSE the
    changed job as the runner lays it out (best-practices 7.22): a release-job bug costs a version.
 8. **U12 Failure: "Re-run failed jobs"** — `checks`' outputs are kept; the tag, the page and the
    upload each skip what is done. Never "Re-run all jobs": a fresh `checks` meets the tag the
