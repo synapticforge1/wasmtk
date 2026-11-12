@@ -11,15 +11,23 @@
  * has a deadline (a hang fails, it does not stall the suite) — review round 1, 2026-11-12. The JSR
  * mock checks every request's path and cache-bust, and env vars are always restored — round 2.
  *
- *   U5 is-release (a fake git whose ls-remote lists EVERY tag it holds; stderr kept apart)
- *     S1  no tag, JSR without it → release        S2  tag + JSR → not a release
+ *   U5 is-release (a fake git with a small history; ls-remote lists EVERY tag; stderr kept apart).
+ *   Round 3 (F): only the BUMP COMMIT's own run releases, and only when pushed alone.
+ *     S1  bump run, no tag, JSR without it → release   S2  tag + JSR → done, not a release
  *     S3  HEAD is not GITHUB_SHA → refused         S4  stderr that LOOKS like the ref line is not a tag
  *     S5  only OTHER tags (v9.8.70, v1.0.0) → release
- *     S6  tag without the JSR version → STRANDED, refused
+ *     S6  bump run re-run, tag without JSR → resumes (a release)
  *     S7  JSR has it, no tag → refused (published outside the flow)
  *     S8  ls-remote fails → refused (never "no tag")
- *     S9  JSR unreadable, tag on origin → not a release, with a warning
- *     S10 JSR unreadable, no tag → refused (cannot decide)
+ *     S9  later push, JSR unreadable → not a release, a warning
+ *     S10 bump run, JSR unreadable → refused (cannot decide)
+ *     S11 bump pushed with other commits → refused   S12 workflow_dispatch → never a release
+ *     S13 later push, released → nothing      S14 later push, unreleased, in grace → a warning
+ *     S15 / S16 later push, unreleased past grace (no tag / tag) → refused UNRELEASED, by name
+ *     S17 a shorter grace     S18 a merge changing the version is not a bump
+ *     S19 later push, JSR without tag → refused   S20 the first deno.json is a bump
+ *     S21 releaseOutputs   S22 findBump   S23 seconds()
+ *     S24 a version-line revert to a released version, pushed with others → done, not refused
  *   U6 tag
  *     T1  absent → an annotated tag object + its ref (2 writes), read back peels to the commit
  *     T2  a re-run: already at this commit → 0 writes
@@ -48,11 +56,14 @@
  */
 import {
   createTag,
+  findBump,
   type GitHubEnv,
   isRelease,
   jsrHas,
   provenance,
   release,
+  releaseOutputs,
+  seconds,
 } from "./publish-workflow.ts";
 
 const SHA = "a".repeat(40);
@@ -217,22 +228,67 @@ async function check(
   );
 }
 
-// ── U5 is-release: a fake git whose ls-remote lists EVERY tag it holds (so only the exact-ref
-//    parse can pick the right one — review round 2: a fake that answered only the asked ref made
-//    S5 vacuous), whose stderr can look exactly like a ref line, and a mock JSR ──
+// ── U5 is-release: a fake git holding a small HISTORY (commits with parents, deno.json versions
+//    and times), whose ls-remote lists EVERY tag it holds (so only the exact-ref parse can pick the
+//    right one — review round 2), whose stderr can look exactly like a ref line, and a mock JSR.
+//    Round 3 (F): the release is decided by the BUMP COMMIT's run, so the history matters ──
+interface Commit {
+  parents: string[];
+  version: string | null; // null = no deno.json there
+  time: number; // seconds
+}
+const NOW = 1_800_000_000_000; // ms
+const PREV = "c".repeat(40); // 9.8.6, the bump's parent
+const LATER = "d".repeat(40); // a later commit on main, still 9.8.7
+const SIDE = "e".repeat(40); // a side-branch commit (a merge's second parent)
+const minsAgo = (m: number) => NOW / 1000 - m * 60;
+/** PREV (9.8.6) ← SHA (bump to 9.8.7, `bumpAge` minutes ago) [← LATER (9.8.7, now)] */
+const history = (bumpAge = 5, later = false): Record<string, Commit> => ({
+  [PREV]: { parents: [], version: "9.8.6", time: minsAgo(bumpAge + 60) },
+  [SHA]: { parents: [PREV], version: "9.8.7", time: minsAgo(bumpAge) },
+  ...(later ? { [LATER]: { parents: [SHA], version: "9.8.7", time: minsAgo(0) } } : {}),
+});
 const fakeGit = (
   head: string,
   remoteTags: string[],
-  o: { stderr?: string; lsRemoteCode?: number } = {},
-) =>
-(args: string[]) => {
-  if (args[0] === "rev-parse") return { code: 0, out: `${head}\n`, err: o.stderr ?? "" };
-  if (args[0] === "ls-remote") {
-    if (o.lsRemoteCode) return { code: o.lsRemoteCode, out: "", err: "fatal: unable to access" };
-    const lines = remoteTags.map((t) => `${SHA}\trefs/tags/${t}`);
-    return { code: 0, out: lines.length ? lines.join("\n") + "\n" : "", err: o.stderr ?? "" };
-  }
-  return { code: 1, out: "", err: "fake git: unexpected" };
+  o: { stderr?: string; lsRemoteCode?: number; commits?: Record<string, Commit> } = {},
+) => {
+  const commits = o.commits ?? history();
+  const resolve = (rev: string): string | undefined => {
+    const m = /^(.*?)(\^*)$/.exec(rev)!;
+    let at: string | undefined = m[1] === "HEAD" ? head : m[1];
+    for (let i = 0; i < m[2].length && at; i++) at = commits[at]?.parents[0];
+    return at && commits[at] ? at : undefined;
+  };
+  return (args: string[]) => {
+    if (args[0] === "rev-parse") return { code: 0, out: `${head}\n`, err: o.stderr ?? "" };
+    if (args[0] === "ls-remote") {
+      if (o.lsRemoteCode) return { code: o.lsRemoteCode, out: "", err: "fatal: unable to access" };
+      const lines = remoteTags.map((t) => `${SHA}\trefs/tags/${t}`);
+      return { code: 0, out: lines.length ? lines.join("\n") + "\n" : "", err: o.stderr ?? "" };
+    }
+    if (args[0] === "rev-list" && args.includes("--parents")) {
+      const c = commits[head];
+      return c
+        ? { code: 0, out: `${[head, ...c.parents].join(" ")}\n`, err: "" }
+        : { code: 128, out: "", err: "fake git: no HEAD" };
+    }
+    if (args[0] === "show" && args[1]?.endsWith(":deno.json")) {
+      const at = resolve(args[1].slice(0, -":deno.json".length));
+      const v = at ? commits[at].version : null;
+      return v === null
+        ? { code: 128, out: "", err: "fatal: path does not exist" }
+        : { code: 0, out: JSON.stringify({ name: "@x/y", version: v }), err: "" };
+    }
+    if (args[0] === "log" && args.includes("--first-parent")) {
+      const lines: string[] = [];
+      for (let at: string | undefined = head; at && commits[at]; at = commits[at].parents[0]) {
+        lines.push(`${at} ${commits[at].time}`);
+      }
+      return { code: 0, out: lines.join("\n") + "\n", err: "" };
+    }
+    return { code: 1, out: "", err: `fake git: unexpected ${args.join(" ")}` };
+  };
 };
 const jsrSays = (has: boolean | "throws") => () =>
   has === "throws"
@@ -244,45 +300,60 @@ async function decide(
   jsrHasIt: boolean | "throws",
   want: boolean | RegExp,
   wantWarning = false,
+  run: { sha?: string; before?: string | null; graceMin?: number } = {},
+  warningSays?: RegExp,
 ) {
   let got = "";
   let ok = false;
   try {
-    const r = await isRelease(SHA, "9.8.7", git, jsrSays(jsrHasIt));
+    const r = await isRelease(
+      {
+        sha: run.sha ?? SHA,
+        version: "9.8.7",
+        before: run.before === null ? undefined : run.before ?? PREV,
+        now: NOW,
+        graceMin: run.graceMin,
+      },
+      git,
+      jsrSays(jsrHasIt),
+    );
     got = JSON.stringify(r);
     ok = typeof want === "boolean" && r.release === want && r.tag === TAG &&
-      Boolean(r.warning) === wantWarning;
+      Boolean(r.warning) === wantWarning && (!warningSays || warningSays.test(r.warning ?? ""));
   } catch (e) {
     got = `refused: ${(e as Error).message}`;
     ok = want instanceof RegExp && want.test(got);
   }
   report(name, ok, got);
 }
-await decide("S1 no tag, JSR without it → release", fakeGit(SHA, []), false, true);
-await decide("S2 tag on origin, JSR has it → not a release", fakeGit(SHA, ["v9.8.7"]), true, false);
+// The bump commit's own run (HEAD = SHA, pushed alone: before = PREV).
+await decide("S1 bump run: no tag, JSR without it → release", fakeGit(SHA, []), false, true);
+await decide("S2 bump run: tag + JSR → done, not a release", fakeGit(SHA, ["v9.8.7"]), true, false);
 await decide(
   "S3 HEAD is not GITHUB_SHA → refused",
   fakeGit(OTHER, []),
   false,
   /not this run's commit/,
 );
+// S4 / S5 with JSR HAVING the version, so a misread tag turns "refused" into "done" (round 3: with
+// JSR empty the bump run releases tag or no tag, and both cases had gone vacuous).
 await decide(
-  "S4 stderr that LOOKS like the ref line is not a tag",
+  "S4 stderr that LOOKS like the ref line is not a tag (JSR has it → refused, not 'done')",
   fakeGit(SHA, [], { stderr: `${SHA}\trefs/tags/v9.8.7\n` }),
-  false,
   true,
+  /published outside this flow/,
 );
 await decide(
-  "S5 only OTHER tags on origin (v9.8.70, v1.0.0) → release",
+  "S5 only OTHER tags on origin (v9.8.70, v1.0.0) are not v9.8.7 (JSR has it → refused)",
   fakeGit(SHA, ["v9.8.70", "v1.0.0"]),
-  false,
   true,
+  /published outside this flow/,
 );
 await decide(
-  "S6 tag on origin, JSR WITHOUT it → stranded, refused",
+  "S6 bump run re-run: tag on origin, JSR without it → RESUMES (a release)",
   fakeGit(SHA, ["v9.8.7"]),
   false,
-  /STRANDED RELEASE/,
+  true,
 );
 await decide(
   "S7 JSR has it, no tag → refused",
@@ -297,18 +368,152 @@ await decide(
   /could not read origin's tags/,
 );
 await decide(
-  "S9 JSR unreadable, tag on origin → not a release, with a WARNING",
-  fakeGit(SHA, ["v9.8.7"]),
+  "S9 later push, JSR unreadable → not a release, with a WARNING",
+  fakeGit(LATER, ["v9.8.7"], { commits: history(5, true) }),
   "throws",
   false,
   true,
+  { sha: LATER, before: SHA },
+  /could not be read/,
 );
 await decide(
-  "S10 JSR unreadable, no tag → refused (cannot decide)",
+  "S10 bump run, JSR unreadable → refused (cannot decide)",
   fakeGit(SHA, []),
   "throws",
   /cannot be decided/,
 );
+await decide(
+  "S11 bump pushed WITH other commits (before ≠ its parent) → refused",
+  fakeGit(SHA, []),
+  false,
+  /carry the bump commit ALONE/,
+  false,
+  { before: OTHER },
+);
+await decide(
+  "S12 workflow_dispatch on the bump commit → never a release, a warning",
+  fakeGit(SHA, []),
+  false,
+  false,
+  true,
+  { before: null },
+  /workflow_dispatch never releases/,
+);
+// F: a LATER push meets the version (the bump's run was cancelled, failed, or is still running).
+await decide(
+  "S13 later push, version released (tag + JSR) → not a release, no warning",
+  fakeGit(LATER, ["v9.8.7"], { commits: history(500, true) }),
+  true,
+  false,
+  false,
+  { sha: LATER, before: SHA },
+);
+await decide(
+  "S14 later push, unreleased, bump 5 min ago → NOT a release, a warning (in progress)",
+  fakeGit(LATER, [], { commits: history(5, true) }),
+  false,
+  false,
+  true,
+  { sha: LATER, before: SHA },
+  /possibly still in progress/,
+);
+await decide(
+  "S15 later push, unreleased, bump 2 h ago → refused UNRELEASED, naming the bump commit",
+  fakeGit(LATER, [], { commits: history(120, true) }),
+  false,
+  new RegExp(`UNRELEASED VERSION on main: .*bump commit ${SHA.slice(0, 11)}.*no tag`),
+  false,
+  { sha: LATER, before: SHA },
+);
+await decide(
+  "S16 later push, tag but no JSR, past grace → refused UNRELEASED (the tag exists)",
+  fakeGit(LATER, ["v9.8.7"], { commits: history(120, true) }),
+  false,
+  /UNRELEASED VERSION on main: .*the tag exists/,
+  false,
+  { sha: LATER, before: SHA },
+);
+await decide(
+  "S17 RELEASE_GRACE_MIN=5: bump 10 min ago → refused",
+  fakeGit(LATER, [], { commits: history(10, true) }),
+  false,
+  /UNRELEASED VERSION/,
+  false,
+  { sha: LATER, before: SHA, graceMin: 5 },
+);
+await decide(
+  "S18 a MERGE that changes the version is not a bump commit → not a release",
+  fakeGit(LATER, [], {
+    commits: {
+      [PREV]: { parents: [], version: "9.8.6", time: minsAgo(70) },
+      [SIDE]: { parents: [PREV], version: "9.8.7", time: minsAgo(6) },
+      [LATER]: { parents: [PREV, SIDE], version: "9.8.7", time: minsAgo(5) },
+    },
+  }),
+  false,
+  false,
+  true,
+  { sha: LATER, before: PREV },
+);
+await decide(
+  "S19 later push, JSR has it, no tag → refused",
+  fakeGit(LATER, [], { commits: history(5, true) }),
+  true,
+  /published outside this flow/,
+  false,
+  { sha: LATER, before: SHA },
+);
+await decide(
+  "S20 the first deno.json ever (no parent version) is a bump → release",
+  fakeGit(SHA, [], {
+    commits: {
+      [PREV]: { parents: [], version: null, time: minsAgo(70) },
+      [SHA]: { parents: [PREV], version: "9.8.7", time: minsAgo(5) },
+    },
+  }),
+  false,
+  true,
+);
+await decide(
+  "S24 a version-line REVERT to a released version, pushed with others → done, not refused",
+  fakeGit(LATER, ["v9.8.7"], {
+    commits: {
+      [SHA]: { parents: [], version: "9.8.7", time: minsAgo(500) },
+      [PREV]: { parents: [SHA], version: "9.8.8", time: minsAgo(90) },
+      [LATER]: { parents: [PREV], version: "9.8.7", time: minsAgo(1) },
+    },
+  }),
+  true,
+  false,
+  false,
+  { sha: LATER, before: OTHER },
+);
+{
+  const o = releaseOutputs({ release: true, version: "9.8.7", tag: TAG });
+  report(
+    "S21 the step outputs are release / version / tag, one per line",
+    JSON.stringify(o) === JSON.stringify(["release=true", "version=9.8.7", "tag=v9.8.7"]),
+    JSON.stringify(o),
+  );
+  const f = findBump(fakeGit(LATER, [], { commits: history(120, true) }), "9.8.7");
+  report(
+    "S22 findBump: the commit that changed the version TO it, not a later one",
+    f?.sha === SHA && f.time === minsAgo(120),
+    JSON.stringify(f),
+  );
+  const s = [
+    seconds(undefined, 7),
+    seconds("x", 7),
+    seconds("-1", 7),
+    seconds("0", 7),
+    seconds("2.5", 7),
+  ];
+  report(
+    "S23 seconds(): unset / NaN / negative → the default; 0 and fractions kept",
+    JSON.stringify(s) === JSON.stringify([7, 7, 7, 0, 2.5]),
+    JSON.stringify(s),
+  );
+}
 
 // ── U6 tag ──
 const tagWrites = [`tag object ${TAG}`, `ref refs/tags/${TAG}`];
@@ -414,12 +619,16 @@ await check("H page not readable back", rel, world({ dropReleaseOnPost: true }),
  */
 function jsrMock(answers: Array<[number, unknown] | "throw">) {
   const state = { n: 0, bad: "" };
+  const busts = new Set<string>();
   const f = (url: string) => {
     const u = new URL(url);
     const a = answers[Math.min(state.n++, answers.length - 1)];
-    if (
-      u.pathname !== "/scopes/jrmarcum/packages/wasmtk/versions/9.8.7" || !u.searchParams.get("cb")
-    ) {
+    const cb = u.searchParams.get("cb") ?? "";
+    // Each attempt must bust the cache ANEW: a repeated `cb` would be served the cached answer
+    // (review round 3: the mock had only checked that one was present).
+    const repeated = busts.has(cb);
+    busts.add(cb);
+    if (u.pathname !== "/scopes/jrmarcum/packages/wasmtk/versions/9.8.7" || !cb || repeated) {
       state.bad = url;
       return Promise.resolve(new Response("{}", { status: 599 }));
     }
@@ -506,6 +715,12 @@ await withEnv({ PROVENANCE_TRIES: "3", PROVENANCE_WAIT_S: "0" }, async () => {
     [
       'P8 rekorLogId "0" / "000" is absence',
       [[200, { rekorLogId: "000" }]],
+      1,
+      /WITHOUT provenance/,
+    ],
+    [
+      'P14 rekorLogId "007" (leading zeros) is not an id',
+      [[200, { rekorLogId: "007" }]],
       1,
       /WITHOUT provenance/,
     ],

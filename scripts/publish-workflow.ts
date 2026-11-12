@@ -57,7 +57,8 @@ export function jsrVersionUrl(pkg: string, version: string): string {
 export function jsrRekor(body: string): string {
   try {
     const id = (JSON.parse(body) as { rekorLogId?: unknown }).rekorLogId;
-    if (typeof id === "string" && /^0*[1-9]\d*$/.test(id.trim())) return id.trim();
+    // A canonical positive integer: no leading zeros ("007", "000" are not ids) — review round 3.
+    if (typeof id === "string" && /^[1-9]\d*$/.test(id.trim())) return id.trim();
     if (typeof id === "number" && Number.isInteger(id) && id > 0) return String(id);
     return "";
   } catch {
@@ -81,18 +82,6 @@ function writeOutput(...lines: string[]): number {
 export type Git = (args: string[]) => { code: number; out: string; err: string };
 
 /**
- * The checked-out commit must be the run's (`GITHUB_SHA`). Then BOTH places that say "released"
- * are read — the tag on origin (an exact `refs/tags/v<version>` line of `ls-remote`'s stdout) and
- * JSR — and must agree:
- *   tag absent, JSR without it → a release;   tag present, JSR has it → not a release (checks only);
- *   tag present, JSR WITHOUT it → STRANDED: a release run tagged and then failed — refused loudly
- *     on every push until it is finished ("Re-run failed jobs" on that run, U12);
- *   tag absent, JSR HAS it → published outside this flow — refused (CI would otherwise tag and
- *     page this commit and pass provenance on the old record).
- * Review round 1, 2026-11-12 (findings C and D): the tag alone decided, so a stranded release went
- * green forever, and a git warning on stderr read as "tag present".
- */
-/**
  * The exact ref line of `git ls-remote` stdout for `ref` exists: a 40-hex object id, whitespace, the
  * ref — so a warning that merely MENTIONS the ref is not one (review round 2, R2-C). Shared with
  * scripts/release.ts, so both halves read a ref the same way.
@@ -104,17 +93,67 @@ export function lsRemoteHas(stdout: string, ref: string): boolean {
   });
 }
 
+/** deno.json's `version` at `rev`, or null when the file is absent or unreadable there. */
+export function versionAt(git: Git, rev: string): string | null {
+  const r = git(["show", `${rev}:deno.json`]);
+  if (r.code !== 0) return null;
+  try {
+    const v = (JSON.parse(r.out) as { version?: unknown }).version;
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * … and when JSR cannot be read at all (after `jsrHas`'s retries): a version whose tag is on origin
- * is treated as "not a release" with a WARNING (a non-release push stays green through a JSR outage
- * — review round 2, R2-D); an untagged version cannot be decided, so the run is refused.
+ * The commit on `main`'s first-parent line that changed deno.json's version TO `version` (its
+ * parent had another), with its commit time — the bump commit whose run releases that version.
+ */
+export function findBump(git: Git, version: string): { sha: string; time: number } | null {
+  const log = git(["log", "--first-parent", "--format=%H %ct", "-n", "500", "--", "deno.json"]);
+  if (log.code !== 0) return null;
+  for (const line of log.out.split("\n").filter((l) => l.trim() !== "")) {
+    const [sha, ct] = line.trim().split(/\s+/);
+    if (versionAt(git, sha) === version && versionAt(git, `${sha}^`) !== version) {
+      return { sha, time: Number(ct) };
+    }
+  }
+  return null;
+}
+
+/** What `is-release` needs beside git and JSR: the run's commit, the push's `before`, the clock. */
+export interface ReleaseRun {
+  sha: string; // GITHUB_SHA
+  version: string; // deno.json's version at HEAD
+  before?: string; // github.event.before (absent on workflow_dispatch)
+  now: number; // ms since the epoch
+  graceMin?: number; // RELEASE_GRACE_MIN: how long an unreleased version only warns (default 60)
+}
+
+/**
+ * U5 — is this push THE release? (Review round 3 + the owner's F, 2026-11-12: the decision is tied to
+ * the bump COMMIT, not to "the version is untagged".) The checked-out commit must be the run's.
+ *
+ * **HEAD is a bump commit** (one parent, and its parent's deno.json version differs):
+ *   – the push must carry it ALONE (`before` = HEAD^): other commits get their own checks first;
+ *   – JSR unreadable → refused (cannot decide); JSR has it, no tag → refused (published outside
+ *     this flow); JSR has it AND the tag → done already (not a release — a re-run after success);
+ *   – otherwise a release — also when the tag already exists: a re-run of this commit's run RESUMES
+ *     (the tag job accepts a tag only at this commit, an existing page is done, `jsr-has` skips).
+ *   A `workflow_dispatch` (no `before`) never releases.
+ * **HEAD is not a bump commit**: never a release. The version must already be released (tag + JSR);
+ *   if JSR has it without the tag → refused; if JSR does not have it, the bump commit's run did not
+ *   finish (or is running): a WARNING for `graceMin` minutes after the bump commit, then refused by
+ *   name with the way out. JSR unreadable → a warning.
+ * Each commit's run is never cancelled (publish.yml's concurrency group is per commit — F), so the
+ * bump's own run is the one that releases it.
  */
 export async function isRelease(
-  sha: string,
-  version: string,
+  run: ReleaseRun,
   git: Git,
   jsr: (version: string) => Promise<"true" | "false">,
 ): Promise<{ release: boolean; version: string; tag: string; warning?: string }> {
+  const { sha, version } = run;
   const head = git(["rev-parse", "HEAD"]);
   if (head.code !== 0 || head.out.trim() !== sha) {
     throw new Error(`HEAD is ${head.out.trim() || "unknown"}, not this run's commit ${sha}`);
@@ -126,37 +165,85 @@ export async function isRelease(
     throw new Error(`could not read origin's tags: ${(remote.err + remote.out).trim()}`);
   }
   const tagged = lsRemoteHas(remote.out, ref);
-  let published: boolean;
+  let published: boolean | null = null;
+  let unread = "";
   try {
     published = (await jsr(version)) === "true";
   } catch (e) {
-    if (!tagged) {
+    unread = (e as Error).message;
+  }
+  const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]).out.trim().split(/\s+/).slice(
+    1,
+  );
+  const bumpHere = parents.length === 1 && versionAt(git, "HEAD^") !== version;
+  const done = { release: false, version, tag };
+
+  if (bumpHere) {
+    // Already released (tag + JSR): nothing to do, however it was pushed — e.g. a commit that
+    // REVERTS the version line to a released one (the stuck-release way out), pushed with others.
+    if (published === true && tagged) return done;
+    if (!run.before) {
+      return {
+        ...done,
+        warning:
+          `HEAD bumps to ${version}, but a workflow_dispatch never releases: the bump's own push run does (re-run ITS failed jobs to resume).`,
+      };
+    }
+    if (run.before !== parents[0]) {
       throw new Error(
-        `JSR could not be read, so whether ${version} is a new release cannot be decided: ${
-          (e as Error).message
-        }. Re-run when JSR answers.`,
+        `a release push must carry the bump commit ALONE: this push went from ${
+          run.before.slice(0, 11)
+        } to the bump, whose parent is ${
+          parents[0].slice(0, 11)
+        }. Push the other commits first (they get their own checks), then \`deno task release\`. To recover now: revert the version line in a normal commit and release again.`,
       );
     }
+    if (published === null) {
+      throw new Error(
+        `JSR could not be read, so whether ${version} is already released cannot be decided: ${unread}. Re-run when JSR answers.`,
+      );
+    }
+    if (published && !tagged) {
+      throw new Error(
+        `JSR already serves ${version} but ${tag} is not on origin: it was published outside this flow. Bump to the next version.`,
+      );
+    }
+    if (published && tagged) return done;
+    return { release: true, version, tag };
+  }
+
+  if (published === null) {
     return {
-      release: false,
-      version,
-      tag,
-      warning: `JSR could not be read (${
-        (e as Error).message
-      }); ${tag} is on origin, so this push is treated as not a release — the stranded-release check did not run.`,
+      ...done,
+      warning:
+        `JSR could not be read (${unread}): whether ${tag} is released was not checked on this push.`,
     };
   }
-  if (tagged && !published) {
+  if (published && !tagged) {
     throw new Error(
-      `STRANDED RELEASE: ${tag} is on origin but JSR does not serve ${version}. The release run that made the tag did not finish: open it and "Re-run failed jobs" (never a new tag, never "Re-run all jobs").`,
+      `JSR already serves ${version} but ${tag} is not on origin: it was published outside this flow. Bump to the next version.`,
     );
   }
-  if (!tagged && published) {
-    throw new Error(
-      `JSR already serves ${version} but ${tag} is not on origin: it was published outside this flow. Bump to the next version; never tag a commit for a version JSR already has.`,
-    );
+  if (published) return done;
+  const bump = findBump(git, version);
+  const ageMin = bump ? (run.now / 1000 - bump.time) / 60 : Infinity;
+  const way = `the release of ${tag}${
+    bump ? ` (bump commit ${bump.sha.slice(0, 11)})` : ""
+  } did not finish: ${
+    tagged ? "the tag exists but" : "no tag, and"
+  } JSR does not serve ${version}. Open the bump commit's run and "Re-run failed jobs" — it resumes (an existing tag or page is done). If that run's gate REFUSED the bump, revert the version line in a normal commit and release again with \`deno task release\`.`;
+  if (ageMin < (run.graceMin ?? 60)) {
+    return {
+      ...done,
+      warning: `possibly still in progress (${Math.round(ageMin)} min since the bump): ${way}`,
+    };
   }
-  return { release: !tagged, version, tag };
+  throw new Error(`UNRELEASED VERSION on main: ${way}`);
+}
+
+/** The step outputs `is-release` writes (a pure function, so the self-test pins them). */
+export function releaseOutputs(r: { release: boolean; version: string; tag: string }): string[] {
+  return [`release=${r.release}`, `version=${r.version}`, `tag=${r.tag}`];
 }
 
 // ── U6 / U7: the GitHub side, through the REST API ──────────────────────────────────────────────
@@ -324,9 +411,17 @@ function oidcCheck(): number {
 }
 
 /** A positive integer from an environment variable, or `fallback` (0, NaN, "abc" are not counts). */
-function count(value: string | undefined, fallback: number): number {
+export function count(value: string | undefined, fallback: number): number {
   const n = Number(value);
   return Number.isInteger(n) && n >= 1 ? n : fallback;
+}
+
+/** A wait in seconds from an environment variable: finite and ≥ 0, else `fallback` ("abc" → NaN
+ * had meant "no wait at all" — review round 3). */
+export function seconds(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === "") return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
 /**
@@ -338,7 +433,7 @@ function count(value: string | undefined, fallback: number): number {
  */
 export async function jsrHas(version: string, f: Fetch = fetch): Promise<"true" | "false"> {
   const tries = count(process.env.JSR_HAS_TRIES, 3);
-  const waitS = Number(process.env.JSR_HAS_WAIT_S ?? 5);
+  const waitS = seconds(process.env.JSR_HAS_WAIT_S, 5);
   let last = "";
   for (let i = 1; i <= tries; i++) {
     try {
@@ -367,7 +462,7 @@ export async function provenance(version: string, f: Fetch = fetch): Promise<num
   const pkg = denoJson.name;
   const url = jsrVersionUrl(pkg, version);
   const tries = count(process.env.PROVENANCE_TRIES, 12);
-  const waitS = Number(process.env.PROVENANCE_WAIT_S ?? 15);
+  const waitS = seconds(process.env.PROVENANCE_WAIT_S, 15);
   const runId = process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`;
   console.log(`Checking ${url}`);
   // Three different failures, named apart (review round 1, finding C): JSR served the record but
@@ -457,19 +552,31 @@ if (import.meta.main) {
         process.exit(2);
       }
       try {
-        const r = await isRelease(e.GITHUB_SHA, denoJson.version, (args) => {
-          const o = spawnSync("git", args, { encoding: "utf8" });
-          return { code: o.status ?? 1, out: o.stdout ?? "", err: o.stderr ?? "" };
-        }, jsrHas);
+        // `before` is github.event.before (all zeros for a new branch = absent).
+        const before = /^[0-9a-f]{40}$/.test(e.BEFORE ?? "") && !/^0+$/.test(e.BEFORE!)
+          ? e.BEFORE
+          : undefined;
+        const r = await isRelease(
+          {
+            sha: e.GITHUB_SHA,
+            version: denoJson.version,
+            before,
+            now: Date.now(),
+            graceMin: count(e.RELEASE_GRACE_MIN, 60),
+          },
+          (args) => {
+            const o = spawnSync("git", args, { encoding: "utf8" });
+            return { code: o.status ?? 1, out: o.stdout ?? "", err: o.stderr ?? "" };
+          },
+          jsrHas,
+        );
         if (r.warning) console.log(`::warning::${r.warning}`);
         console.log(
           r.release
-            ? `${r.tag} is not on origin and JSR does not serve it: this push is the release of ${r.version}`
-            : r.warning
-            ? `${r.tag} is on origin: not a release (checks only; JSR unread)`
-            : `${r.tag} exists and JSR serves it: not a release (checks only)`,
+            ? `HEAD is the bump to ${r.version}, pushed alone: this push is the release of ${r.tag}`
+            : `not a release (checks only)${r.warning ? " — see the warning" : ""}`,
         );
-        process.exit(writeOutput(`release=${r.release}`, `version=${r.version}`, `tag=${r.tag}`));
+        process.exit(writeOutput(...releaseOutputs(r)));
       } catch (err) {
         console.error(`::error::is-release: ${(err as Error).message}`);
         process.exit(1);
