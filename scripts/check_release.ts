@@ -238,6 +238,45 @@ check(
   reviewsRecorded(entry("Note: write `<!--` to hide; text <!-- here too.", SEC, HARD), "4.0.0"),
   null,
 );
+// Round 5.
+check(
+  "R17 a LONE CR before a comment (CommonMark ends the line there) → refused by line",
+  reviewsRecorded(entry("Notes.\r\r<!-- not done yet", SEC, HARD, "-->"), "4.0.0"),
+  /line \d+: a lone carriage return/,
+);
+check(
+  "R18 a 'blank' line of U+00A0 (not blank to CommonMark) joining a link title → refused",
+  reviewsRecorded(entry("[x]: /u '\n ", SEC, " ", HARD, " \n'"), "4.0.0"),
+  /line \d+: a line of whitespace other than spaces \/ tabs/,
+);
+check(
+  "R19 a setext underline with a trailing TAB → refused",
+  reviewsRecorded(
+    doc("### 4.0.0\n\nNotes.\n===\t\n", both("4.0.0").replace("### 4.0.0", "#### x")),
+    "4.0.0",
+  ),
+  /line \d+: a "===" \/ "---" line/,
+);
+check(
+  "R20 a NESTED marker (> - ```) before a fence → refused",
+  reviewsRecorded(entry("> - ```", SEC, HARD), "4.0.0"),
+  /line \d+: a code fence/,
+);
+check(
+  "R21 no '## Release History' heading (a lowercase one) → refused, never a pass",
+  reviewsRecorded(`# r\n\n## Release history\n\n${both("4.0.0")}`, "4.0.0"),
+  /no "## Release History" section/,
+);
+for (const [label, scope] of [["<", "<!-- NOT DONE --> all"], ["a backslash", "all \\ of it"]]) {
+  check(
+    `R9f a scope with ${label} → refused`,
+    reviewsRecorded(
+      entry(`${S} ${scope}; rounds 1; ended by an empty round (round 1, 2026-12-01).`, HARD),
+      "4.0.0",
+    ),
+    /scope .* is not plain text/,
+  );
+}
 {
   // The REAL cmem/release.md is inside the subset (a false refusal would block every release).
   const here = dirname(fileURLToPath(import.meta.url));
@@ -315,6 +354,9 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
     "package.json": [PJ, bumpV(PJ)],
     "src/utils.ts": [UT, bumpV(UT)],
   };
+  // One `git diff --raw --no-abbrev` line, as real git prints it (round 5: the gate reads modes).
+  const raw = (status: string, path: string, modes = ["100644", "100644"]) =>
+    `:${modes[0]} ${modes[1]} ${"a".repeat(40)} ${"b".repeat(40)} ${status}\t${path}`;
   const commitGit = (o: {
     subject?: string;
     diff?: string;
@@ -333,7 +375,7 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
         return {
           code: 0,
           out: o.diff ??
-            Object.keys(files).filter((f) => files[f][0] !== files[f][1]).map((f) => `M\t${f}`)
+            Object.keys(files).filter((f) => files[f][0] !== files[f][1]).map((f) => raw("M", f))
                 .join("\n") + "\n",
           err: "",
         };
@@ -360,7 +402,10 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
   );
   check(
     "V3 a fourth file in the commit",
-    verifyReleaseCommit("4.0.0", commitGit({ diff: "M\tdeno.json\nM\tsrc/wasic.ts\n" })),
+    verifyReleaseCommit(
+      "4.0.0",
+      commitGit({ diff: `${raw("M", "deno.json")}\n${raw("M", "src/wasic.ts")}\n` }),
+    ),
     /touches src\/wasic\.ts/,
   );
   check(
@@ -404,7 +449,7 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
       verifyReleaseCommit(
         "4.0.0",
         commitGit({
-          diff: "M\tdeno.json\n",
+          diff: `${raw("M", "deno.json")}\n`,
           files: {
             "deno.json": [at4, at4],
             "package.json": [bumpV(PJ), bumpV(PJ)],
@@ -415,6 +460,18 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
       /HEAD\^ is already at 4\.0\.0/,
     );
   }
+  check(
+    "V11 a MODE change on a release file rides along → refused (round 5)",
+    verifyReleaseCommit(
+      "4.0.0",
+      commitGit({
+        diff: `${raw("M", "deno.json")}\n${raw("M", "package.json")}\n${
+          raw("M", "src/utils.ts", ["100644", "100755"])
+        }\n`,
+      }),
+    ),
+    /changes src\/utils\.ts's mode \(100644 → 100755\)/,
+  );
   check(
     "V8 a MERGE commit is not a release commit",
     verifyReleaseCommit("4.0.0", commitGit({ parents: 2 })),

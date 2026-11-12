@@ -66,8 +66,7 @@ export function jsrRekor(body: string): string {
   }
 }
 
-function writeOutput(...lines: string[]): number {
-  const out = process.env.GITHUB_OUTPUT;
+function writeOutput(out: string | undefined, ...lines: string[]): number {
   if (!out) {
     console.error("::error::GITHUB_OUTPUT is not set (this subcommand runs inside GitHub Actions)");
     return 1;
@@ -142,6 +141,14 @@ export function findBump(git: Git, version: string): string | null {
   return null;
 }
 
+/** The parents of `rev`; a failed `git rev-list` THROWS (round 5: it had read as "no parents",
+ * a non-bump, and the run then read itself as the bump still releasing). */
+export function parentsOf(git: Git, rev: string): string[] {
+  const r = git(["rev-list", "--parents", "-n", "1", rev]);
+  if (r.code !== 0) throw new Error(`could not read ${rev}'s parents: ${(r.err + r.out).trim()}`);
+  return r.out.trim().split(/\s+/).slice(1);
+}
+
 /** publish.yml's PUSH runs for one commit: one still going, all finished, or none at all. */
 export type RunState = "running" | "finished" | "none";
 
@@ -194,14 +201,17 @@ export interface ReleaseRun {
  *   – the PREVIOUS version must be released (tag + JSR) — a bump over a stranded or refused version
  *     would bury it for good (round 4);
  *   – the tag at another commit → refused (a tag never moves);
+ *   – origin's main moved on to ANOTHER version → refused: a re-run of an old bump run never
+ *     releases a given-up version late (round 5);
  *   – otherwise a RELEASE: fresh, resumed (the tag / page already made), or — tag at this commit
  *     AND on JSR — re-verified: "Re-run all jobs" after a failed `verify` runs `verify` again
  *     instead of going green (round 4); every job skips what is done.
  * **HEAD is not a bump commit**: never a release. The version must be released; JSR unreadable → a
- *   warning; JSR without the tag → refused; otherwise the bump commit's OWN run decides: still
- *   running → a warning; finished → refused "UNRELEASED VERSION on main"; no run at all (pushed
- *   under a later commit) → refused at once; no bump found → refused; its state unreadable → a
- *   warning.
+ *   warning; JSR without the tag → refused; otherwise: no bump found, or the version came in by a
+ *   MERGE (which can never release — round 5) → refused at once; else the bump commit's OWN run
+ *   decides: still running → a warning; finished → refused "UNRELEASED VERSION on main"; no run
+ *   at all (pushed under a later commit) → refused at once; its state unreadable → a warning.
+ * A failed `git rev-list` throws (round 5).
  */
 export async function isRelease(
   run: ReleaseRun,
@@ -224,9 +234,7 @@ export async function isRelease(
   } catch (e) {
     unread = (e as Error).message;
   }
-  const parents = git(["rev-list", "--parents", "-n", "1", "HEAD"]).out.trim().split(/\s+/).slice(
-    1,
-  );
+  const parents = parentsOf(git, "HEAD");
   const prev = parents.length === 1 ? versionAt(git, "HEAD^") : null;
   const bumpHere = parents.length === 1 && prev !== version;
   const done = { release: false, version, tag };
@@ -286,6 +294,31 @@ export async function isRelease(
         `${tag} exists on origin at ${taggedAt}, not this commit: a tag never moves.`,
       );
     }
+    // Round 5: a re-run of an OLD bump run, after main moved on (a revert and a newer version),
+    // would release an abandoned version late. Main must still be at this version.
+    const main = git(["ls-remote", "origin", "refs/heads/main"]);
+    if (main.code !== 0) {
+      throw new Error(`could not read origin's main: ${(main.err + main.out).trim()}`);
+    }
+    const mainSha = main.out.split("\n").map((l) => l.trim().split(/\s+/))
+      .find((f) => f.length === 2 && /^[0-9a-f]{40}$/.test(f[0]) && f[1] === "refs/heads/main")
+      ?.[0];
+    if (!mainSha) throw new Error("origin has no refs/heads/main");
+    if (mainSha !== sha) {
+      const onMain = versionAt(git, mainSha);
+      if (onMain === null) {
+        throw new Error(
+          `origin's main ${
+            mainSha.slice(0, 11)
+          } could not be read here, so whether it is still at ${version} cannot be decided. Re-run.`,
+        );
+      }
+      if (onMain !== version) {
+        throw new Error(
+          `main has moved on to ${onMain}: ${tag} was given up and is never released late. Nothing to do here.`,
+        );
+      }
+    }
     return { release: true, version, tag };
   }
 
@@ -303,6 +336,15 @@ export async function isRelease(
   if (!bump) {
     throw new Error(
       `UNRELEASED VERSION on main: ${state}, and no commit on main's first-parent line bumps to it. ${wayOut}`,
+    );
+  }
+  // Round 5: a version brought onto main by a MERGE can never release — only a one-parent bump
+  // commit's own run releases — so its run must not read itself as "still releasing".
+  if (parentsOf(git, bump).length !== 1) {
+    throw new Error(
+      `UNRELEASED VERSION on main: ${state}, and it came in through the MERGE ${
+        bump.slice(0, 11)
+      }, which can never release (only a one-parent \`bump to\` commit pushed alone does). ${wayOut}`,
     );
   }
   let st: RunState;
@@ -334,6 +376,42 @@ export async function isRelease(
       bump.slice(0, 11)
     }'s run finished without releasing it. Open that run and "Re-run failed jobs" (or all jobs) — it resumes. If its gate REFUSED the bump: ${wayOut}`,
   );
+}
+
+/**
+ * The `is-release` STEP, as publish.yml runs it: reads GITHUB_SHA and BEFORE (github.event.before;
+ * all zeros or absent = no `before`) from `e`, decides, and writes the outputs to GITHUB_OUTPUT.
+ * Returns the exit code. Exported so the self-test runs the step itself, env parse and output
+ * file included (round 5: a broken BEFORE parse or an unwritten output left every case green and
+ * would have made every release push a green non-release).
+ */
+export async function isReleaseStep(
+  e: Record<string, string | undefined>,
+  version: string,
+  git: Git,
+  jsr: (version: string) => Promise<"true" | "false">,
+  runState: (sha: string) => Promise<RunState>,
+): Promise<number> {
+  if (!e.GITHUB_SHA) {
+    console.error("::error::is-release needs GITHUB_SHA");
+    return 2;
+  }
+  try {
+    const before = /^[0-9a-f]{40}$/.test(e.BEFORE ?? "") && !/^0+$/.test(e.BEFORE!)
+      ? e.BEFORE
+      : undefined;
+    const r = await isRelease({ sha: e.GITHUB_SHA, version, before }, git, jsr, runState);
+    if (r.warning) console.log(`::warning::${r.warning}`);
+    console.log(
+      r.release
+        ? `HEAD is the bump to ${r.version}, pushed alone: this run releases ${r.tag} (every job skips what is already done)`
+        : `not a release (checks only)${r.warning ? " — see the warning" : ""}`,
+    );
+    return writeOutput(e.GITHUB_OUTPUT, ...releaseOutputs(r));
+  } catch (err) {
+    console.error(`::error::is-release: ${(err as Error).message}`);
+    return 1;
+  }
 }
 
 /** The step outputs `is-release` writes (a pure function, so the self-test pins them). */
@@ -646,17 +724,10 @@ if (import.meta.main) {
   };
   switch (cmd) {
     case "is-release": {
-      if (!e.GITHUB_SHA) {
-        console.error("::error::is-release needs GITHUB_SHA");
-        process.exit(2);
-      }
-      try {
-        // `before` is github.event.before (all zeros for a new branch = absent).
-        const before = /^[0-9a-f]{40}$/.test(e.BEFORE ?? "") && !/^0+$/.test(e.BEFORE!)
-          ? e.BEFORE
-          : undefined;
-        const r = await isRelease(
-          { sha: e.GITHUB_SHA, version: denoJson.version, before },
+      process.exit(
+        await isReleaseStep(
+          e,
+          denoJson.version,
           (args) => {
             const o = spawnSync("git", args, { encoding: "utf8" });
             return { code: o.status ?? 1, out: o.stdout ?? "", err: o.stderr ?? "" };
@@ -673,18 +744,8 @@ if (import.meta.main) {
               workflow: ".github/workflows/publish.yml",
             });
           },
-        );
-        if (r.warning) console.log(`::warning::${r.warning}`);
-        console.log(
-          r.release
-            ? `HEAD is the bump to ${r.version}, pushed alone: this run releases ${r.tag} (every job skips what is already done)`
-            : `not a release (checks only)${r.warning ? " — see the warning" : ""}`,
-        );
-        process.exit(writeOutput(...releaseOutputs(r)));
-      } catch (err) {
-        console.error(`::error::is-release: ${(err as Error).message}`);
-        process.exit(1);
-      }
+        ),
+      );
       break;
     }
     case "tag":
@@ -704,7 +765,7 @@ if (import.meta.main) {
       try {
         const present = await jsrHas(version);
         console.log(`JSR ${present === "true" ? "already serves" : "does not serve"} ${version}`);
-        process.exit(writeOutput(`present=${present}`));
+        process.exit(writeOutput(process.env.GITHUB_OUTPUT, `present=${present}`));
       } catch (err) {
         console.error(`::error::${(err as Error).message}`);
         process.exit(1);

@@ -66,12 +66,16 @@
  *
  * Usage (from the repo root):  bun scripts/check_publish_workflow.ts
  */
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   bumpRunState,
   createTag,
   findBump,
   type GitHubEnv,
   isRelease,
+  isReleaseStep,
   jsrHas,
   lsRemotePeeled,
   provenance,
@@ -97,6 +101,7 @@ interface World {
   hang?: boolean; // I: every GitHub call hangs until its signal aborts
   releaseGetStatus?: number; // H2: GET /releases/tags answers this (e.g. 500) before any POST
   readBackTag?: string; // H3: the page read back names another tag
+  moveTagAfterPage?: boolean; // H4: the tag peels elsewhere once the page is posted
   writes: string[];
 }
 
@@ -120,6 +125,12 @@ function mockFetch(w: World) {
     }
     const path = url.slice(`${API}/repos/${REPO}`.length);
     const method = init.method ?? "GET";
+    // Like the real API (round 5): no `Bearer` token, no answer — a dropped Authorization header
+    // had left every case green.
+    const auth = (init.headers as Record<string, string> | undefined)?.Authorization;
+    if (auth !== `Bearer ${env.token}`) {
+      return res(401, { message: "Requires authentication" });
+    }
     let m: RegExpMatchArray | null;
     if (method === "GET" && (m = path.match(/^\/git\/ref\/tags\/(.+)$/))) {
       const t = w.tags[decodeURIComponent(m[1])];
@@ -159,6 +170,7 @@ function mockFetch(w: World) {
     if (method === "POST" && path === "/releases") {
       const body = JSON.parse(String(init.body));
       w.writes.push(`release ${body.tag_name}`);
+      if (w.moveTagAfterPage) w.tags[TAG] = { type: "commit", sha: OTHER };
       if (!body.generate_release_notes) return res(422, { message: "test: notes not asked" });
       if ("target_commitish" in body) {
         return res(422, { message: "test: the page must be made ON the tag, no target" });
@@ -274,6 +286,8 @@ const fakeGit = (
     logCode?: number;
     commits?: Record<string, Commit>;
     prevTag?: boolean; // v9.8.6 on origin (default: yes)
+    main?: string; // origin's refs/heads/main (default: HEAD)
+    revListCode?: number; // `rev-list --parents` fails
   } = {},
 ) => {
   const commits = o.commits ?? history();
@@ -288,18 +302,30 @@ const fakeGit = (
     if (args[0] === "rev-parse") return { code: 0, out: `${head}\n`, err: o.stderr ?? "" };
     if (args[0] === "ls-remote") {
       if (o.lsRemoteCode) return { code: o.lsRemoteCode, out: "", err: "fatal: unable to access" };
-      const lines = tags.flatMap((t) =>
-        typeof t === "string"
-          ? [`${SHA}\trefs/tags/${t}`]
-          : [`${"7".repeat(40)}\trefs/tags/${t[0]}`, `${t[1]}\trefs/tags/${t[0]}^{}`]
-      );
+      const asked = args.slice(1).filter((a) => a.startsWith("refs/"));
+      if (asked.includes("refs/heads/main")) {
+        return { code: 0, out: `${o.main ?? head}\trefs/heads/main\n`, err: "" };
+      }
+      // Every tag held is listed (so only the exact-ref parse can pick the right one), but an
+      // annotated tag's `^{}` line appears ONLY when `<ref>^{}` was asked, as real git does
+      // (round 5: the fake had printed it unasked, so dropping the pattern went unnoticed).
+      const lines = tags.flatMap((t) => {
+        const name = typeof t === "string" ? t : t[0];
+        const ref = `refs/tags/${name}`;
+        if (typeof t === "string") return [`${SHA}\t${ref}`];
+        return [
+          `${"7".repeat(40)}\t${ref}`,
+          ...(asked.includes(`${ref}^{}`) ? [`${t[1]}\t${ref}^{}`] : []),
+        ];
+      });
       return { code: 0, out: lines.length ? lines.join("\n") + "\n" : "", err: o.stderr ?? "" };
     }
     if (args[0] === "rev-list" && args.includes("--parents")) {
-      const c = commits[head];
-      return c
-        ? { code: 0, out: `${[head, ...c.parents].join(" ")}\n`, err: "" }
-        : { code: 128, out: "", err: "fake git: no HEAD" };
+      if (o.revListCode) return { code: o.revListCode, out: "", err: "fatal: bad object" };
+      const at = resolve(args[args.length - 1]);
+      return at
+        ? { code: 0, out: `${[at, ...commits[at].parents].join(" ")}\n`, err: "" }
+        : { code: 128, out: "", err: "fake git: no such commit" };
     }
     if (args[0] === "show" && args[1]?.endsWith(":deno.json")) {
       const at = resolve(args[1].slice(0, -":deno.json".length));
@@ -482,7 +508,7 @@ await decide(
   /could not be read \(HTTP 502\)/,
 );
 await decide(
-  "S18 a MERGE that changes the version is not a bump commit → not a release",
+  "S18 a version brought in by a MERGE can never release → refused AT ONCE, not 'still releasing'",
   fakeGit(LATER, [], {
     commits: {
       [PREV]: { parents: [], version: "9.8.6" },
@@ -491,10 +517,99 @@ await decide(
     },
   }),
   false,
+  new RegExp(`came in through the MERGE ${LATER.slice(0, 11)}, which can never release`),
   false,
-  true,
-  { sha: LATER, before: PREV },
+  { sha: LATER, before: PREV, state: "running" },
 );
+// Round 5: an OLD bump run re-run after main moved on, and the parents read failing.
+{
+  const R = "f".repeat(40), N = "9".repeat(40); // a revert to 9.8.6, then the bump to 9.8.8
+  const moved = {
+    ...history(true),
+    [R]: { parents: [LATER], version: "9.8.6" },
+    [N]: { parents: [R], version: "9.8.8" },
+  };
+  await decide(
+    "S32 a re-run of an ABANDONED bump run (main moved on to 9.8.8) → refused, never released late",
+    fakeGit(SHA, [], { commits: moved, main: N }),
+    false,
+    /main has moved on to 9\.8\.8: v9\.8\.7 was given up/,
+  );
+  await decide(
+    "S33 main moved on but is still at 9.8.7 (a later docs commit) → the bump run still releases",
+    fakeGit(SHA, [], { commits: history(true), main: LATER }),
+    false,
+    true,
+  );
+  await decide(
+    "S34 origin's main not readable here → refused (cannot decide)",
+    fakeGit(SHA, [], { main: "8".repeat(40) }),
+    false,
+    /origin's main 88888888888 could not be read here/,
+  );
+  await decide(
+    "S35 `git rev-list --parents` fails → refused (never read as 'no parents')",
+    fakeGit(SHA, [], { revListCode: 128 }),
+    false,
+    /could not read HEAD's parents/,
+  );
+}
+// The is-release STEP itself (round 5): the BEFORE parse and the GITHUB_OUTPUT write, which every
+// case above bypassed — a broken parse or an unwritten output would make a release push green.
+{
+  const dir = mkdtempSync(join(tmpdir(), "wasmtk-check-step-"));
+  try {
+    const step = async (env: Record<string, string | undefined>) => {
+      const out = join(dir, `out-${Math.random().toString(36).slice(2)}`);
+      writeFileSync(out, "");
+      const r = await quiet(() =>
+        isReleaseStep(
+          { GITHUB_OUTPUT: out, ...env },
+          "9.8.7",
+          fakeGit(SHA, []),
+          jsrSays(false),
+          () => Promise.resolve("running" as const),
+        )
+      );
+      let written = "";
+      try {
+        written = readFileSync(env.GITHUB_OUTPUT === undefined ? out : env.GITHUB_OUTPUT, "utf8");
+      } catch { /* no file */ }
+      return { code: r.v, written };
+    };
+    const a = await step({ GITHUB_SHA: SHA, BEFORE: PREV });
+    report(
+      "X1 the step, BEFORE = the bump's parent → exit 0, GITHUB_OUTPUT gets release=true / version / tag",
+      a.code === 0 && a.written === "release=true\nversion=9.8.7\ntag=v9.8.7\n",
+      `exit ${a.code}, ${JSON.stringify(a.written)}`,
+    );
+    const b = await step({ GITHUB_SHA: SHA, BEFORE: "0".repeat(40) });
+    const c = await step({ GITHUB_SHA: SHA, BEFORE: "not-a-sha" });
+    report(
+      "X2 BEFORE all zeros / not a sha → treated as absent: release=false (never a release)",
+      b.code === 0 && b.written.startsWith("release=false\n") && c.code === 0 &&
+        c.written.startsWith("release=false\n"),
+      `${JSON.stringify(b.written)} / ${JSON.stringify(c.written)}`,
+    );
+    const d = await step({ BEFORE: PREV });
+    const e = await quiet(() =>
+      isReleaseStep(
+        { GITHUB_SHA: SHA, BEFORE: PREV },
+        "9.8.7",
+        fakeGit(SHA, []),
+        jsrSays(false),
+        () => Promise.resolve("running" as const),
+      )
+    );
+    report(
+      "X3 no GITHUB_SHA → exit 2; no GITHUB_OUTPUT → exit 1 (never a silent pass)",
+      d.code === 2 && e.v === 1,
+      `exit ${d.code} / exit ${e.v}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 await decide(
   "S19 later push, JSR has it, no tag → refused",
   fakeGit(LATER, [], { commits: history(true) }),
@@ -723,6 +838,12 @@ await check(
   rel,
   world({ readBackTag: "v0.0.1" }),
   { code: 1, writes: page, msg: /read back: page is for v0\.0\.1/ },
+);
+await check(
+  "H4 the tag peels ELSEWHERE once the page is posted → refused (the second peel)",
+  rel,
+  world({ moveTagAfterPage: true }),
+  { code: 1, writes: page, msg: /read back: tag v9\.8\.7 moved/ },
 );
 {
   // I: the PER-REQUEST limit is what ends a hung call — measured: it must end near

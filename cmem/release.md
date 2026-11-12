@@ -22,8 +22,9 @@ EXACTLY the form `**Security review (vX.Y.Z):** <scope>; rounds <n>; ended by an
 entry's own — `deno task release` refuses without both, and CI repeats the check on the bump commit
 (guard 0g, `--verify-commit`; [review-process.md](review-process.md) § 3). **This file stays plain
 Markdown** (since review round 4): no code fences, no HTML or comments (no line starting with `<`),
-no indentation of 4+ spaces or tabs, headings only as `#`… at column 0 — the gate refuses such a
-line by number, since each can hide text. The entries below predate the rule. Entries before this file existed are summaries of the records they came from; the full
+no indentation of 4+ spaces or tabs, headings only as `#`… at column 0, no `===` / `---` lines, no
+lone CR and no line of non-space whitespace (round 5) — the gate refuses such a line by number,
+since each can hide text. The entries below predate the rule. Entries before this file existed are summaries of the records they came from; the full
 per-release logs stay in [roadmap.md](roadmap.md) § "Release status (date) — vX.Y.Z", which this
 file indexes (not moved, 2026-11-10).
 

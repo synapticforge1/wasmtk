@@ -16,6 +16,8 @@
  *   0c. the tag absent locally and on origin (a tag that exists has been, or will be, released);
  *   0d. JSR does not already serve the version (a version number is immutable there);
  *   0h. the version it bumps FROM (origin/main's) is released: its tag on origin and on JSR;
+ *   0i. the compatibility gate CI runs (`api-surface.ts --verify-release`: one SemVer step, the
+ *       surface floor), so a version CI would refuse is never pushed;
  *   0e. COLD checks on exactly what will be committed (`git archive HEAD` unpacked to a temp folder,
  *       plus the bump) with an empty DENO_DIR, as publish.yml's `checks` runs them: `deno check
  *       main.ts`, `deno publish --dry-run`, then `--version` names this version and `--help` exits
@@ -65,12 +67,20 @@ export type Git = (args: string[]) => { code: number; out: string; err: string }
  *   – after any list / quote markers, a line that starts with ``` / ~~~ (a fence) or `<` (an HTML
  *     block — comments, `<?`, `<!X`, `<![CDATA[`, `<style>` …);
  *   – a heading not at column 0 or not followed by a space, and a `===` / `---` line (a setext
- *     underline). Returns "line N: why" for each.
+ *     underline, trailing spaces or tabs allowed);
+ *   – round 5: a lone CR (CommonMark ends a line there, so a `<!--` after it starts a block the
+ *     line scan would not see), and a line of whitespace other than spaces / tabs (CommonMark does
+ *     not count it as blank, so it can join two "paragraphs" — e.g. into a link title).
+ * Returns "line N: why" for each.
  */
 export function markdownSubsetProblems(text: string): string[] {
   const out: string[] = [];
   text.replace(/\r\n/g, "\n").split("\n").forEach((line, i) => {
     const at = `cmem/release.md line ${i + 1}`;
+    if (line.includes("\r")) return out.push(`${at}: a lone carriage return (CR)`);
+    if (/^\s+$/.test(line) && !/^[ \t]+$/.test(line)) {
+      return out.push(`${at}: a line of whitespace other than spaces / tabs`);
+    }
     if (/^ *\t/.test(line)) return out.push(`${at}: a tab in the indentation`);
     if (/^ {4,}\S/.test(line)) return out.push(`${at}: indented 4+ spaces (a code block)`);
     const body = line.replace(/^(?: {0,3}(?:>|[-*+]|\d{1,9}[.)])(?= |$) ?)+/, "").trimStart();
@@ -78,7 +88,7 @@ export function markdownSubsetProblems(text: string): string[] {
     if (body.startsWith("<")) return out.push(`${at}: a line starting with "<" (an HTML block)`);
     if (/^ {1,3}#{1,6}(\s|$)/.test(line)) return out.push(`${at}: an indented heading`);
     if (/^#{1,6}(\t|$)/.test(line)) return out.push(`${at}: a heading without a space`);
-    if (/^ {0,3}(=+|-+) *$/.test(line)) return out.push(`${at}: a "===" / "---" line`);
+    if (/^ {0,3}(=+|-+)[ \t]*$/.test(line)) return out.push(`${at}: a "===" / "---" line`);
   });
   return out;
 }
@@ -153,7 +163,8 @@ export function reviewsRecorded(releaseMd: string, version: string): string[] {
   if (start < 0) return [`cmem/release.md has no "### ${version}" entry in its Release History`];
   let end = start + 1;
   while (end < histEnd && !/^#{1,3} /.test(lines[end])) end++;
-  const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n\s*\n/)
+  // Blank = spaces and tabs only, as CommonMark counts it (round 5).
+  const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n[ \t]*\n/)
     .map((x) => x.replace(/^\n+/, ""));
   const problems: string[] = [];
   for (const kind of ["Security", "Hardening"] as const) {
@@ -252,16 +263,27 @@ export function verifyReleaseCommit(version: string, git: Git): string[] {
       `HEAD's subject is "${subject.out.trim()}", not "bump to v${version}" — a release is the commit \`deno task release\` makes, and nothing else`,
     );
   }
-  const diff = git(["diff", "--name-status", "--no-renames", "HEAD^", "HEAD"]);
+  // `--raw` carries the file MODES (round 5: `--name-status` shows a 100644 → 100755 change as a
+  // plain `M`, so a mode change rode along): `:<old mode> <new mode> <old> <new> <status>\t<path>`.
+  const diff = git(["diff", "--raw", "--no-abbrev", "--no-renames", "HEAD^", "HEAD"]);
   if (diff.code !== 0) return [...problems, `could not diff HEAD^..HEAD: ${diff.err.trim()}`];
-  const changed = diff.out.split("\n").filter((l) => l.trim() !== "").map((l) => l.split("\t"));
-  for (const [status, path] of changed) {
+  const changed: Array<[string, string]> = [];
+  for (const l of diff.out.split("\n").filter((x) => x.trim() !== "")) {
+    const m = /^:(\d{6}) (\d{6}) \S+ \S+ (\S+)\t(.+)$/.exec(l);
+    if (!m) {
+      problems.push(`could not read the diff line "${l}"`);
+      continue;
+    }
+    const [, oldMode, newMode, status, path] = m;
+    changed.push([status, path]);
     if (status !== "M" || !RELEASE_FILES.includes(path)) {
       problems.push(
         `the release commit touches ${path} (${status}) — only the version lines of ${
           RELEASE_FILES.join(", ")
         } may change`,
       );
+    } else if (oldMode !== newMode) {
+      problems.push(`the release commit changes ${path}'s mode (${oldMode} → ${newMode})`);
     }
   }
   if (!changed.some(([, p]) => p === "deno.json")) {
@@ -463,6 +485,20 @@ if (import.meta.main) {
     }
   }
 
+  // 0i. The compatibility gate CI runs on the candidate (`api-surface.ts --verify-release`: one
+  //     SemVer step from the previous tag, at or above the surface floor), run HERE before the
+  //     push — round 5: a hand-typed 3.0.0 → 7.0.0 or → 2.9.9 passed every local guard and was
+  //     refused only by CI, after `main` already carried the unreleased version. The working tree
+  //     is HEAD + the bump (0a), exactly the candidate.
+  console.log("$ bun scripts/api-surface.ts --verify-release");
+  const surface = capture(["bun", "scripts/api-surface.ts", "--verify-release"]);
+  if (surface.code !== 0) {
+    refuse(
+      "the compatibility gate refuses this version (CI would refuse it after the push).",
+      ...said(surface).split("\n").slice(-12),
+    );
+  }
+
   // 0e. Cold checks on EXACTLY what will be committed: `git archive HEAD` unpacked into a temp
   //     folder, plus the bump, and an empty DENO_DIR. Round 4: a `git worktree` had registered
   //     itself in .git and, on Ctrl-C, stayed registered; an archive registers nothing. Cleanup
@@ -488,7 +524,11 @@ if (import.meta.main) {
   try {
     const tar = join(cold, "tree.tar");
     const archived = git(["archive", "--format=tar", "-o", tar, "HEAD"]);
-    const unpacked = archived.code === 0 ? capture(["tar", "-xf", tar, "-C", tree]) : archived;
+    // The archive is named RELATIVE to its folder: Git Bash's GNU tar reads `C:\…\tree.tar` as a
+    // remote `host:file` and fails (round 5); Windows' bsdtar and Linux tar take either.
+    const unpacked = archived.code === 0
+      ? capture(["tar", "-xf", "tree.tar", "-C", tree], { cwd: cold })
+      : archived;
     await rm(tar, { force: true });
     if (unpacked.code !== 0) {
       failure = ["could not unpack HEAD for the cold checks.", said(unpacked)];

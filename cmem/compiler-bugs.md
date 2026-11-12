@@ -350,6 +350,34 @@ same day, after the first tally's 2 were fixed, and that 0 carried the warning b
 audit then CONFIRMED 28 more by running them (table below). The count is only as good as the
 entries: a silent-wrong bug nobody has found is not in it.
 
+## Review round 5 — the round-4 fixes (2026-11-12): 4 silent + 4 loud tool rows + 8 test gaps, CONFIRMED BY RUNNING, FIXED
+
+Owner: "all". Three fresh reviewers on `eae9f1c9`, told to write only inside their own temp folder
+(one deleted a shared temp folder holding another's probes, already re-run here; none touched the
+owner's home). Every finding re-run here first (CommonMark 0.31.2 renders; real-git scratch repos;
+`tar` from Git Bash and from PowerShell). Tests now: `check_release.ts` 71, `check_publish_workflow.ts`
+71; 19 round-5 mutants each caught by its own case (8 of them the reviewer's survivors), round 4's 39
+still caught; rehearsal J1–J2 run from Git Bash.
+
+| row | class | the defect (measured) | fix |
+| --- | --- | --- | --- |
+| **sw213** | A — a merged bump | a version brought onto main by a MERGE: its own run read itself as "the bump commit still releasing" and went green; it could never release, and the next push advised a useless re-run | a version whose first-parent bump is a merge is refused at once ("can never release"), with the way out; a failed `git rev-list --parents` throws instead of reading as "no parents" (`parentsOf`) |
+| **sw214** | A — a given-up version released late | re-running an OLD bump run after the owner reverted and released a newer version released the old one (tag, page, JSR) after it | a release also needs origin's main still at this version: "main has moved on to X" → refused; main unreadable → refused |
+| **sw215** | B — a lone CR | a lone CR (CommonMark's line end) put a `<!--` block where the line scan did not see it; the records were hidden and the gate passed (the CR survives a commit with `* text=auto eol=lf`) | a lone CR is refused by line |
+| **sw216** | B — not-blank "blank" lines | a line of U+00A0 (not blank to CommonMark) let a link-reference title swallow both records while the gate split paragraphs there | such a line is refused; paragraphs split on spaces / tabs only |
+| ld132 | B | `deno task release` from Git Bash always refused: Git's GNU tar reads `C:\…\tree.tar` as `host:file` | the archive is named relative to its folder (rehearsed from Git Bash) |
+| ld133 | B | no local SemVer-step / surface-floor check: a hand-typed 3.0.0 → 7.0.0 or → 2.9.9 was pushed and refused only by CI, leaving `main` at an unreleased version | guard 0i runs `api-surface.ts --verify-release` before the push (rehearsed: 7.0.0 refused locally) |
+| ld134 | B | a file-MODE change on a release file rode along (`--name-status` shows it as `M`) | the commit gate reads `git diff --raw` and refuses a mode change |
+| ld135 | B | a setext `===` with a trailing tab was not refused, though the rule says it is | spaces or tabs after the underline |
+
+**Test gaps closed (C):** the `is-release` STEP is now an exported `isReleaseStep` run by X1–X3 with
+a real `GITHUB_OUTPUT` file (the BEFORE parse and the output write had been bypassed — either broken
+would make a release push a green non-release); the fake git prints an annotated tag's `^{}` line
+only when asked, as real git does (dropping the pattern had gone unnoticed); the mock GitHub refuses
+a call without `Bearer` (401); H4 (the page step's second peel); R21 (no `## Release History`
+heading); R9f (`<` / backslash in a scope); R20 (nested `> - ```` markers). **UNMEASURED:** the
+Actions-API read on GitHub; the Ctrl-C cleanup. Next: round 6 on these fixes.
+
 ## Review round 4 — the round-3 fixes (2026-11-12): 5 silent + 4 loud tool rows + 11 test gaps, CONFIRMED BY RUNNING, FIXED
 
 Owner: "all" (with the recommended approach for B: a plain-Markdown subset, the version in the

@@ -5,6 +5,14 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-12 — review round 5, the round-4 fixes (owner: "all")
+
+- **Round 5 DONE, every group FIXED** — compiler-bugs.md § "Review round 5" (sw213–sw216,
+  ld132–ld135, 8 test gaps): a merged bump refused at once; an abandoned version never released
+  late; lone CR / Unicode-whitespace lines refused; guard 0i (the compatibility gate before the
+  push); `--raw` mode check; tar from Git Bash; the is-release step tested end to end.
+- **NEXT: round 6 on these fixes**, fresh reviewers, until a round finds nothing.
+
 ## 2026-11-12 — review round 4, the round-3 fixes (owner: "all")
 
 - **Round 4 DONE, every group FIXED** — compiler-bugs.md § "Review round 4" (sw208–sw212,
@@ -12,7 +20,8 @@ branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
   plain Markdown (review-process.md § 3); a bump over an unreleased version is refused; a later
   push reads the bump commit's own run instead of a time window.
 - **UNMEASURED until a push:** `is-release` reading the Actions API with `actions: read`.
-- **NEXT: round 5 on these fixes**, fresh reviewers, until a round finds nothing.
+- Round 5 followed (above). The push of `eae9f1c9` ran green (run 43294546868); the Actions-API
+  read was not reached (the version was released).
 
 ## 2026-11-12 — review round 3, the round-2 fixes + F (owner: "all and include F")
 
