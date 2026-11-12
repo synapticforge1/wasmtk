@@ -13,7 +13,10 @@
  *   0d. JSR does not already serve the version (a version number is immutable there);
  *   0e. COLD checks in an empty DENO_DIR, as publish.yml's `checks` runs them: `deno check main.ts`
  *       and `deno publish --dry-run` (a warm cache passes what CI fails);
- *   0f. the published root runs as a user runs it: `--version` names this version, `--help` exits 0.
+ *   0f. the published root runs as a user runs it: `--version` names this version, `--help` exits 0;
+ *   0g. the version's entry in `cmem/release.md` records BOTH required reviews — a security review
+ *       and a hardening review, each ended by an empty round (🔒 owner 2026-11-12, workspace
+ *       `review-process.md` § 0, letter H35; the entry is committed with the release notes, U2).
  * Then: commit RELEASE_FILES as `bump to vX.Y.Z` (if anything is staged), push `main` as a user,
  * and read it back with `git ls-remote`. **It makes and pushes NO tag** (U4): CI checks the pushed
  * commit, then CI creates the tag, then the Release page from the tag, then publishes to JSR —
@@ -24,7 +27,7 @@
  * on 2026-11-10, which had none of the guards, force-moved a local tag and pushed twice.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import denoJson from "../deno.json" with { type: "json" };
@@ -32,6 +35,33 @@ import { jsrHas } from "./publish-workflow.ts";
 
 /** What `deno task bump` writes (deno.json + scripts/sync-version.ts's two mirrors). */
 export const RELEASE_FILES = ["deno.json", "package.json", "src/utils.ts"];
+
+/**
+ * Guard 0g: the problems with `version`'s entry in `cmem/release.md` (empty = it records both
+ * required reviews). The entry is the `### X.Y.Z` section of § "Release History" (up to the next
+ * `###` or `##`); it must hold a paragraph beginning `**Security review` and one beginning
+ * `**Hardening review`, each saying how it ended: "empty round" (cmem/review-process.md § 3).
+ */
+export function reviewsRecorded(releaseMd: string, version: string): string[] {
+  const lines = releaseMd.replace(/\r\n/g, "\n").split("\n");
+  const head = new RegExp(`^### ${version.replace(/\./g, "\\.")}(\\s|$)`);
+  const start = lines.findIndex((l) => head.test(l));
+  if (start < 0) return [`cmem/release.md has no "### ${version}" entry in its Release History`];
+  let end = start + 1;
+  while (end < lines.length && !/^##/.test(lines[end])) end++;
+  const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n\s*\n/);
+  const problems: string[] = [];
+  for (const kind of ["Security", "Hardening"]) {
+    const p = paragraphs.find((x) => x.trimStart().startsWith(`**${kind} review`));
+    if (!p) problems.push(`the ${version} entry records no **${kind} review** paragraph`);
+    else if (!/empty round/i.test(p)) {
+      problems.push(
+        `the ${version} entry's ${kind.toLowerCase()} review does not say it ended by an empty round`,
+      );
+    }
+  }
+  return problems;
+}
 
 /** `git status --porcelain` lines that would be LEFT OUT of the release (untracked included). */
 export function releaseBlockers(porcelain: string): string[] {
@@ -78,6 +108,24 @@ if (import.meta.main) {
       ...dirty.slice(0, 10).map((l) => `  ${l}`),
       ...(dirty.length > 10 ? [`  ... and ${dirty.length - 10} more`] : []),
       `This script commits ${RELEASE_FILES.join(", ")} only; commit the rest first.`,
+    );
+  }
+
+  // 0g. Both required reviews recorded in the release's entry (checked early: it is cheap, and a
+  //     release without them is not ready — workspace review-process.md § 0).
+  let releaseMd = "";
+  try {
+    releaseMd = await readFile("cmem/release.md", "utf8");
+  } catch {
+    refuse("cmem/release.md is missing.");
+  }
+  const unreviewed = reviewsRecorded(releaseMd, version);
+  if (unreviewed.length > 0) {
+    refuse(
+      "the security and hardening reviews are not recorded.",
+      ...unreviewed,
+      'Run "security review" and "hardening review" to their empty rounds and record both in the',
+      "release's entry (cmem/review-process.md § 3), committed with the release notes.",
     );
   }
 

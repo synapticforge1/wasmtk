@@ -5,6 +5,23 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-12 — workspace items for wasmtk (owner: same words as 2026-11-10)
+
+- **H35 (one review process, every project) — DONE:** the three words ("review", "security
+  review", "hardening review") in INDEX.md § Owner commands; wasmtk's slots in the new
+  [review-process.md](review-process.md) (private data, the worst silent case = a valid module
+  printing something JavaScript would not, reference results with dates, CI, five review classes,
+  the seven security surfaces, the environment matrix, compiler-bugs.md as the findings ledger);
+  `deno task release` refuses unless the version's release.md entry records BOTH reviews, each
+  ended by an empty round (guard 0g; `scripts/check_release.ts` 7 cases, 3 mutants; rehearsed
+  against a scratch bare origin, 3 cases). **OPEN, the first security review's first question:**
+  the producer verbs' and the CLI's subprocess time limits are not measured (review-process.md
+  § 2, surface 4). **No review has been RUN yet** — the next release needs both, to an empty round.
+- **C45 CLOSED** (wasmtk's row): loader-js and loader-jvm make the page on the tag with no branch,
+  re-derived on each `origin/main`.
+- **C46** (S3D → workspace) is H35's source, not addressed to wasmtk. H6 (H6.5b), H10, H12 as
+  before; H19, H27, H28, H30–H34, C30, C34, C43, C44 answered, waiting on their creators.
+
 ## 2026-11-10 — workspace items for wasmtk (owner: "review workspace for items needing this project's attention and make the requested fixes")
 
 Every open ledger row naming wasmtk, read; answers in each row's cell.

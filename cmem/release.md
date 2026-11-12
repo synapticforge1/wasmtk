@@ -15,7 +15,11 @@ Rekor id read back.
 
 **Each entry:** the version and date, a summary of what changed (CHANGELOG.md § X.Y.Z is the
 user-facing text), the CI run, the read-backs (JSR provenance, the page), and what was checked as a
-user. Entries before this file existed are summaries of the records they came from; the full
+user. 🔒 **From 2026-11-12 every entry ALSO records the two required reviews** (owner; workspace
+`review-process.md` § 0, letter H35), written BEFORE the bump, as two paragraphs beginning
+`**Security review:**` and `**Hardening review:**`, each naming the round that ended it empty
+("ended by an empty round (round n, date)") — `deno task release` refuses without both (guard 0g;
+[review-process.md](review-process.md) § 3). The entries below predate the rule. Entries before this file existed are summaries of the records they came from; the full
 per-release logs stay in [roadmap.md](roadmap.md) § "Release status (date) — vX.Y.Z", which this
 file indexes (not moved, 2026-11-10).
 
