@@ -380,8 +380,9 @@ way out below), V6–V9, R16–R23,
 R18b/c, B6, P14. **Rehearsal G1–G4:** a hook-altered commit refused and undone (HEAD = origin/main,
 the bump kept staged), nothing pushed; the same bump released (origin main = `bump to v4.0.0`, no
 tag) with an unrelated prunable worktree still registered; `--verify-commit` passes it; a
-deno.json-only bump commit refused, naming package.json and VERSION. **UNMEASURED until a push:**
-the self-test step and per-commit concurrency on GitHub; the F path end to end (the next release).
+deno.json-only bump commit refused, naming package.json and VERSION. **Measured on GitHub** (run
+43290071765, `21a54042`, green): the self-test step, and `is-release` on a non-bump push. Unmeasured:
+the F path end to end (the next release).
 Next: round 4 on these fixes.
 
 ## Review round 2 — the round-1 fixes (2026-11-12): 4 silent + 3 loud tool rows, CONFIRMED BY RUNNING, FIXED

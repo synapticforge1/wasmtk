@@ -11,7 +11,9 @@ branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
   (sw203–sw207, ld125–ld127). F: one run per commit, and only the bump commit's own push run
   releases (a re-run resumes; a later push warns for 60 min, then refuses "UNRELEASED VERSION").
   The stuck-release way out is in workflow.md § The release flow.
-- **UNMEASURED until a push:** the self-test step in `checks`; per-commit concurrency.
+- **MEASURED on GitHub** (run 43290071765, `21a54042`, green): the self-test step passed on
+  ubuntu-latest; `is-release` with `BEFORE` read a non-bump push as "not a release"; the
+  per-commit group ran it. The F path end to end is unmeasured until the next release.
 - **NEXT: round 4 on these fixes**, fresh reviewers, until a round finds nothing.
 
 ## 2026-11-12 — review round 2, the round-1 fixes (owner: "all")
