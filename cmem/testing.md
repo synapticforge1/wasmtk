@@ -119,7 +119,17 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-10-26, binaryang **2.2.0**; latest release v3.0.0)
+## Current pass counts (2026-11-18, binaryang **4.0.0**; latest release v3.0.0)
+
+> **2026-11-18: binaryang 2.2.0 → 4.0.0 pinned, full gate GREEN, ONE number moved, as predicted**
+> (2.2.2's `delegate` depth check): wast `legacy/try_delegate.wast` accepted-invalid 1 → 0, so
+> `KNOWN_ACCEPTED_INVALID` is now empty; wast 64,506 / 0 / 16 ALL CLEAN. Everything else
+> unchanged: wasi **509/509** · golden-WAT **568** byte-identical (also run on 2.2.0 just before the
+> pin: 568, 0 diverged) · `-Oz` guard 42 / 42 · cross-check **1374** on baseline · go 7 / 7 / 12 ·
+> merge_layout 17 · tool_rows 37 · outpath 14 · witgen 24 · typed_decl 50 · bindgen 142 · mod 55 ·
+> hybrid + wasmmerge_guard 17 · wasMath L1 151 / L2 199 exact · zig 20 · rust 10 · every other
+> suite green. 3.0.x's optimizer fixes (tail-call inlining, SimplifyLocals in a `try`) moved no
+> golden; 4.0.0's 256-level nesting limit and refusals met nothing in the corpus.
 
 > **2026-10-26, H11 (`wasmbundle` on binaryang's `bundle()`) + round 3's worst rows (sw141/sw142
 > fresh `new`, sw149–sw152 switch, sw160 i32 literal range, sw174; sw139, sw140), full gate GREEN

@@ -5,13 +5,28 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-18 — binaryang 2.2.0 → 4.0.0 PINNED (owner: "binaryang has been updated to 4.0.0")
+
+All four specifiers + the `src/binaryen.ts` comment; full gate GREEN (testing.md, 2026-11-18).
+One number moved, as predicted: `legacy/try_delegate.wast` accepted-invalid 1 → 0, pin emptied in
+`tests/wast_tests.ts`. Closes C43's bump (target was 3.0.4; 4.0.0 is a superset). Unblocked: the
+size-capped `(module definition …)` verdict (§ "Open now", the wast item). Not committed.
+
+## ⏸ PAUSED 2026-11-12 (end of day) — review round 6 FOUND, NOT FIXED (owner: pause)
+
+Round 6's three reviewers ran on `bd69c99f` (local, unpushed; `origin/main` = `eae9f1c9`). Their
+findings are recorded, NOT fixed, in compiler-bugs.md § "Review round 6 — FOUND". **Resume:**
+re-measure R6-L1 (stale local tags) yourself, ask the owner which groups to fix (A–D), fix with a
+test + mutant each, rehearse, commit, then round 7. Every reviewer wrote only inside its own temp
+folder this round (`r6-ci-*`, `r6-tests-*`, `r6-local-*` under the system temp; safe to delete).
+
 ## 2026-11-12 — review round 5, the round-4 fixes (owner: "all")
 
 - **Round 5 DONE, every group FIXED** — compiler-bugs.md § "Review round 5" (sw213–sw216,
   ld132–ld135, 8 test gaps): a merged bump refused at once; an abandoned version never released
   late; lone CR / Unicode-whitespace lines refused; guard 0i (the compatibility gate before the
   push); `--raw` mode check; tar from Git Bash; the is-release step tested end to end.
-- **NEXT: round 6 on these fixes**, fresh reviewers, until a round finds nothing.
+- Round 6 ran; its findings are open (the PAUSED section above).
 
 ## 2026-11-12 — review round 4, the round-3 fixes (owner: "all")
 
@@ -818,8 +833,9 @@ publishing works from `synapticforge1` (before 3.0.0), and the other repos' part
   customDescriptors everywhere: the two br_on_cast files red, 3 each). Reported in the DRAFT to
   binaryang. **2026-11-05: FIXED upstream** (binaryang `12e6c042d`, reply in their `handoffs.md`
   § 47; ledger C12 closed): their tag `v2.2.2` carries it (JSR availability not checked here).
-  **Next:** pin a release that carries it (the binaryang bump checklist in workflow.md, full gate),
-  then set this pin to 0 and invert it. When the pin reads 0, the definition verdict is a few lines in
+  **2026-11-18: binaryang 4.0.0 PINNED, the pin is 0** (`KNOWN_ACCEPTED_INVALID` emptied; with the
+  old entry the file read "accepted 1 → 0", red; emptied, ALL CLEAN — so the pin is inverted).
+  **Next, now unblocked:** the definition verdict is a few lines in
   the `kind === "definition"` catch (judge only an engine SIZE-CAP refusal, not an unimplemented
   proposal — two custom-descriptors definitions would otherwise be judged too), then re-record the
   4 files' `unbuilt`. The plain `memory64.wast` module `(module (memory i64 0 0x1_0000_0000_0000))`

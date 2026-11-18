@@ -67,6 +67,10 @@
    `gh`, no `release/<tag>` branch) → `jsr` (last; skips an upload already made; Rekor fatal);
    every action pinned to a commit. Releases recorded in `cmem/release.md`. Self-test
    `scripts/check_publish_workflow.ts`.
+9. **Backend → binaryang 4.0.0 (2026-11-18, from 2.2.0).** wasmtk's output is unchanged (golden
+   568 byte-identical, wasi 509/509); binaryang's validator now checks a legacy `delegate`'s label
+   depth (2.2.2), so the wast gate needs no accepted-invalid pin. 4.0.0's input limits (256
+   nesting levels, malformed UTF-8 in WAT refused, bounded locals) apply to what wasmtk passes it.
 
 > **Releases are recorded in [release.md](release.md) § "Release History" since 2026-11-10** (🔒
 > owner D3: one place, newest first). The "Release status" sections below are the earlier

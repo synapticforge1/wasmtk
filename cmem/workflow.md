@@ -61,7 +61,7 @@ with *"dubious ownership"* until you ran
 clone printed its revision; ledger C9 closed the workspace-wide `safe.directory` issue) — if
 `unknown` comes back, this is the cause.
 
-## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, 1.13.0 → 1.15.0, 1.15.0 → 1.16.1, and 1.16.1 → 2.2.0 — a MAJOR, whose one breaking change, a flag spelling, wasmtk never used; nothing moved, 2026-10-24)
+## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, 1.13.0 → 1.15.0, 1.15.0 → 1.16.1, 1.16.1 → 2.2.0 — a MAJOR, whose one breaking change, a flag spelling, wasmtk never used; nothing moved, 2026-10-24 — and 2.2.0 → 4.0.0, two MAJORs at once, 2026-11-18: only the predicted `try_delegate` pin moved, 1 → 0)
 
 (1.13.0, 2026-10-20, and 1.15.0, 2026-10-23: an optimizer release moves PIPELINE goldens that merge
 a `-Oz` library, 43 of them both times, only in the merged library's functions; check that no
@@ -101,6 +101,11 @@ Collected 2026-09-30 from the bumps recorded in next-work.md's history (its full
    (binaryang rejects no valid module) must read 0.
 8. **If a report went to binaryang, verify every item it claims fixed against OUR numbers**, and
    answer with them.
+
+**DONE 2026-11-18 as 2.2.0 → 4.0.0** (testing.md has the counts). 4.0.0 (CHANGELOG: one nesting
+limit of 256 levels, malformed UTF-8 in WAT refused, bounded locals, atomic CLI writes, an optional
+`readBinary(bytes, { validate })`; "no calling code needs to change") moved nothing of ours. The
+3.0.x list below, kept as the record of what was checked:
 
 **For the 2.2.0 → 3.0.x bump (a MAJOR; binaryang's ledger C43, read into our tree by them
 2026-11-09 — a claim until re-measured here). Target 3.0.4** (JSR `latest`, read 2026-11-12):

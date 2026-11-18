@@ -350,6 +350,54 @@ same day, after the first tally's 2 were fixed, and that 0 carried the warning b
 audit then CONFIRMED 28 more by running them (table below). The count is only as good as the
 entries: a silent-wrong bug nobody has found is not in it.
 
+## Review round 6 — FOUND, NOT FIXED (2026-11-12, paused by the owner at end of day)
+
+Three fresh reviewers on `bd69c99f`. Row numbers are given when fixed; the ids below are the
+round's. "Confirmed" = re-run here; "reviewer-measured" = run by the reviewer, re-run pending.
+
+**A — CI half**
+- **R6-A1 (high)** — "Re-run failed jobs" on an OLD bump run (checks passed, tag / page / jsr
+  failed) skips `checks`, so round 5's "main moved on" check (sw214) never runs: `tag`,
+  `release`, `jsr` would release a given-up version late. From the workflow's structure plus
+  GitHub's documented re-run semantics (UNVERIFIED on GitHub). Fix direction: repeat the main
+  check inside the `tag` job (or every write job) before any write.
+- **R6-A2** — sw214 compares version STRINGS: an old bump commit A can release 1.0.1 while main
+  holds a NEWER bump B to 1.0.1 (revert, fix, re-bump); B is then refused for good. Confirmed (S33
+  asserts the string rule). Fix direction: main must DESCEND from this commit with no other
+  version change between.
+- **R6-A3 (low)** — re-verifying a RELEASED version (sw209) is refused once main moved on, with
+  the false message "given up". Exempt published + tag-here from the main check.
+- **R6-A4 (low)** — a push between `checks`' checkout and `is-release` makes main's new commit
+  unknown locally → "could not be read here" (a re-run clears it). Fetch it, or read deno.json
+  through the API.
+
+**B — local half**
+- **R6-L1 (loud)** — guard 0i (and `bump.ts`) measure from LOCAL tags; CI makes every tag on
+  GitHub and nothing fetches them, so the next release after a CI release is refused ("not one
+  SemVer step" from the stale tag; Rule 4 can misjudge too). Reviewer-measured (scratch origin:
+  `git fetch origin main` brought no tag; `--verify-release` exited 1; after `fetch --tags`, 0).
+  Fix direction: `git fetch --tags origin` before 0h / 0i (and in `deno task bump`).
+- **R6-L2 (loud)** — the cold-check unpack still fails in Git Bash when the `-C` path has a
+  segment starting with t / r / n / a / b / f / v / a digit (GNU tar unquotes backslashes).
+  Confirmed (`…\tt2-…\rtree` → "Cannot open"). Fix: pass `-C` with forward slashes (or a relative
+  path), and rehearse with such a path.
+- **R6-L3 (hardening)** — markers without a following space (`><!--`, `-\t<!--`, `1)\t<!--`,
+  `>```) pass the subset; they hide only inside their container. Strip markers followed by any
+  whitespace or nothing.
+- **R6-L4 (hardening)** — a record paragraph is joined up to the next blank line, but a column-0
+  `#### ` / `> ` / `- ` line starts a new block: the rendered record is cut short and still
+  passes. Refuse a record paragraph containing a line that starts a block; also a future date and
+  `rounds 01` pass.
+- **R6-L5 (hardening)** — `capture` ignores `spawnSync`'s error: a missing bun / deno / tar reads
+  as a gate refusal with no detail. Report the launch error.
+
+**C/D — tests (confirmed: each mutant leaves both suites green)**
+- the HTTP_TIMEOUT_MS default (30 s) never checked; the `jsr` job's Deno permissions never run (a
+  new env read breaks only the real job — run jsr-has under `deno run` with publish.yml's exact
+  flags in a case); the step's `::warning::` line unchecked; the CLI's real `runState` wiring
+  (workflow path, token) never run; the runs mock ignores the auth header; an empty `###` heading
+  unreached; the page body's JSR link unchecked; "could not read the diff line" unreached.
+
 ## Review round 5 — the round-4 fixes (2026-11-12): 4 silent + 4 loud tool rows + 8 test gaps, CONFIRMED BY RUNNING, FIXED
 
 Owner: "all". Three fresh reviewers on `eae9f1c9`, told to write only inside their own temp folder

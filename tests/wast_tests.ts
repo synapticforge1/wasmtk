@@ -360,14 +360,12 @@ let totalAccepted = 0; // spec-invalid modules binaryang's validator accepted (a
  * custom-descriptors feature-set differences are excluded in `src/wast.ts`, so what is listed here
  * is a binaryang defect, reported. V8 rejects these modules, so they still PASS as `assert_invalid`;
  * what they block is trusting binaryang's VALID verdict (the size-capped definitions).
+ *
+ * Empty since binaryang 4.0.0 was pinned (2026-11-18): the one entry, `legacy/try_delegate.wast`
+ * (a legacy `delegate`'s label depth was not checked, reported 2026-10-23), was fixed upstream in
+ * 2.2.2. With the entry still at 1 the gate went red on that file ("accepted 1 → 0").
  */
-const KNOWN_ACCEPTED_INVALID: Record<string, { count: number; cause: string }> = {
-  "legacy/try_delegate.wast": {
-    count: 1,
-    cause: "binaryang 1.15.0 does not check a legacy `delegate`'s label depth (`delegate 1` " +
-      "directly in a function is accepted; the spec and V8: unknown label). Reported 2026-10-23.",
-  },
-};
+const KNOWN_ACCEPTED_INVALID: Record<string, { count: number; cause: string }> = {};
 const drifted: string[] = [];
 
 for (const rel of names) {
