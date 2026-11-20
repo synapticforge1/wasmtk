@@ -1548,3 +1548,14 @@ replacement.
   Stack-Switching (goroutines / channels / true async suspension) and Threads (shared memory /
   atomics). Goroutines, channels, and `select` **already work today** via the Go producer's asyncify
   scheduler.
+
+## License
+
+wasmtk is dual-licensed under either of
+
+- the MIT License ([LICENSE-MIT](LICENSE-MIT)), or
+- the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)),
+
+at your option. Third-party code included in wasmtk (fdlibm's math kernels) and its notice are
+listed in [NOTICE.md](NOTICE.md); every dependency's licence is recorded in
+[licences.json](licences.json).

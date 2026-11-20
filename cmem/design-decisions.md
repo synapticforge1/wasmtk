@@ -15,6 +15,14 @@ Invariants and codegen rules that are easy to break in a refactor and must NOT b
 reverted. The exhaustive list (with line numbers) is in the legacy `CLAUDE.md`; this is the
 high-value subset.
 
+## 🔒 Licence: MIT OR Apache-2.0, dependencies inventoried (owner, 2026-11-20)
+
+- "We need to be compliant with licensing with dependencies, with wasmtk specifically we are dual
+  licenced as APACHE and MIT." `deno.json` had said `MIT` alone while `LICENSE-APACHE` shipped.
+- Third-party code copied INTO wasmtk keeps its notice in `NOTICE.md` (fdlibm today); a dependency
+  resolved from a registry carries its own; `deno task check-licences` holds the inventory.
+- Round 6's findings, already in GitHub history (`8e627039`): left as they are (owner: "Leave it").
+
 ## 🔒 How the review and release rules changed on 2026-11-20 (H37, H38)
 
 - **The review words:** until 2026-11-20 three — "review" (a targeted code review in rounds),

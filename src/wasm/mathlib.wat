@@ -33,6 +33,8 @@
       (f64.const 1.0))
   )
 
+  ;; Third-party: the fdlibm kernels, 2/pi table and atan coefficients below are adapted from
+  ;; fdlibm (Copyright (C) 1993 Sun Microsystems, Inc.); its notice is preserved in NOTICE.md.
   ;; ── fdlibm trig: __kernel_sin/__kernel_cos + Veltkamp-split argument reduction ──
   ;; Reduction: n = rint(x * 2/pi); r + rt = x - n*(pi/2) accumulated in double-double
   ;; using the 7 fdlibm PIo2[] 24-bit chunks. n is Veltkamp-split (nhi<=24 sig bits +

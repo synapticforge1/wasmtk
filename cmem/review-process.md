@@ -53,16 +53,23 @@ call in `src/host.ts`, settings tagged with their platform ID there).
 
 ## Slot: licences — the inventory and the notices
 
-- **wasmtk's own licence:** `deno.json` declares `MIT` (`LICENSE`, `LICENSE-MIT`); `LICENSE-APACHE`
-  is ALSO in the repository and in the published package (`publish.include`) — what it grants is a
-  question for the first licensing review (2026-11-20: not decided here).
+- 🔒 **wasmtk's own licence: dual, MIT OR Apache-2.0** (owner, 2026-11-20: "with wasmtk
+  specifically we are dual licenced as APACHE and MIT"): `deno.json` / `package.json` say
+  `MIT OR Apache-2.0` (deno.json said `MIT` until then), `LICENSE-MIT`, `LICENSE-APACHE`, the
+  README § License.
+- **Third-party code inside wasmtk:** fdlibm (Sun Microsystems) — `src/wasm/mathlib.wat`'s trig
+  kernels, 2/π table and atan coefficients, shipped compiled; its notice is preserved in
+  `NOTICE.md` (added 2026-11-20). Nothing else found (`src/` searched for ported code and notices).
 - **What the JSR package ships:** `main.ts`, `src/*.ts`, `src/wasm/*.ts` / `*.wasm` (wasmtk's own
-  embedded libraries, built by `modc`), the README and the three licence files. No NOTICE file.
+  embedded libraries, built by `modc`), the README, the three licence files and `NOTICE.md`.
 - **What it pulls in at install:** `@std/cli`, `@std/path` (JSR), `@jrmarcum/binaryang` (pinned
   exactly; it carries its own notices for the wabt / binaryen ports), `wasm2js` (npm). Not shipped:
   the vendored spec corpus (`tests/module/wasm_wast/testsuite-main`) and wasm-wat-samples.
-- **No inventory gate yet:** a licence inventory against an allowlist (§ 10) does not exist here
-  (2026-11-20) — the first licensing review's first item.
+- **The inventory gate:** `deno task check-licences` (`scripts/check-licences.ts`, self-test
+  `--self-test`): every package in `deno.lock` must be in `licences.json` with an allowed licence
+  (MIT, Apache-2.0, BSD-2/3-Clause, ISC, 0BSD), and the package must ship both licence files and
+  `NOTICE.md`. Measured 2026-11-20 from the registries: 13 packages, all MIT (binaryang carries
+  its own NOTICE for its Apache-2.0 ports). A new dependency is recorded after reading its licence.
 
 ## Slot: outputs that can carry user facts
 
@@ -86,8 +93,8 @@ call in `src/host.ts`, settings tagged with their platform ID there).
   (self-test `scripts/check_compat_gate.ts`: 4 stale cases since v3.0.0, next-work.md).
 - **Release tooling:** `scripts/check_release.ts`, `scripts/check_publish_workflow.ts`.
 - **Reference suites:** the full gate (workflow.md); `scripts/check_try_table_oz.ts`.
-- **Missing (2026-11-20):** a licence inventory against an allowlist; a vulnerability check of the
-  dependencies.
+- **Licences:** `deno task check-licences`.
+- **Missing (2026-11-20):** a vulnerability check of the dependencies.
 
 ## Classes this repo's audits keep finding (for the basic and hardening briefs' scope)
 

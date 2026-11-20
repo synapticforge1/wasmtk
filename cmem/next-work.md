@@ -37,10 +37,11 @@ On branch `refactor/host-ts-2026-11-20`, committed after `a3aee940` (local, not 
   `--verify-commit` deleted; (e) `publish.yml` `checks` = `is-release` only (YAML parsed, outputs
   consistent; UNMEASURED on GitHub until the next push); (f) the seven review words; (g)
   `platforms.md` (H39) and six settings tagged `[win-x64, win-arm64]`.
-- **For the owner:** round 6's findings are ALREADY on GitHub (`origin/main` `8e627039` carries
-  them in `cmem/compiler-bugs.md`): leave, or purge history? Gaps named in review-process.md: no
-  licence inventory gate, no vulnerability check; `LICENSE-APACHE` shipped beside an `MIT`
-  manifest (the first licensing review's question).
+- **Owner, 2026-11-20:** round 6's findings already in history on GitHub (`8e627039`): "Leave it".
+  Licences: "We need to be compliant with licensing with dependencies, with wasmtk specifically we
+  are dual licenced as APACHE and MIT" → manifests `MIT OR Apache-2.0`, README § License,
+  `NOTICE.md` (fdlibm), `licences.json` + `deno task check-licences` (13 packages, all MIT).
+  Still missing: a dependency vulnerability check.
 - **Answers written at "commit"** in the workspace letters H37, H38, H43.
 
 ## ⏸ PAUSED 2026-11-12 (end of day) — review round 6 FOUND, NOT FIXED (owner: pause)
