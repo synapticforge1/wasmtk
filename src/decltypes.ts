@@ -12,7 +12,7 @@
  * counter (`for (let i = 0; …)`), which is an integer by standard and checked where wasic emits the
  * loop.
  *
- * @license MIT
+ * @license MIT OR Apache-2.0
  */
 
 import { maskCode } from "./varscope.ts";

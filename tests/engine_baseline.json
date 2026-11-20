@@ -564,6 +564,11 @@
     "wasmer": "match",
     "wazero": "match"
   },
+  "22_PowerIntoI32Slot": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
   "23_Tuples": {
     "wasmtime": "match",
     "wasmer": "match",
@@ -1324,6 +1329,11 @@
     "wasmer": "match",
     "wazero": "match"
   },
+  "45_UnsignedShiftIsUnsigned": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
   "45_random-numbers": {
     "wasmtime": "match",
     "wasmer": "match",
@@ -1470,6 +1480,16 @@
     "wazero": "match"
   },
   "4m_ExpressionGaps": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "4n_ModuleFloatUnaryOperators": {
+    "wasmtime": "match",
+    "wasmer": "match",
+    "wazero": "match"
+  },
+  "4n_RadixLiteralsInConsole": {
     "wasmtime": "match",
     "wasmer": "match",
     "wazero": "match"

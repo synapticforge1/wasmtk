@@ -61,6 +61,30 @@ check(
   ])
     .length === 4,
 );
+{
+  // review P1: a Linux removable drive or Silverblue home names the user (both purges missed it)
+  const media = ["file://", "/run/media/", "someone", "/3285-ABCD/x.wasm"].join("");
+  check(
+    "a /run/media/<user>/ path (in a file:/// URL) is refused (P1)",
+    kinds(`"${media}"`).includes("home path"),
+  );
+  check(
+    "a /var/home/<user>/ path is refused (P1)",
+    kinds(`${["/var/home/", "someone", "/x"].join("")}`).includes("home path"),
+  );
+}
+{
+  // review H13: a long line with no `@` is linear (it was quadratic: 160 K chars 5.8 s)
+  const long = "a.".repeat(500_000); // 1 MB
+  const t0 = performance.now();
+  const n = kinds(long).length;
+  const ms = performance.now() - t0;
+  check(`a 1 MB line scans in linear time (${ms.toFixed(0)} ms)`, n === 0 && ms < 3000);
+  check(
+    "an address inside a long line is still found",
+    kinds("x".repeat(100_000) + ` ${person} ` + "y".repeat(100_000)).includes("email address"),
+  );
+}
 check(
   "a finding is masked to its first three characters",
   mask(ghToken).startsWith("ghp") && !mask(ghToken).includes("AAAA"),

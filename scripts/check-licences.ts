@@ -20,11 +20,17 @@ interface Inventory {
 
 /** Every `jsr:` / `npm:` package@version a deno.lock resolves. */
 export function lockPackages(
-  lock: { jsr?: Record<string, unknown>; npm?: Record<string, unknown> },
+  lock: {
+    jsr?: Record<string, unknown>;
+    npm?: Record<string, unknown>;
+    remote?: Record<string, unknown>;
+  },
 ): string[] {
   return [
     ...Object.keys(lock.jsr ?? {}).map((k) => `jsr:${k}`),
     ...Object.keys(lock.npm ?? {}).map((k) => `npm:${k}`),
+    // URL imports (review H, "other classes": the `remote` section was not read)
+    ...Object.keys(lock.remote ?? {}).map((k) => `remote:${k}`),
   ].sort();
 }
 
@@ -34,7 +40,8 @@ export function licenceProblems(pkgs: string[], inv: Inventory, include: string[
   for (const p of pkgs) {
     const e = inv.packages[p];
     if (!e) out.push(`${p} is not in licences.json: read its licence and record it`);
-    else if (!inv.allowed.includes(e.licence)) {
+    // An SPDX `A OR B` lets the user choose: allowed when any alternative is (review L2)
+    else if (!e.licence.split(/\s+OR\s+/).some((l) => inv.allowed.includes(l.trim()))) {
       out.push(`${p} is ${e.licence}, not an allowed licence`);
     }
   }
@@ -68,9 +75,23 @@ function selfTest(): boolean {
       /NOTICE\.md/.test(licenceProblems([], inv, ["LICENSE-MIT", "LICENSE-APACHE"]).join()),
     ],
     [
-      "the lock's jsr and npm sections are both read",
-      lockPackages({ jsr: { "@a/b@1.0.0": {} }, npm: { "x@1.0.0": {} } }).join() ===
-        "jsr:@a/b@1.0.0,npm:x@1.0.0",
+      "the lock's jsr, npm and remote sections are all read",
+      lockPackages({
+        jsr: { "@a/b@1.0.0": {} },
+        npm: { "x@1.0.0": {} },
+        remote: { "https://e.example/m.ts": "h" },
+      }).join() === "jsr:@a/b@1.0.0,npm:x@1.0.0,remote:https://e.example/m.ts",
+    ],
+    [
+      "an `A OR B` licence passes when one alternative is allowed, fails when none is (L2)",
+      licenceProblems(["jsr:@d/e@1.0.0"], {
+          allowed: ["MIT"],
+          packages: { "jsr:@d/e@1.0.0": { licence: "MIT OR Apache-2.0" } },
+        }, all).length === 0 &&
+      licenceProblems(["jsr:@d/e@1.0.0"], {
+          allowed: ["MIT"],
+          packages: { "jsr:@d/e@1.0.0": { licence: "GPL-3.0 OR AGPL-3.0" } },
+        }, all).length === 1,
     ],
   ];
   for (const [n, ok] of cases) console.log(`${ok ? "  ✓" : "  ✗"} ${n}`);
@@ -79,10 +100,18 @@ function selfTest(): boolean {
 
 if (import.meta.main) {
   if (process.argv.includes("--self-test")) process.exit(selfTest() ? 0 : 1);
-  const lock = JSON.parse(readFileSync("deno.lock", "utf8"));
-  const inv = JSON.parse(readFileSync("licences.json", "utf8")) as Inventory;
-  const include =
-    (JSON.parse(readFileSync("deno.json", "utf8")).publish?.include ?? []) as string[];
+  // A missing or broken file is named (it was a raw stack trace — review H14, 2026-11-20).
+  const json = (f: string): any => {
+    try {
+      return JSON.parse(readFileSync(f, "utf8"));
+    } catch (e) {
+      console.error(`check-licences: cannot read ${f}: ${(e as Error).message}`);
+      process.exit(1);
+    }
+  };
+  const lock = json("deno.lock");
+  const inv = json("licences.json") as Inventory;
+  const include = (json("deno.json").publish?.include ?? []) as string[];
   const pkgs = lockPackages(lock);
   const problems = licenceProblems(pkgs, inv, include);
   for (const p of problems) console.error(`check-licences: ${p}`);

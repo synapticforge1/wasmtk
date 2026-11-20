@@ -12,6 +12,39 @@ import wabt from "wabt";
 import { bundleImports } from "./tsbundler.ts";
 import { emitWitBeside } from "./witgen.ts";
 import { explainEngineRejection } from "./engine.ts";
+import { EXN_KINDS } from "./exn_kinds.ts";
+
+/**
+ * An exception a wasic module threw and nothing caught, as JavaScript would print it
+ * (`RangeError: the result of '+' does not fit an i32 …`), read through the module's exported
+ * `__exn_tag` (its payload: the message's pointer and length) and `__exn_kind`. Undefined for
+ * anything else, which is then printed as it is. Review B4 (2026-11-20): `wasmtk mod` printed
+ * `[object WebAssembly.Exception]` where the README promises the RangeError's message.
+ */
+function describeWasmException(
+  err: unknown,
+  inst: WebAssembly.Instance | undefined,
+): string | undefined {
+  // The runtime has the exception-handling API; Deno's type library does not declare it.
+  type Exn = { is(t: unknown): boolean; getArg(t: unknown, i: number): unknown };
+  const W = WebAssembly as unknown as {
+    Exception?: new (...a: never[]) => Exn;
+    Tag?: new (...a: never[]) => object;
+  };
+  if (!inst || !W.Exception || !W.Tag || !(err instanceof W.Exception)) return undefined;
+  const e = err as Exn;
+  const tag = inst.exports.__exn_tag;
+  const mem = inst.exports.memory;
+  if (!(tag instanceof W.Tag) || !(mem instanceof WebAssembly.Memory) || !e.is(tag)) {
+    return undefined;
+  }
+  const ptr = Number(e.getArg(tag, 0)) >>> 0, len = Number(e.getArg(tag, 1)) >>> 0;
+  if (ptr + len > mem.buffer.byteLength) return undefined;
+  const msg = new TextDecoder().decode(new Uint8Array(mem.buffer, ptr, len));
+  const kg = inst.exports.__exn_kind;
+  const kind = kg instanceof WebAssembly.Global ? EXN_KINDS[Number(kg.value)] ?? "" : "";
+  return kind ? `${kind}: ${msg}` : `Uncaught ${JSON.stringify(msg)}`;
+}
 
 // NOTE: `compileWasi` and `compileModule` are deliberately NOT re-exported here. They live in
 // `wasic.ts` / `modc.ts`, which are the public homes the README's Programmatic API table documents,
@@ -85,21 +118,33 @@ const wasiImports: WasiImports = {
       iovsLen: number | bigint,
       nwrittenPtr: number | bigint,
     ): number => {
+      // Only stdout (1) and stderr (2) exist here: any other descriptor is EBADF, and a pointer
+      // outside memory EFAULT. Every fd but 1 went to stderr as a success, and a bad iovec threw
+      // a raw RangeError (review H12, 2026-11-20).
+      if (Number(fd) !== 1 && Number(fd) !== 2) return 8; // EBADF
       const memory = wasiInstance?.exports.memory as WebAssembly.Memory;
+      const size = memory.buffer.byteLength;
       const view = new DataView(memory.buffer);
       let nwritten = 0;
-      for (let i = 0; i < Number(iovsLen); i++) {
-        const ptr = view.getUint32(Number(iovs) + i * 8, true);
-        const len = view.getUint32(Number(iovs) + i * 8 + 4, true);
+      // a pointer arrives as a SIGNED i32: read it unsigned (a negative nwritten pointer passed the
+      // size check and threw a raw RangeError — security re-review, 2026-11-20)
+      const iovBase = Number(iovs) >>> 0, nwAt = Number(nwrittenPtr) >>> 0;
+      for (let i = 0; i < Number(iovsLen) >>> 0; i++) {
+        const at = iovBase + i * 8;
+        if (at + 8 > size) return 21; // EFAULT
+        const ptr = view.getUint32(at, true);
+        const len = view.getUint32(at + 4, true);
+        if (ptr + len > size) return 21; // EFAULT
         const buf = new Uint8Array(memory.buffer, ptr, len);
         if (Number(fd) === 1) host.stdout.writeSync(buf);
         else host.stderr.writeSync(buf);
         nwritten += len;
       }
-      view.setUint32(Number(nwrittenPtr), nwritten, true);
+      if (nwAt + 4 > size) return 21; // EFAULT
+      view.setUint32(nwAt, nwritten, true);
       return 0;
     },
-    fd_pwrite: (): number => 0,
+    fd_pwrite: (): number => 52, // ENOSYS: no file is open here (it reported success, H12)
     fd_read: (
       fd: number | bigint,
       iovs: number | bigint,
@@ -198,7 +243,9 @@ const wasiImports: WasiImports = {
  * *fuller* WASI surface than our shims (e.g. Zig std / Rust std pull in `clock_res_get`, `path_*`,
  * `fd_pread`, `fd_readdir`, …) still INSTANTIATES rather than failing with a LinkError. Implemented
  * shims (`fd_write`, `random_get`, `clock_time_get`, …) are returned as-is. The stub is only a
- * fallback for functions a program imports but typically doesn't call on the common path.
+ * fallback for functions a program imports but typically doesn't call on the common path. It
+ * returns ENOSYS (52), "not implemented" — it returned 0, success, so a `path_open` "opened" a file
+ * with its output pointer never written (review H12, 2026-11-20).
  */
 function makeWasiImport(): Record<string, unknown> {
   const shims = wasiImports.wasi_snapshot_preview1 as unknown as Record<string, unknown>;
@@ -206,7 +253,7 @@ function makeWasiImport(): Record<string, unknown> {
     get(target, prop) {
       const key = typeof prop === "string" ? prop : String(prop);
       if (key in target) return target[key];
-      return (..._args: unknown[]) => 0;
+      return (..._args: unknown[]) => 52; // ENOSYS
     },
   });
 }
@@ -474,7 +521,7 @@ export async function callExport(path: string, fnName: string, params: string[])
     const res = (fn as WasmCallable)(...parsedArgs);
     if (res !== undefined) console.log(`${res}`);
   } catch (err) {
-    console.error(`❌ mod error: ${err}`);
+    console.error(`❌ mod error: ${describeWasmException(err, wasiInstance) ?? err}`);
     explainIfEngine(err);
     host.exit(1);
   }
@@ -504,6 +551,12 @@ function exportCallArgs(
     }
     module.dispose();
   } catch { /* unreadable here: every argument is a Number, as before */ }
+  // The signature is known: the count must match (review H10, 2026-11-20 — a missing argument was
+  // `undefined`, so `addf 1` printed NaN, and an extra one was ignored)
+  const known = types.length > 0 || sigKnown(wasmBytes, name);
+  if (known && params.length !== types.length) {
+    return { error: `${name} takes ${types.length} argument(s), got ${params.length}` };
+  }
   const args: (number | bigint)[] = [];
   for (let i = 0; i < params.length; i++) {
     const p = params[i].trim();
@@ -513,11 +566,38 @@ function exportCallArgs(
         return { error: `'${params[i]}' is not an integer (parameter ${i + 1} is i64)` };
       }
       args.push(BigInt(p));
+    } else if (types[i] === "i32") {
+      // an i32 takes an integer that fits (the owner's boundary rule, 2026-10-19): `1.5` became 1
+      // and `1e10` 1410065409 silently (H10)
+      const n = Number(p);
+      if (!Number.isInteger(n) || n < -2147483648 || n > 2147483647) {
+        return {
+          error: `'${params[i]}' is not an i32 (parameter ${i + 1}: an integer in -2147483648…2147483647)`,
+        };
+      }
+      args.push(n);
     } else {
       args.push(Number(p));
     }
   }
   return { args };
+}
+
+/** Whether export `name` is a function whose signature could be read (a zero-parameter function
+ *  has an empty type list, which alone cannot tell "none" from "unreadable"). */
+function sigKnown(wasmBytes: Uint8Array, name: string): boolean {
+  try {
+    const module = binaryen.readBinary(wasmBytes);
+    let found = false;
+    for (let i = 0; i < module.getNumExports(); i++) {
+      const exp = binaryen.getExportInfo(module.getExportByIndex(i));
+      if (exp.kind === 0 && exp.name === name) found = true;
+    }
+    module.dispose();
+    return found;
+  } catch {
+    return false;
+  }
 }
 
 /** `wasmtk info`: prints a module's callable exported functions with their signatures. */

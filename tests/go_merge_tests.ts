@@ -10,7 +10,7 @@
  *
  * GATED on TinyGo being installed (the CI image has none) — skips cleanly.
  *
- * @license MIT
+ * @license MIT OR Apache-2.0
  */
 
 import { join } from "jsr:@std/path";

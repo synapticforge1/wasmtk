@@ -184,6 +184,32 @@ async function main(): Promise<void> {
   const command = args._[0] as string;
   const target = args._[1] as string;
   const outPath = args.name as string | undefined;
+  // `-o ""` (or `-o` with nothing after it) names no file: it wrote a stray `.wat` named `.wat`,
+  // then failed at the rename (review H17, 2026-11-20)
+  if (outPath !== undefined && outPath.trim() === "") {
+    console.error("❌ wasmtk: -o / --name needs a file name");
+    host.exit(1);
+  }
+  // A command that takes ONE file refuses a second: `wasic a.ts extra.ts` compiled a.ts and
+  // ignored extra.ts, exit 0 (review H10, 2026-11-20). `run`, `mod`, `wasmbundle` take more.
+  const ONE_FILE = new Set([
+    "wasic",
+    "dync",
+    "convert",
+    "wasm2js",
+    "tsbundle",
+    "jstyper",
+    "bindgen",
+    "hybrid",
+    "info",
+    "wast",
+  ]);
+  if (ONE_FILE.has(command) && args._.length > 2) {
+    console.error(
+      `❌ wasmtk ${command}: takes one file; '${args._.slice(2).join(" ")}' is not used — remove it`,
+    );
+    host.exit(1);
+  }
 
   // Producer commands (--lang=go|zig) accept an optional path (default = current dir), so they don't
   // require a positional target the way the TS commands do. `wasic` is kept here only so that

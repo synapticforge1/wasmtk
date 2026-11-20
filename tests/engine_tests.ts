@@ -17,7 +17,7 @@
  * Usage:
  *   deno run --allow-read --allow-write --allow-run --allow-env tests/engine_tests.ts
  *
- * @license MIT
+ * @license MIT OR Apache-2.0
  */
 
 import { join } from "jsr:@std/path";

@@ -91,6 +91,27 @@ await check("wasic -o the input .wat is refused", { "lib.wat": WAT }, "lib.wat",
 // sw174 (round 3, 2026-10-26): dync compared the output with its generated driver, not the source
 await check("dync -o the input .ts is refused", { "prog2.ts": `console.log("hi", 1 + 2);\n` }, "prog2.ts", ["dync", "prog2.ts", "-o", "prog2.ts"], { code: 1 });
 await check("dync still writes its default output", { "prog3.ts": `console.log("hi", 1 + 2);\n` }, "prog3.ts", ["dync", "prog3.ts"], { code: 0, writes: "prog3.wasm" });
+// review H1 (2026-11-20): Win32 drops trailing dots / spaces from a name, so `-o "p.ts."` named the
+// input and the atomic rename replaced it; a hard link is the input under another name
+if (Deno.build.os === "windows") {
+  await check("wasic -o the input with a trailing dot is refused", { "p.ts": `console.log(1);\n` }, "p.ts", ["wasic", "p.ts", "-o", "p.ts."], { code: 1 });
+  await check("wasic -o the input with a trailing space is refused", { "p.ts": `console.log(1);\n` }, "p.ts", ["wasic", "p.ts", "-o", "p.ts "], { code: 1 });
+}
+{
+  const dir = await Deno.makeTempDir({ prefix: "wasmtk_outpath_" });
+  try {
+    await Deno.writeTextFile(join(dir, "p.ts"), `console.log(1);\n`);
+    await Deno.link(join(dir, "p.ts"), join(dir, "link.ts"));
+    const r = await wasmtk(["wasic", "p.ts", "-o", "link.ts"], dir);
+    const still = await Deno.readTextFile(join(dir, "p.ts"));
+    const ok = r.code === 1 && still === `console.log(1);\n`;
+    if (ok) passed++;
+    else failed++;
+    console.log(`  ${ok ? "✓" : "✗"} wasic -o a hard link to the input is refused${ok ? "" : `: exit ${r.code}`}`);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+}
 // sw114: an assembler error in a .wat compile exited 0
 await check("wasic of a broken .wat exits 1", { "bad.wat": `(module (func i32.bogus_op))\n` }, "bad.wat", ["wasic", "bad.wat"], { code: 1 });
 
@@ -131,6 +152,11 @@ async function checkFolder(
 console.log("── writes: atomic, and devices written in place (H39) ──");
 const NULL_DEVICE = Deno.build.os === "windows" ? "NUL" : "/dev/null";
 await checkFolder(`convert -o ${NULL_DEVICE} writes nothing beside it`, { "lib.wat": WAT }, ["convert", "lib.wat", "-o", NULL_DEVICE], { code: 0, listing: ["lib.wat"] });
+// review H17 (2026-11-20): `-o ""` wrote a stray `.wat` before failing at the rename
+await checkFolder(`wasic -o "" is refused, nothing written`, { "p.ts": `console.log(1);\n` }, ["wasic", "p.ts", "-o", ""], { code: 1, listing: ["p.ts"] });
+// review B8 (2026-11-20): wasic / modc printed `WAT: NUL.wat` / `WIT: NUL.wit` for files never written
+await checkFolder(`wasic -o ${NULL_DEVICE} writes no .wat / .wit beside it`, { "p.ts": `console.log(1);\n` }, ["wasic", "p.ts", "-o", NULL_DEVICE], { code: 0, listing: ["p.ts"] });
+await checkFolder(`modc -o ${NULL_DEVICE} writes no .wat / .wit beside it`, { "m.ts": `export function add(a: number, b: number): number { return a + b; }\n` }, ["modc", "m.ts", "-o", NULL_DEVICE], { code: 0, listing: ["m.ts"] });
 await checkFolder("convert leaves no temporary file", { "lib.wat": WAT }, ["convert", "lib.wat"], { code: 0, listing: ["lib.wat", "lib.wasm", "lib.wit"] });
 await checkFolder("convert over an existing output replaces it, no temporary file", { "lib.wat": WAT, "lib.wasm": "old" }, ["convert", "lib.wat"], { code: 0, listing: ["lib.wat", "lib.wasm", "lib.wit"] });
 

@@ -2,7 +2,7 @@
   "$comment": "Every package in deno.lock with its licence, read from the registry (JSR: the package's LICENSE file; npm: the registry's license field) on 2026-11-20. scripts/check-licences.ts fails on a package not listed here or a licence not in `allowed`. A new dependency is added here by hand after reading its licence.",
   "allowed": ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD"],
   "packages": {
-    "jsr:@jrmarcum/binaryang@4.1.1": { "licence": "MIT", "note": "ships NOTICE.md for its wabt / binaryen ports (Apache-2.0)" },
+    "jsr:@jrmarcum/binaryang@4.1.1": { "licence": "MIT OR Apache-2.0", "note": "read from its LICENSE footer and NOTICE.md (its jsr.json field says MIT); ships NOTICE.md for its wabt / binaryen ports (Apache-2.0)" },
     "jsr:@std/assert@1.0.19": { "licence": "MIT", "note": "tests only" },
     "jsr:@std/cli@1.0.32": { "licence": "MIT" },
     "jsr:@std/fmt@1.0.1": { "licence": "MIT", "note": "tests only" },

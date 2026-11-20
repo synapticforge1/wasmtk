@@ -352,7 +352,9 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
       realPath = await host.realPath(filePath);
     } catch (err) {
       if (isEntry) throw err;
-      return { source: "", exportRenames: new Map() };
+      // An import that does not resolve is refused by name: it was dropped, and its names became
+      // undefined references in a bundle reported as success (review H8, 2026-11-20).
+      throw new Error(`cannot resolve the import '${filePath}': ${(err as Error).message}`);
     }
 
     // Already visited: return empty source but supply cached exportRenames so
@@ -367,7 +369,7 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
       src = await host.readTextFile(realPath);
     } catch (err) {
       if (isEntry) throw err;
-      return { source: "", exportRenames: new Map() };
+      throw new Error(`cannot read the import '${filePath}': ${(err as Error).message}`); // H8
     }
 
     // ── #14.3.1 auto-merge: pull the own dynamic runtime when the entry uses `any` or `eval` ──
