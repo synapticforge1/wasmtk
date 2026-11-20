@@ -37,6 +37,7 @@
       "flag:--name": { "kind": "flag:string", "members": { "alias:-n": "alias", "alias:-o": "alias" } },
       "flag:--on-conflict": { "kind": "flag:string", "members": {  } },
       "flag:--runtime": { "kind": "flag:string", "members": {  } },
+      "flag:--self-check": { "kind": "flag:boolean", "members": {  } },
       "flag:--verbose": { "kind": "flag:boolean", "members": {  } },
       "flag:--version": { "kind": "flag:boolean", "members": { "alias:-V": "alias", "alias:-v": "alias" } }
     },
