@@ -4,10 +4,13 @@
  * `deno task bump <kind>`:
  *
  *   deno task release                       (runs `bun scripts/release.ts`)
- *   bun scripts/release.ts --verify-commit  (publish.yml's `checks`, on a release push: the same
- *                                            commit-level gate CI repeats — see below)
  *
  * Guards, before anything is committed — each one a release that went wrong somewhere:
+ *   0g. FIRST (workspace review standard § 9, letter H37 (d), 2026-11-20): the review set's
+ *       result — `scripts/review-gate.ts`: the gitignored `cmem/review-issues.md` says
+ *       `Review complete: <commit>`, an ancestor of HEAD, and nothing but the bump, CHANGELOG.md
+ *       and `cmem/` changed since. (Until 2026-11-20 0g read two record paragraphs in
+ *       `cmem/release.md`, H35; that parser and its strict-Markdown rule are retired.)
  *   0a. the tree is clean but for the bump's own files, UNTRACKED files counted as dirty, and those
  *       files plain modifications (a rename / add / delete onto one blocks);
  *   0b. on `main`, and either `main` = `origin/main` with the bump in the working tree (changing
@@ -16,25 +19,24 @@
  *   0c. the tag absent locally and on origin (a tag that exists has been, or will be, released);
  *   0d. JSR does not already serve the version (a version number is immutable there);
  *   0h. the version it bumps FROM (origin/main's) is released: its tag on origin and on JSR;
- *   0i. the compatibility gate CI runs (`api-surface.ts --verify-release`: one SemVer step, the
- *       surface floor), so a version CI would refuse is never pushed;
+ *   0i. the compatibility gate (`api-surface.ts --verify-release`: one SemVer step, the surface
+ *       floor) — LOCAL only since 2026-11-20 (H37 (e): every gate runs here, CI only publishes);
  *   0e. COLD checks on exactly what will be committed (`git archive HEAD` unpacked to a temp folder,
- *       plus the bump) with an empty DENO_DIR, as publish.yml's `checks` runs them: `deno check
- *       main.ts`, `deno publish --dry-run`, then `--version` names this version and `--help` exits
- *       0 — so an ignored or skip-worktree file the working copy has but the commit lacks cannot
- *       make them pass; nothing is registered in .git, and Ctrl-C removes the temp folders;
- *   0g. the version's entry in `cmem/release.md` records BOTH required reviews in the strict form
- *       naming the version (`reviewRecordProblem`), the file plain Markdown throughout
- *       (`markdownSubsetProblems`; 🔒 owner 2026-11-12, workspace `review-process.md` § 0, H35).
+ *       plus the bump) with an empty DENO_DIR: `deno check main.ts`, `deno publish --dry-run`,
+ *       then `--version` names this version and `--help` exits 0 — so an ignored or skip-worktree
+ *       file the working copy has but the commit lacks cannot make them pass; nothing is
+ *       registered in .git, and Ctrl-C removes the temp folders.
  * The push is `--no-follow-tags`.
  * Then: commit RELEASE_FILES as `bump to vX.Y.Z` (unless already committed), push `main` as a user,
- * and read it back with `git ls-remote`. **It makes and pushes NO tag** (U4): CI checks the pushed
- * commit, then CI creates the tag, then the Release page from the tag, then publishes to JSR.
+ * and read it back with `git ls-remote`. **It makes and pushes NO tag** (U4): CI reads the pushed
+ * version, then CI creates the tag, then the Release page from the tag, then publishes to JSR.
  *
- * **CI repeats the commit-level gate** (review round 2, 2026-11-12, finding R2-B): a hand-pushed
- * `bump to` commit — or any push that changes the version — would otherwise be released by CI
- * with none of these guards. `--verify-commit` checks HEAD: subject `bump to v<version>`, a diff
- * against HEAD^ that changes only the version lines of RELEASE_FILES, and both review records.
+ * **CI no longer repeats this gate** (owner, 2026-11-17, H37 (e): "We want the CI to verify the
+ * version, then tag, create the release page and publish, and skip any version already
+ * published"). From review round 2 (R2-B) to 2026-11-20 CI ran `release.ts --verify-commit` so a
+ * hand-pushed `bump to` commit could not release unguarded; that check read the review record in
+ * `cmem/release.md`, which CI cannot read now that the review's result is the gitignored issues
+ * file. The rule stands instead: never push a version change by hand (working-rules.md).
  *
  * Never `deno publish` here (§ 1 rule 3: a local publish uploads WITHOUT provenance, and that
  * version can never be fixed), never `git tag`. Replaced `scripts/publish.ts` / `deno task publish`
@@ -47,6 +49,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import denoJson from "../deno.json" with { type: "json" };
 import { jsrHas, lsRemoteHas, lsRemotePeeled, versionAt } from "./publish-workflow.ts";
+import { ISSUES_FILE, reviewGate } from "./review-gate.ts";
 
 /** What `deno task bump` writes (deno.json + scripts/sync-version.ts's two mirrors). */
 export const RELEASE_FILES = ["deno.json", "package.json", "src/utils.ts"];
@@ -55,131 +58,6 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** A git call's result: `out` is STDOUT only (the only thing parsed), `err` its stderr. */
 export type Git = (args: string[]) => { code: number; out: string; err: string };
-
-/**
- * Guard 0g reads `cmem/release.md` only as PLAIN Markdown, and refuses anything else (review round
- * 4, 2026-11-12). Rounds 2–3 had emulated CommonMark's hiding rules, and every round found another
- * construct the emulation missed (a comment in a list item, a fence ended by its item, `<?…?>` /
- * `<style>` / CDATA blocks, indented and setext headings) or wrongly applied (`<!-->`). So instead
- * of deciding what Markdown hides, the gate accepts only a subset in which NOTHING hides text and
- * every heading is spelled one way; a failure is a refusal by line, never a pass. Refused lines:
- *   – a tab in the indentation, or 4+ leading spaces (indented code);
- *   – after any list / quote markers, a line that starts with ``` / ~~~ (a fence) or `<` (an HTML
- *     block — comments, `<?`, `<!X`, `<![CDATA[`, `<style>` …);
- *   – a heading not at column 0 or not followed by a space, and a `===` / `---` line (a setext
- *     underline, trailing spaces or tabs allowed);
- *   – round 5: a lone CR (CommonMark ends a line there, so a `<!--` after it starts a block the
- *     line scan would not see), and a line of whitespace other than spaces / tabs (CommonMark does
- *     not count it as blank, so it can join two "paragraphs" — e.g. into a link title).
- * Returns "line N: why" for each.
- */
-export function markdownSubsetProblems(text: string): string[] {
-  const out: string[] = [];
-  text.replace(/\r\n/g, "\n").split("\n").forEach((line, i) => {
-    const at = `cmem/release.md line ${i + 1}`;
-    if (line.includes("\r")) return out.push(`${at}: a lone carriage return (CR)`);
-    if (/^\s+$/.test(line) && !/^[ \t]+$/.test(line)) {
-      return out.push(`${at}: a line of whitespace other than spaces / tabs`);
-    }
-    if (/^ *\t/.test(line)) return out.push(`${at}: a tab in the indentation`);
-    if (/^ {4,}\S/.test(line)) return out.push(`${at}: indented 4+ spaces (a code block)`);
-    const body = line.replace(/^(?: {0,3}(?:>|[-*+]|\d{1,9}[.)])(?= |$) ?)+/, "").trimStart();
-    if (/^(`{3,}|~{3,})/.test(body)) return out.push(`${at}: a code fence`);
-    if (body.startsWith("<")) return out.push(`${at}: a line starting with "<" (an HTML block)`);
-    if (/^ {1,3}#{1,6}(\s|$)/.test(line)) return out.push(`${at}: an indented heading`);
-    if (/^#{1,6}(\t|$)/.test(line)) return out.push(`${at}: a heading without a space`);
-    if (/^ {0,3}(=+|-+)[ \t]*$/.test(line)) return out.push(`${at}: a "===" / "---" line`);
-  });
-  return out;
-}
-
-/**
- * THE record of a required review, and nothing else (cmem/review-process.md § 3):
- *
- *   **Security review (v<version>):** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).
- *
- * The whole paragraph must be exactly this (whitespace and line breaks normalised): the version is
- * the release's (round 4: an entry could borrow the records of the release below it), the scope is
- * plain text, the last round is the empty one (both numbers equal), the date is real, and nothing
- * follows the final period. Round 2 (R2-A): free prose with negating words had let five phrasings
- * of an UNFINISHED review pass; a strict form cannot be half-matched. Returns the problem, or "".
- */
-export function reviewRecordProblem(
-  paragraph: string,
-  kind: "Security" | "Hardening",
-  version: string,
-): string {
-  const p = paragraph.replace(/\s+/g, " ").trim();
-  const re = new RegExp(
-    `^\\*\\*${kind} review \\(v${
-      escapeRe(version)
-    }\\):\\*\\* ([^\\s;][^;]*?); rounds (\\d+); ended by an empty round \\(round (\\d+), (\\d{4})-(\\d{2})-(\\d{2})\\)\\.$`,
-  );
-  const m = re.exec(p);
-  const form =
-    `"**${kind} review (v${version}):** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>)."`;
-  if (!m) return `the ${kind.toLowerCase()} review is not in the recorded form ${form}`;
-  if (/[<`\\]/.test(m[1])) {
-    return `the ${kind.toLowerCase()} review's scope "${
-      m[1]
-    }" is not plain text (no <, backtick or backslash)`;
-  }
-  const [, , rounds, last, y, mo, d] = m;
-  if (Number(rounds) < 1 || rounds !== last) {
-    return `the ${kind.toLowerCase()} review's last round (${last}) is not its round count (${rounds}): the empty round ends it`;
-  }
-  const date = new Date(`${y}-${mo}-${d}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== `${y}-${mo}-${d}`) {
-    return `the ${kind.toLowerCase()} review's date ${y}-${mo}-${d} is not a real date`;
-  }
-  return "";
-}
-
-/**
- * Guard 0g: the problems with `version`'s entry in `cmem/release.md` (empty = it records both
- * required reviews). The WHOLE file must be plain Markdown (`markdownSubsetProblems`), so nothing
- * in it can hide text. Only the `## Release History` section counts (up to the next `#` / `##`
- * heading); the entry is the `### X.Y.Z` section up to the next `#`–`###` heading (a `####`
- * subheading stays inside it). It must hold exactly one paragraph beginning `**Security review`
- * and one beginning `**Hardening review` at column 0, each in the strict recorded form naming
- * this version (`reviewRecordProblem`).
- */
-export function reviewsRecorded(releaseMd: string, version: string): string[] {
-  const subset = markdownSubsetProblems(releaseMd);
-  if (subset.length) {
-    return [
-      ...subset,
-      "the release gate reads cmem/release.md only as plain Markdown (headings at column 0, paragraphs, lists) — write those lines another way",
-    ];
-  }
-  const lines = releaseMd.replace(/\r\n/g, "\n").split("\n");
-  const hist = lines.findIndex((l) => /^## Release History\s*$/.test(l));
-  if (hist < 0) return ['cmem/release.md has no "## Release History" section'];
-  let histEnd = hist + 1;
-  while (histEnd < lines.length && !/^#{1,2} /.test(lines[histEnd])) histEnd++;
-  const head = new RegExp(`^### ${escapeRe(version)}(\\s|$)`);
-  let start = -1;
-  for (let i = hist + 1; i < histEnd && start < 0; i++) if (head.test(lines[i])) start = i;
-  if (start < 0) return [`cmem/release.md has no "### ${version}" entry in its Release History`];
-  let end = start + 1;
-  while (end < histEnd && !/^#{1,3} /.test(lines[end])) end++;
-  // Blank = spaces and tabs only, as CommonMark counts it (round 5).
-  const paragraphs = lines.slice(start + 1, end).join("\n").split(/\n[ \t]*\n/)
-    .map((x) => x.replace(/^\n+/, ""));
-  const problems: string[] = [];
-  for (const kind of ["Security", "Hardening"] as const) {
-    const ps = paragraphs.filter((x) => x.startsWith(`**${kind} review`));
-    if (ps.length === 0) {
-      problems.push(`the ${version} entry records no **${kind} review (v${version}):** paragraph`);
-    } else if (ps.length > 1) {
-      problems.push(`the ${version} entry records the ${kind.toLowerCase()} review twice`);
-    } else {
-      const p = reviewRecordProblem(ps[0], kind, version);
-      if (p) problems.push(`the ${version} entry: ${p}`);
-    }
-  }
-  return problems;
-}
 
 /**
  * `git status --porcelain` lines that would be LEFT OUT of the release, or that are not a plain
@@ -235,10 +113,10 @@ export function bumpOnly(file: string, head: string, now: string, version: strin
 export { lsRemoteHas };
 
 /**
- * The commit-level release gate, on HEAD — run by CI on every release push (`--verify-commit`) and
- * locally for a bump already committed: the subject is `bump to v<version>`; against HEAD^ it
- * changes only RELEASE_FILES, each by its version line alone (`bumpOnly`); and HEAD's
- * `cmem/release.md` records both required reviews. Returns the problems (empty = it passes).
+ * The commit-level release gate, on HEAD — for a bump already committed (guard 0b): the subject is
+ * `bump to v<version>`; against HEAD^ it changes only RELEASE_FILES, each by its version line
+ * alone (`bumpOnly`). Returns the problems (empty = it passes). (CI ran it as `--verify-commit`
+ * from review round 2 to 2026-11-20, with the review record check; both retired, H37.)
  * Review round 3: HEAD must have ONE parent (a merge is not a bump); EVERY release file is
  * compared at HEAD^ and HEAD, changed or not, so a deno.json-only bump that leaves package.json /
  * VERSION behind is refused (A1); HEAD^ must be at a different version, so a "bump" that bumps
@@ -310,9 +188,6 @@ export function verifyReleaseCommit(version: string, git: Git): string[] {
       problems.push(`HEAD^ is already at ${version} — the release commit bumps nothing`);
     }
   }
-  const md = git(["show", "HEAD:cmem/release.md"]);
-  if (md.code !== 0) problems.push("HEAD has no cmem/release.md");
-  else problems.push(...reviewsRecorded(md.out, version));
   return problems;
 }
 
@@ -349,22 +224,32 @@ function refuse(why: string, ...detail: string[]): never {
   process.exit(1);
 }
 
-if (import.meta.main && process.argv[2] === "--verify-commit") {
-  // CI (publish.yml `checks`, on a release push): the same gate as a local release, on HEAD.
-  const problems = verifyReleaseCommit(version, git);
-  if (problems.length) {
-    for (const p of problems) console.error(`::error::${tag}: ${p}`);
-    console.error(
-      `::error::${tag} is not released: push the bump only through \`deno task release\`, after both reviews are recorded.`,
-    );
-    process.exit(1);
-  }
-  console.log(`✅ ${tag}: HEAD is the bump commit, version lines only, both reviews recorded`);
-  process.exit(0);
+if (import.meta.main && process.argv.length > 2) {
+  // `--verify-commit` was CI's (review round 2 → 2026-11-20); it is retired, and so is any flag.
+  refuse(`unknown argument ${process.argv[2]} (release.ts takes none since 2026-11-20, H37).`);
 }
 
 if (import.meta.main) {
   console.log(`Releasing ${tag}\n`);
+
+  // 0g. FIRST: the review set's result (review standard § 9, letter H37 (d)): the gitignored
+  // issues file names the reviewed commit, an ancestor of HEAD, and nothing but the bump,
+  // CHANGELOG.md and cmem/ changed since (scripts/review-gate.ts).
+  let issues: string | null = null;
+  try {
+    issues = await readFile(ISSUES_FILE, "utf8");
+  } catch {
+    issues = null;
+  }
+  const unreviewed = reviewGate(issues, git, RELEASE_FILES);
+  if (unreviewed.length > 0) {
+    refuse(
+      "the review set has not passed for this code.",
+      ...unreviewed,
+      'Run "review" (basic, hardening, licensing, security, privacy; cmem/review-process.md) to an',
+      `empty re-review and a passing full suite, then set "Review complete: <commit>" in ${ISSUES_FILE}.`,
+    );
+  }
 
   // 0a. A clean tree but for plain modifications of the release files.
   const status = git(["status", "--porcelain", "--untracked-files=all"]);
@@ -417,20 +302,7 @@ if (import.meta.main) {
         upstream.slice(0, 11)
       }), nor origin/main plus one bump commit.`,
       "Push or pull the other work first (release-process.md U2: merge first). Never push a",
-      "`bump to` commit by hand: CI releases any pushed version change, and refuses one this gate did not pass.",
-    );
-  }
-
-  // 0g. Both required reviews recorded in the release's entry (HEAD's, committed with the notes).
-  const md = git(["show", "HEAD:cmem/release.md"]);
-  if (md.code !== 0) refuse("HEAD has no cmem/release.md.", said(md));
-  const unreviewed = reviewsRecorded(md.out, version);
-  if (unreviewed.length > 0) {
-    refuse(
-      "the security and hardening reviews are not recorded.",
-      ...unreviewed,
-      'Run "security review" and "hardening review" to their empty rounds and record both in the',
-      "release's entry (cmem/review-process.md § 3), committed with the release notes.",
+      "`bump to` commit by hand: CI releases any pushed version change, and no longer re-checks it.",
     );
   }
 

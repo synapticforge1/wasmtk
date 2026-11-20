@@ -57,12 +57,11 @@
  *     .wit.
  */
 
-import { basename } from "@std/path";
 import { bundle, type BundleInput, moduleNameOf } from "binaryang-bundle";
 import wabtInit from "wabt";
 import binaryen from "./binaryen.ts";
 import { samePath } from "./outpath.ts";
-import { rt } from "./rt.ts";
+import { basename, host } from "./host.ts";
 import { emitWitBeside } from "./witgen.ts";
 
 // ---------------------------------------------------------------------------
@@ -125,7 +124,7 @@ async function promptConflict(
     })\n`;
 
   const encoder = new TextEncoder();
-  await rt.stdout.write(
+  await host.stdout.write(
     encoder.encode(
       `\nConflict: "${name}" exported by: ${fileNames.join(", ")}\n` +
         `  [1]  Prefix with module name  →  ${prefixExamples}\n` +
@@ -136,7 +135,7 @@ async function promptConflict(
     ),
   );
   const buf = new Uint8Array(16);
-  const n = await rt.stdin.read(buf);
+  const n = await host.stdin.read(buf);
   const choice = n ? new TextDecoder().decode(buf.subarray(0, n)).trim() : "4";
 
   if (choice === "1") return "prefix";
@@ -148,8 +147,8 @@ async function promptConflict(
 /** Print an error and exit 1. */
 function fail(message: string): never {
   console.error(`❌ wasmbundle: ${message}`);
-  rt.exit(1);
-  throw new Error(message); // unreachable: rt.exit does not return
+  host.exit(1);
+  throw new Error(message); // unreachable: host.exit does not return
 }
 
 /** The entity an export names, by name (binaryang's reader names every reference). */
@@ -250,7 +249,7 @@ export async function runWasmBundle(
 ): Promise<void> {
   if (inputs.length === 0) {
     console.error("❌ No input files specified.");
-    rt.exit(1);
+    host.exit(1);
   }
   // `-o` naming an input would overwrite it (sw181, 2026-10-26; sw113's rule for every command)
   const clash = inputs.find((f) => samePath(f, outputPath));
@@ -266,7 +265,7 @@ export async function runWasmBundle(
   for (const filePath of inputs) {
     let module: IrModule;
     try {
-      module = binaryen.readBinary(await rt.readFile(filePath))._inner as IrModule;
+      module = binaryen.readBinary(await host.readFile(filePath))._inner as IrModule;
     } catch (e) {
       fail(`cannot read ${basename(filePath)}: ${e instanceof Error ? e.message : e}`);
     }
@@ -325,7 +324,7 @@ export async function runWasmBundle(
           `\n❌ --on-conflict=alias requires --alias for every conflicting module.\n` +
             `   Missing alias for: ${missing.map((f) => basename(f)).join(", ")}`,
         );
-        rt.exit(1);
+        host.exit(1);
       }
       resolution = "alias";
       const fileNames = files.map((f) => basename(f)).join(", ");
@@ -338,7 +337,7 @@ export async function runWasmBundle(
       console.error(
         `\n❌ Compile stopped. Rename "${name}" in your source and recompile.`,
       );
-      rt.exit(1);
+      host.exit(1);
     }
 
     for (const mod of modules) {
@@ -442,7 +441,7 @@ export async function runWasmBundle(
   }
 
   // ── Write output ──────────────────────────────────────────────────────────
-  await rt.writeFile(outputPath, bytes);
+  await host.writeFile(outputPath, bytes);
   const exportCount = report.exports.length;
   console.log(
     `\n✅ ${inputs.length} module(s) bundled → ${outputPath}` +

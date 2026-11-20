@@ -21,13 +21,23 @@ trap → nonzero exit, so a passing `run` proves semantics. (Until 2026-09-28 a 
 
 ## Status (all shipped, 2026-05-30 / 05-31)
 
-| Cap | Kind | Pipeline | Handle / shape | Exports |
-| --- | --- | --- | --- | --- |
-| `Set<i32>` | shared-heap | 18c | i32 ptr → 4-slot Int32Array `[count,cap,keysPtr,usedPtr]` + 2 bucket arrays; linear probing on `key&(cap-1)`; ×2 grow/rehash @ load 0.5 | setNew/setAdd/setHas/setSize |
-| `Map<i32,i32>` | shared-heap | 18d | 5-slot `[count,cap,keysPtr,valsPtr,usedPtr]` + 3 bucket arrays; reuses Set hash core + parallel values | mapNew/mapSet/mapGet(h,k,fallback)/mapHas/mapSize |
-| `Date` | leaf | 18e | none (UTC integer calendar math; Howard Hinnant civil↔days) | isLeapYear/daysInMonth/daysFromCivil/weekdayFromDays/yearFromDays/monthFromDays/dayFromDays |
-| `JSON` | shared-heap | 18f | i32 handle → 4-slot Int32Array node `[tag,a,b,c]` (tag 0=null 1=bool 2=number(int) 3=string 4=array 5=object); containers reuse native dynamic `i32[]`; strings decoded into `Uint8Array` | jsonParse/jsonType/jsonInt/jsonBool/jsonArrayLen/jsonArrayGet/jsonObjectLen/jsonStrLen/jsonStrCharAt/jsonStrEq/jsonGet/jsonHas |
-| `RegExp` | leaf | 18g | none (backtracking matcher; pattern+text threaded as strings) | reTest/reSearch/reEnd |
+(Table as a list — Cap · Kind · Pipeline · Handle / shape · Exports:)
+
+- `Set<i32>` — Kind: shared-heap — Pipeline: 18c — Handle / shape: i32 ptr → 4-slot Int32Array
+  `[count,cap,keysPtr,usedPtr]` + 2 bucket arrays; linear probing on `key&(cap-1)`; ×2 grow/rehash @
+  load 0.5 — Exports: setNew/setAdd/setHas/setSize
+- `Map<i32,i32>` — Kind: shared-heap — Pipeline: 18d — Handle / shape: 5-slot
+  `[count,cap,keysPtr,valsPtr,usedPtr]` + 3 bucket arrays; reuses Set hash core + parallel values —
+  Exports: mapNew/mapSet/mapGet(h,k,fallback)/mapHas/mapSize
+- `Date` — Kind: leaf — Pipeline: 18e — Handle / shape: none (UTC integer calendar math; Howard
+  Hinnant civil↔days) — Exports:
+  isLeapYear/daysInMonth/daysFromCivil/weekdayFromDays/yearFromDays/monthFromDays/dayFromDays
+- `JSON` — Kind: shared-heap — Pipeline: 18f — Handle / shape: i32 handle → 4-slot Int32Array node
+  `[tag,a,b,c]` (tag 0=null 1=bool 2=number(int) 3=string 4=array 5=object); containers reuse native
+  dynamic `i32[]`; strings decoded into `Uint8Array` — Exports:
+  jsonParse/jsonType/jsonInt/jsonBool/jsonArrayLen/jsonArrayGet/jsonObjectLen/jsonStrLen/jsonStrCharAt/jsonStrEq/jsonGet/jsonHas
+- `RegExp` — Kind: leaf — Pipeline: 18g — Handle / shape: none (backtracking matcher; pattern+text
+  threaded as strings) — Exports: reTest/reSearch/reEnd
 
 **Remaining Tier-1:** none — RegExp was the last. Brief §7 status: **#4 tree-shake ✅**, **#6 hybrid
 routing ✅**, **#7 kernel-scope DECIDED ✅ (build own runtime)** — all 2026-06-02. #5 Promise/async and

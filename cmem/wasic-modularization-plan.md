@@ -34,16 +34,27 @@ the owner opens it. This section designs wasmtk's seams only.** It supersedes th
 
 ### The four layers (every extracted module belongs to exactly one)
 
-| layer | what | today | fate |
-| --- | --- | --- | --- |
-| **CORE** | TS source text → `{ wat, wit, diagnostics }`. Pure: no file I/O, no process exit, no console, no backend calls | `WasicTranspiler` (prepass / parse / infer / emit / runtime WAT templates), `console_log.ts`'s emission, `varscope.ts` | **the `ts2wasm` seam**: moves as a unit under I11 |
-| **FRONT EDGE** | gathers the source: reads imported `.ts`, resolves `wasmtk:<cap>` virtual imports, records `.wasm` imports | `tsbundler.ts` (`bundleImportsEx`), `jstyper.ts` | its OUTPUT must be pure data (source text + `{prefix, bytes, wit}` import descriptors), so the core never needs a file system |
-| **BACK EDGE** | WAT → wasm: merge imported modules, post-merge fixups, assemble, `-Oz` | `mergeOneWasmImport` + the fixup regexes, `wasmmerge.ts`, `watToOptimisedWasm`, the mathlib auto-merge | **NOT the core**: H11 #1/#3 moves it onto binaryang's parser/IR. Keeping it out of the core means neither move blocks the other |
-| **CLI EDGE** | path-based entry points and printing | `compileWasiTs` / `compileLibTs` / `compileWasi` / `compileWat`, `suggestNextStepOnAbort` | stays in wasmtk (the thin orchestrator in `projects.md`) |
+(Table as a list — layer · what · today · fate:)
+
+- **CORE** — what: TS source text → `{ wat, wit, diagnostics }`. Pure: no file I/O, no process exit,
+  no console, no backend calls — today: `WasicTranspiler` (prepass / parse / infer / emit / runtime
+  WAT templates), `console_log.ts`'s emission, `varscope.ts` — fate: **the `ts2wasm` seam**: moves
+  as a unit under I11
+- **FRONT EDGE** — what: gathers the source: reads imported `.ts`, resolves `wasmtk:<cap>` virtual
+  imports, records `.wasm` imports — today: `tsbundler.ts` (`bundleImportsEx`), `jstyper.ts` — fate:
+  its OUTPUT must be pure data (source text + `{prefix, bytes, wit}` import descriptors), so the
+  core never needs a file system
+- **BACK EDGE** — what: WAT → wasm: merge imported modules, post-merge fixups, assemble, `-Oz` —
+  today: `mergeOneWasmImport` + the fixup regexes, `wasmmerge.ts`, `watToOptimisedWasm`, the mathlib
+  auto-merge — fate: **NOT the core**: H11 #1/#3 moves it onto binaryang's parser/IR. Keeping it out
+  of the core means neither move blocks the other
+- **CLI EDGE** — what: path-based entry points and printing — today: `compileWasiTs` /
+  `compileLibTs` / `compileWasi` / `compileWat`, `suggestNextStepOnAbort` — fate: stays in wasmtk
+  (the thin orchestrator in `projects.md`)
 
 ### Rules for Phases 1–3 (in addition to "output-preserving" below)
 
-1. **A core module never imports** `rt.ts`, `utils.ts`, `wasmmerge.ts`, `tsbundler.ts`, `wabt`,
+1. **A core module never imports** `host.ts` (was `rt.ts`), `utils.ts`, `wasmmerge.ts`, `tsbundler.ts`, `wabt`,
    `binaryen-backend` or `@std/path`, and never calls `console.*` or exits. Errors are
    `diagnostics`. This is checkable by grep, so it becomes a gate (see below), not a convention.
 2. **The core's entry is string-in / data-out.** Phase 3's facade exposes something like

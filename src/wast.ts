@@ -21,7 +21,7 @@
 import wabt from "wabt";
 import { allFeatures, wasmValidate } from "binaryang-validate";
 import { binaryenLowerCustomPageSizes } from "./binaryen.ts";
-import { rt } from "./rt.ts";
+import { host } from "./host.ts";
 import { engineName, explainEngineRejection } from "./engine.ts";
 import { KNOWN_UNBUILT } from "./wast_known_unbuilt.ts";
 
@@ -1088,7 +1088,7 @@ export async function runWast(
       : e instanceof WebAssembly.RuntimeError
       ? "module: trapped at instantiation"
       : "module: other";
-  const src = await rt.readTextFile(path);
+  const src = await host.readTextFile(path);
   let cmds: SexpList[];
   try {
     cmds = parseSexprs(src);
@@ -1878,7 +1878,7 @@ export async function runWast(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function* walkWast(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of host.readDir(dir)) {
     const p = `${dir}/${entry.name}`;
     if (entry.isDirectory) yield* walkWast(p);
     else if (entry.name.endsWith(".wast")) yield p;
@@ -1890,7 +1890,7 @@ export async function runWastPath(
   target: string,
   opts: WastOptions = {},
 ): Promise<WastResult[]> {
-  const stat = await Deno.stat(target);
+  const stat = await host.stat(target);
   const files: string[] = [];
   if (stat.isDirectory) {
     for await (const f of walkWast(target)) files.push(f);

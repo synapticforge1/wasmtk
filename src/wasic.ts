@@ -118,8 +118,7 @@
 
 import wabt from "wabt";
 import binaryen from "./binaryen.ts";
-import { basename, dirname } from "@std/path";
-import { rt } from "./rt.ts";
+import { basename, dirname, host } from "./host.ts";
 import { defaultOutPath, samePath } from "./outpath.ts";
 import { emitWitBeside } from "./witgen.ts";
 import { bundleImportsEx } from "./tsbundler.ts";
@@ -275,7 +274,7 @@ async function watToOptimisedWasm(
     const optimised = binMod.emitBinary();
     binMod.dispose();
 
-    await rt.writeFile(outPath, optimised);
+    await host.writeFile(outPath, optimised);
     return { success: true, outputPath: outPath, sizeBytes: optimised.length };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -294,7 +293,7 @@ export async function compileWat(watPath: string, outPath?: string): Promise<Was
   if (samePath(watPath, out)) {
     return { success: false, error: `the output '${out}' is the input file; pass another -o` };
   }
-  const source = await rt.readTextFile(watPath);
+  const source = await host.readTextFile(watPath);
   const result = await watToOptimisedWasm(source, watPath, out);
   if (result.success) {
     console.log(`✅ WASI: ${out} (${result.sizeBytes} bytes)`);
@@ -805,7 +804,7 @@ async function readWitLogicalSigs(
   const witPath = wasmFilePath.replace(/\.wasm$/, ".wit");
   let witSrc: string;
   try {
-    witSrc = await rt.readTextFile(witPath);
+    witSrc = await host.readTextFile(witPath);
   } catch {
     // .wit absent — a numeric-only library; the overlay is a no-op. (Only file
     // absence is swallowed here; a parse/unsupported-type error must propagate.)
@@ -19445,7 +19444,7 @@ ${prefixed}
           this.interfaceVars.has(receiver) || this.namespaceDefs.has(receiver) ||
           this.externalBindings.has(receiver);
         if (!isKnown) {
-          // A diagnostic, not `console.error` + `rt.exit(1)` (2026-09-28, H12). This was the ONLY
+          // A diagnostic, not `console.error` + `host.exit(1)` (2026-09-28, H12). This was the ONLY
           // place inside WasicTranspiler that touched the host: it killed the whole process, which
           // a library import (the future `ts2wasm` seam) must never do, and which aborted `hybrid`'s
           // and `dync`'s speculative probe compiles instead of failing just the probe. Worded to
@@ -27892,7 +27891,7 @@ export async function compileWasiTs(
     return { success: false, error: `the output '${out}' is the input file; pass another -o` };
   }
 
-  if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
+  if (outPath) await host.mkdir(dirname(outPath), { recursive: true });
 
   let bundleResult: Awaited<ReturnType<typeof bundleImportsEx>>;
   try {
@@ -27911,7 +27910,7 @@ export async function compileWasiTs(
   for (const entry of wasmImports) {
     try {
       // Embedded capability (Brief #4): bytes/wit are carried inline; otherwise read the file.
-      const bytes = entry.bytes ?? await rt.readFile(entry.filePath);
+      const bytes = entry.bytes ?? await host.readFile(entry.filePath);
       wasmBytesMap.set(entry.filePath, bytes);
       // Index form, not debug names — see mergeOneWasmImport.
       const mod = wabtMod.readWasm(bytes.buffer as ArrayBuffer, { readDebugNames: false });
@@ -28039,7 +28038,7 @@ export async function compileWasiTs(
   wat = internalizeDynrtHostImports(wat);
 
   // Write WAT alongside the output for inspection / debugging
-  await rt.writeTextFile(watPath, wat);
+  await host.writeTextFile(watPath, wat);
 
   const result = await watToOptimisedWasm(wat, watPath, out);
   if (result.success) {
@@ -28050,7 +28049,7 @@ export async function compileWasiTs(
     // so its WIT is an empty world — writing it is a wasted step.
     if (opts?.emitWit !== false) {
       const witPath = defaultOutPath(out, [".wasm"], ".wit"); // never the output itself (sw113)
-      await rt.writeTextFile(witPath, transpiler.generateWit(name));
+      await host.writeTextFile(witPath, transpiler.generateWit(name));
       console.log(`   WIT:  ${witPath}`);
     }
     if (wasmImports.length > 0) {
@@ -28089,7 +28088,7 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
     return { success: false, error: `the output '${out}' is the input file; pass another -o` };
   }
 
-  if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
+  if (outPath) await host.mkdir(dirname(outPath), { recursive: true });
 
   let bundleResult2: Awaited<ReturnType<typeof bundleImportsEx>>;
   try {
@@ -28108,7 +28107,7 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
       // #14.3.4: handle EMBEDDED virtual-capability bytes/wit (e.g. auto-merged `wasmtk:dynrt`) the
       // same way compileWasiTs does — modc must support virtual imports too (the hybrid core is a
       // modc library that auto-merges dynrt for `any`/`eval`).
-      const bytes = entry.bytes ?? await rt.readFile(entry.filePath);
+      const bytes = entry.bytes ?? await host.readFile(entry.filePath);
       wasmBytesMap2.set(entry.filePath, bytes);
       // Index form, not debug names — see mergeOneWasmImport.
       const mod = wabtMod2.readWasm(bytes.buffer as ArrayBuffer, { readDebugNames: false });
@@ -28195,13 +28194,13 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
   // #14 follow-up: export dynrt marshalling helpers for `any`-signature functions (modc path too).
   wat = injectDynrtMarshalExports(wat, transpiler);
 
-  await rt.writeTextFile(watPath, wat);
+  await host.writeTextFile(watPath, wat);
 
   const result = await watToOptimisedWasm(wat, watPath, out);
   if (result.success) {
     // Phase 41: emit .wit interface file alongside the compiled .wasm (never the output itself)
     const witPath = defaultOutPath(out, [".wasm"], ".wit");
-    await rt.writeTextFile(witPath, transpiler.generateWit(name));
+    await host.writeTextFile(witPath, transpiler.generateWit(name));
     console.log(`✅ Library: ${out} (${result.sizeBytes} bytes)`);
     console.log(`   WAT:  ${watPath}`);
     console.log(`   WIT:  ${witPath}`);
@@ -28227,14 +28226,14 @@ export async function compileWasi(path: string, outPath?: string): Promise<void>
     const watResult = await compileWat(path, outPath);
     if (!watResult.success) {
       if (watResult.error) console.error(`❌ wasic: ${watResult.error}`);
-      rt.exit(1);
+      host.exit(1);
     }
     return;
   }
 
   if (!path.endsWith(".ts")) {
     console.error(`❌ wasic expects a .ts or .wat file. Got: ${path}`);
-    rt.exit(1); // it returned, so `wasmtk wasic x.js` exited 0 (2026-09-30), unlike a failed build
+    host.exit(1); // it returned, so `wasmtk wasic x.js` exited 0 (2026-09-30), unlike a failed build
     return;
   }
 
@@ -28242,7 +28241,7 @@ export async function compileWasi(path: string, outPath?: string): Promise<void>
   if (!result.success) {
     if (result.error) console.error(`❌ wasic: ${result.error}`);
     if (result.aborted) suggestNextStepOnAbort(path, result.diagnostics ?? []);
-    rt.exit(1);
+    host.exit(1);
   }
 }
 
@@ -28261,11 +28260,11 @@ async function abortWithReport(
   const sources: SourceFile[] = [];
   let entryReal = entry;
   try {
-    entryReal = await rt.realPath(entry);
+    entryReal = await host.realPath(entry);
   } catch { /* keep the path as given */ }
   for (const f of files?.length ? files : [entry]) {
     try {
-      sources.push({ path: f === entryReal ? entry : f, text: await rt.readTextFile(f) });
+      sources.push({ path: f === entryReal ? entry : f, text: await host.readTextFile(f) });
     } catch { /* an unreadable file just cannot be pointed into */ }
   }
   console.error(formatReport(warnings, sources));

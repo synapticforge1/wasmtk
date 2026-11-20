@@ -1090,6 +1090,23 @@ The `.ts` and `.js` paths are native runtime passthrough — they do not go thro
 compilation step. Use them to run a TypeScript file as-is for comparison against its compiled WASM
 output.
 
+### `wasmtk --self-check` — Check This Machine
+
+```bash
+wasmtk --self-check
+```
+
+Tries every file, folder, path, environment and process operation wasmtk uses, on the machine it
+runs on, in a temporary folder that it removes afterwards, and prints `ok` or `FAIL` for each step
+(exit 1 if one fails). It runs only when asked, and takes no other arguments. Use it on an OS
+wasmtk has not been tested on yet, or when a command fails with a file-system error.
+
+Every output wasmtk writes is written atomically (a temporary file beside it, then a rename), so a
+failed or interrupted write leaves the previous file as it was. `-o NUL` (Windows) and
+`-o /dev/null` discard the output.
+
+**Tested on:** Windows 11 (`win-x64`), Deno 2.9.8 (2026-11-20). Other platforms: not yet tested.
+
 ---
 
 ## Programmatic API
@@ -1531,3 +1548,14 @@ replacement.
   Stack-Switching (goroutines / channels / true async suspension) and Threads (shared memory /
   atomics). Goroutines, channels, and `select` **already work today** via the Go producer's asyncify
   scheduler.
+
+## License
+
+wasmtk is dual-licensed under either of
+
+- the MIT License ([LICENSE-MIT](LICENSE-MIT)), or
+- the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)),
+
+at your option. Third-party code included in wasmtk (fdlibm's math kernels) and its notice are
+listed in [NOTICE.md](NOTICE.md); every dependency's licence is recorded in
+[licences.json](licences.json).

@@ -94,5 +94,45 @@ await check("dync still writes its default output", { "prog3.ts": `console.log("
 // sw114: an assembler error in a .wat compile exited 0
 await check("wasic of a broken .wat exits 1", { "bad.wat": `(module (func i32.bogus_op))\n` }, "bad.wat", ["wasic", "bad.wat"], { code: 1 });
 
+/** Runs `args` in a temp dir holding `files`; the exit code and the folder's final listing decide. */
+async function checkFolder(
+  name: string,
+  files: Record<string, string>,
+  args: string[],
+  expect: { code: 0 | 1; listing: string[] },
+): Promise<void> {
+  const dir = await Deno.makeTempDir({ prefix: "wasmtk_outpath_" });
+  try {
+    for (const [f, body] of Object.entries(files)) await Deno.writeTextFile(join(dir, f), body);
+    const r = await wasmtk(args, dir);
+    const names: string[] = [];
+    for await (const e of Deno.readDir(dir)) names.push(e.name);
+    names.sort();
+    const problems: string[] = [];
+    if (r.code !== expect.code) problems.push(`exit ${r.code}, expected ${expect.code}`);
+    if (names.join() !== [...expect.listing].sort().join()) {
+      problems.push(`the folder holds [${names.join(", ")}], expected [${expect.listing.join(", ")}]`);
+    }
+    if (problems.length === 0) {
+      passed++;
+      console.log(`  ✓ ${name}`);
+    } else {
+      failed++;
+      console.log(`  ✗ ${name}: ${problems.join("; ")}\n${r.out.trim().split("\n").slice(0, 4).map((l) => "      " + l).join("\n")}`);
+    }
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+}
+
+// H39 (2026-11-20): writes go through src/host.ts — atomically (a temporary file, then a rename),
+// and a DEVICE in place. `-o NUL` failed on Windows under the installed permissions (os error 87;
+// found by `wasmtk --self-check`), and then tried to write `NUL.wit` beside the device.
+console.log("── writes: atomic, and devices written in place (H39) ──");
+const NULL_DEVICE = Deno.build.os === "windows" ? "NUL" : "/dev/null";
+await checkFolder(`convert -o ${NULL_DEVICE} writes nothing beside it`, { "lib.wat": WAT }, ["convert", "lib.wat", "-o", NULL_DEVICE], { code: 0, listing: ["lib.wat"] });
+await checkFolder("convert leaves no temporary file", { "lib.wat": WAT }, ["convert", "lib.wat"], { code: 0, listing: ["lib.wat", "lib.wasm", "lib.wit"] });
+await checkFolder("convert over an existing output replaces it, no temporary file", { "lib.wat": WAT, "lib.wasm": "old" }, ["convert", "lib.wat"], { code: 0, listing: ["lib.wat", "lib.wasm", "lib.wit"] });
+
 console.log(`\n  outpath: ${passed} passed, ${failed} failed`);
 if (failed > 0) Deno.exit(1);

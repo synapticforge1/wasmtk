@@ -20,8 +20,7 @@
  * string/aggregate HOST bindings (bindgen) are deferred (ABI forward-alignment), as for Go.
  */
 
-import { basename, dirname, join, resolve } from "@std/path";
-import { rt } from "./rt.ts";
+import { basename, dirname, host, join, resolve } from "./host.ts";
 import { binaryenOptimize } from "./binaryen.ts";
 
 /**
@@ -42,16 +41,16 @@ export interface ZigCompileOptions {
 /** Result of a Zig build/scaffold: `success` plus the output path or an error message. */
 export type ZigResult = { success: boolean; outputPath?: string; error?: string };
 
-/** Decodes captured stderr+stdout from a piped rt.Command result into one diagnostic string. */
+/** Decodes captured stderr+stdout from a piped host.Command result into one diagnostic string. */
 function decodeOut(r: { stdout: Uint8Array; stderr: Uint8Array }): string {
   const dec = new TextDecoder();
   return [dec.decode(r.stderr), dec.decode(r.stdout)].filter((s) => s.trim().length > 0).join("\n");
 }
 
-/** True if `cmd <versionArgs>` runs and exits 0. (Always pipe so rt.Command.output() can read.) */
+/** True if `cmd <versionArgs>` runs and exits 0. (Always pipe so host.Command.output() can read.) */
 async function toolAvailable(cmd: string, versionArgs: string[]): Promise<boolean> {
   try {
-    const r = await new rt.Command(cmd, { args: versionArgs, stdout: "piped", stderr: "piped" })
+    const r = await new host.Command(cmd, { args: versionArgs, stdout: "piped", stderr: "piped" })
       .output();
     return r.success;
   } catch {
@@ -62,7 +61,7 @@ async function toolAvailable(cmd: string, versionArgs: string[]): Promise<boolea
 /** True if path exists and is a directory (handles Deno property vs node method shapes). */
 async function isDirectory(path: string): Promise<boolean> {
   try {
-    const s = await rt.stat(path) as { isDirectory: boolean | (() => boolean) };
+    const s = await host.stat(path) as { isDirectory: boolean | (() => boolean) };
     return typeof s.isDirectory === "function" ? s.isDirectory() : !!s.isDirectory;
   } catch {
     return false;
@@ -95,7 +94,7 @@ async function resolveBuild(
  */
 async function scanExportFns(file: string): Promise<string[]> {
   try {
-    const src = await rt.readTextFile(file);
+    const src = await host.readTextFile(file);
     const names = new Set<string>();
     for (const m of src.matchAll(/\bexport\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/g)) names.add(m[1]);
     return [...names];
@@ -112,7 +111,7 @@ async function report(out: string, how: string): Promise<ZigResult> {
   // audit. `zigwasic.ts` has no test suite, so nothing else would have caught this.)
   let size = 0;
   try {
-    size = (await rt.readFile(out)).length;
+    size = (await host.readFile(out)).length;
   } catch (e) {
     console.error(
       `❌ wasmtk (zig): the build reported success but ${out} could not be read: ` +
@@ -162,10 +161,10 @@ export async function compileZig(input: string, opts: ZigCompileOptions = {}): P
     targetArgs = ["-target", "wasm32-wasi"];
   }
 
-  const r = await new rt.Command("zig", {
+  const r = await new host.Command("zig", {
     args: ["build-exe", srcFile, ...targetArgs, "-O", "ReleaseSmall", `-femit-bin=${out}`],
     cwd: baseDir,
-    env: rt.env.toObject(),
+    env: host.env.toObject(),
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -183,13 +182,13 @@ export async function compileZig(input: string, opts: ZigCompileOptions = {}): P
     // is not an -Oz failure: `report()` below checks for it and fails the build.
     let bytes: Uint8Array | null = null;
     try {
-      bytes = await rt.readFile(out);
+      bytes = await host.readFile(out);
     } catch { /* missing artifact — report() fails loudly on it */ }
     let how = "wasm32-freestanding library";
     if (bytes) {
       const r = binaryenOptimize(bytes);
       if (r.optimized) {
-        await rt.writeFile(out, r.bytes);
+        await host.writeFile(out, r.bytes);
         how += " + binaryen -Oz";
       } else {
         console.warn(`  ⚠️  binaryen -Oz failed, shipping the unoptimised module: ${r.error}`);
@@ -240,15 +239,18 @@ export async function scaffoldZigProject(
       : `Initializing Zig wasm library project: ${name}`,
   );
   try {
-    await rt.mkdir(baseDir, { recursive: true });
+    await host.mkdir(baseDir, { recursive: true });
   } catch { /* already exists — fine */ }
 
   const mainPath = join(baseDir, "main.zig");
   try {
-    await rt.stat(mainPath);
+    await host.stat(mainPath);
     console.log("   main.zig already exists — leaving it as is.");
   } catch {
-    await rt.writeTextFile(mainPath, scaffold === "program" ? MAIN_ZIG_PROGRAM : MAIN_ZIG_LIBRARY);
+    await host.writeTextFile(
+      mainPath,
+      scaffold === "program" ? MAIN_ZIG_PROGRAM : MAIN_ZIG_LIBRARY,
+    );
     console.log(`   wrote ${mainPath}`);
   }
   if (scaffold === "program") {

@@ -4,8 +4,7 @@
  * binary inspection via Binaryen, and multi-runtime execution logic.
  */
 
-import { basename, dirname } from "@std/path";
-import { rt } from "./rt.ts";
+import { basename, dirname, host } from "./host.ts";
 import { assertNotInput, defaultOutPath, samePath } from "./outpath.ts";
 import wasm2js_compiler from "wasm2js";
 import binaryen from "./binaryen.ts";
@@ -77,7 +76,7 @@ function getTypeName(typeId: number): string {
 const wasiImports: WasiImports = {
   wasi_snapshot_preview1: {
     proc_exit: (code: number | bigint): void => {
-      if (Number(code) === 0) rt.exit(0);
+      if (Number(code) === 0) host.exit(0);
       throw new WebAssembly.RuntimeError(`exit:${code}`);
     },
     fd_write: (
@@ -93,8 +92,8 @@ const wasiImports: WasiImports = {
         const ptr = view.getUint32(Number(iovs) + i * 8, true);
         const len = view.getUint32(Number(iovs) + i * 8 + 4, true);
         const buf = new Uint8Array(memory.buffer, ptr, len);
-        if (Number(fd) === 1) rt.stdout.writeSync(buf);
-        else rt.stderr.writeSync(buf);
+        if (Number(fd) === 1) host.stdout.writeSync(buf);
+        else host.stderr.writeSync(buf);
         nwritten += len;
       }
       view.setUint32(Number(nwrittenPtr), nwritten, true);
@@ -115,7 +114,7 @@ const wasiImports: WasiImports = {
         const ptr = view.getUint32(Number(iovs) + i * 8, true);
         const len = view.getUint32(Number(iovs) + i * 8 + 4, true);
         const buf = new Uint8Array(len);
-        const n = rt.stdin.readSync(buf);
+        const n = host.stdin.readSync(buf);
         if (n === null || n === 0) break;
         new Uint8Array(memory.buffer, ptr, n).set(buf.subarray(0, n));
         totalRead += n;
@@ -215,7 +214,7 @@ function makeWasiImport(): Record<string, unknown> {
 async function getWasmBytes(path: string): Promise<Uint8Array> {
   if (path.endsWith(".wat")) {
     try {
-      const watSource = await rt.readTextFile(path);
+      const watSource = await host.readTextFile(path);
       const wabtModule = await (wabt as unknown as () => Promise<WabtModule>)();
       const parsed = wabtModule.parseWat(path, watSource, { enable_all: true } as WasmFeatures);
       const { buffer } = parsed.toBinary({});
@@ -227,7 +226,7 @@ async function getWasmBytes(path: string): Promise<Uint8Array> {
       );
     }
   }
-  return await rt.readFile(path);
+  return await host.readFile(path);
 }
 
 /**
@@ -237,22 +236,22 @@ async function getWasmBytes(path: string): Promise<Uint8Array> {
  */
 export async function runWasi(path: string, args: string[]): Promise<void> {
   if (path.endsWith(".ts") || path.endsWith(".js")) {
-    const command = new rt.Command(rt.execPath(), {
+    const command = new host.Command(host.execPath(), {
       args: ["run", "-A", path, ...args],
     });
-    const process = command.spawn();
+    const child = command.spawn();
     // Propagate the child's exit code. It was awaited and DISCARDED until 2026-09-28, so a
     // TypeScript program that crashed (uncaught error → the runtime exits 1) read as success through
     // `wasmtk run x.ts` — the other half of the uncaught-exception exit-code bug.
-    const { code } = await process.status;
-    if (code !== 0) rt.exit(code);
+    const { code } = await child.status;
+    if (code !== 0) host.exit(code);
     return;
   }
 
   // Intercept Javy dynamic WAT files before attempting instantiation
   if (path.endsWith(".wat")) {
     try {
-      const watSource = await rt.readTextFile(path);
+      const watSource = await host.readTextFile(path);
       if (
         watSource.includes("javy_quickjs_provider") || watSource.includes("javy-default-plugin")
       ) {
@@ -263,7 +262,7 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
           `   To run, use the original WASM: wasmtk run ${path.replace(/\.wat$/, ".wasm")}`,
         );
         console.error(`   To rebuild after edits: wasmtk wasic ${inferredTs}`);
-        rt.exit(1);
+        host.exit(1);
       }
     } catch { /* not readable as text - fall through to normal handling */ }
   }
@@ -292,7 +291,7 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
         const ptr = args[0] as number;
         const len = args[1] as number;
         const memory = wasiInstance.exports.memory as WebAssembly.Memory;
-        rt.stdout.writeSync(new Uint8Array(memory.buffer, ptr, len).slice());
+        host.stdout.writeSync(new Uint8Array(memory.buffer, ptr, len).slice());
       },
     };
     const envProxy = new Proxy(envBase, {
@@ -322,7 +321,7 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
         const conv = exportCallArgs(wasmBytes, name, params);
         if ("error" in conv) {
           console.error(`❌ wasmtk run: ${conv.error} (arguments to ${name} are numbers)`);
-          rt.exit(1);
+          host.exit(1);
           return;
         }
         const parsedArgs = conv.args;
@@ -346,7 +345,7 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
         if (exitM) {
           const code = Number(exitM[1]);
           if (code === 0) return;
-          rt.exit(code);
+          host.exit(code);
           return;
         }
         if (
@@ -378,16 +377,18 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
               ) as number;
               const memory = wasiInstance?.exports.memory as WebAssembly.Memory;
               const msg = new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
-              rt.stderr.writeSync(
+              host.stderr.writeSync(
                 new TextEncoder().encode(`error: Uncaught (in Wasm) Error: ${msg}\n`),
               );
               printed = true;
             }
           } catch { /* ignore tag extraction errors */ }
           if (!printed) {
-            rt.stderr.writeSync(new TextEncoder().encode("error: Uncaught (in Wasm) exception\n"));
+            host.stderr.writeSync(
+              new TextEncoder().encode("error: Uncaught (in Wasm) exception\n"),
+            );
           }
-          rt.exit(1);
+          host.exit(1);
           return;
         }
         throw err;
@@ -396,7 +397,7 @@ export async function runWasi(path: string, args: string[]): Promise<void> {
   } catch (err) {
     console.error(`❌ Run error: ${err}`);
     explainIfEngine(err);
-    rt.exit(1);
+    host.exit(1);
   }
 }
 
@@ -457,7 +458,7 @@ export async function callExport(path: string, fnName: string, params: string[])
     if (typeof fn !== "function") {
       console.error(`❌ mod: no exported function named "${fnName}" in ${path}`);
       console.error(`   Use "wasmtk info ${path}" to list available functions.`);
-      rt.exit(1);
+      host.exit(1);
     }
 
     // A non-numeric argument is refused; it became 0, so `mod lib.wasm add abc 5` printed 5
@@ -465,7 +466,7 @@ export async function callExport(path: string, fnName: string, params: string[])
     const conv = exportCallArgs(wasmBytes, fnName, params);
     if ("error" in conv) {
       console.error(`❌ mod: ${conv.error} (the arguments to ${fnName} are numbers)`);
-      rt.exit(1);
+      host.exit(1);
       return;
     }
     const parsedArgs = conv.args;
@@ -475,7 +476,7 @@ export async function callExport(path: string, fnName: string, params: string[])
   } catch (err) {
     console.error(`❌ mod error: ${err}`);
     explainIfEngine(err);
-    rt.exit(1);
+    host.exit(1);
   }
 }
 
@@ -559,7 +560,7 @@ export async function showInfo(path: string): Promise<void> {
     console.error("❌ Info error: " + err);
     // Exit 1 like `callExport` does. It returned, so `wasmtk info` and `wasmtk mod <file>` exited
     // 0 on a missing or unreadable module (found by the 2026-09-30 exit sweep).
-    rt.exit(1);
+    host.exit(1);
   }
 }
 
@@ -571,10 +572,10 @@ export async function wasm2js(path: string, outPath?: string): Promise<boolean> 
   const out = outPath ?? defaultOutPath(path, [".wasm", ".wat"], ".js");
   try {
     assertNotInput(path, out, "wasm2js"); // sw113: `lib2.bin` was replaced by JS
-    if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
+    if (outPath) await host.mkdir(dirname(outPath), { recursive: true });
     const wasmBuffer = await getWasmBytes(path);
     const result = wasm2js_compiler(wasmBuffer as BufferSource);
-    await rt.writeTextFile(
+    await host.writeTextFile(
       out,
       typeof result === "string" ? result : new TextDecoder().decode(result),
     );
@@ -604,31 +605,31 @@ export async function convertFile(p: string, outPath?: string): Promise<boolean>
     console.error(`❌ convert: the output '${out}' is the input file; pass -o <path>.`);
     return false;
   }
-  if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
+  if (outPath) await host.mkdir(dirname(outPath), { recursive: true });
 
   try {
     if (isWat) {
       // --- WAT → WASM ---
-      const watSource = await rt.readTextFile(p);
+      const watSource = await host.readTextFile(p);
 
       // Normal WAT → WASM round-trip
       const wabtModule = await (wabt as unknown as () => Promise<WabtModule>)();
       const parsed = wabtModule.parseWat(p, watSource, { enable_all: true } as WasmFeatures);
       const { buffer } = parsed.toBinary({});
       parsed.destroy();
-      await rt.writeFile(out, new Uint8Array(buffer));
+      await host.writeFile(out, new Uint8Array(buffer));
       console.log(`✅ Converted to ${out}`);
       // .wit auto-emission for every WAT → WASM artifact (owner, 2026-09-28).
       await emitWitBeside(out, "wat2wasm");
     } else {
       // --- WASM → WAT ---
-      const wasmBytes = await rt.readFile(p);
+      const wasmBytes = await host.readFile(p);
       // Normal WASM → WAT round-trip
       const wabtModule = await (wabt as unknown as () => Promise<WabtModule>)();
       const mod = wabtModule.readWasm(wasmBytes, { readDebugNames: true });
       const wat = mod.toText({ inlineExport: false });
       mod.destroy();
-      await rt.writeTextFile(out, wat);
+      await host.writeTextFile(out, wat);
       console.log(`✅ Converted to ${out}`);
     }
     return true;
@@ -653,6 +654,6 @@ export async function bundleTs(p: string, outPath?: string): Promise<void> {
   const out = outPath || defaultOutPath(p, [".ts", ".mts", ".cts"], ".bundled.ts");
   assertNotInput(p, out, "tsbundle");
   const bundled = await bundleImports(p);
-  await rt.writeTextFile(out, bundled);
+  await host.writeTextFile(out, bundled);
   console.log(`✅ Bundled: ${out}`);
 }

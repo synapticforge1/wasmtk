@@ -1,19 +1,82 @@
 # Architecture
 
+> **Split by size on 2026-11-20 (letter H38): this file is part 1 of 2.** The sections continue in:
+
+- [architecture-2.md](architecture-2.md): from "The merge (wasmmerge.ts) — the "DLL linker""
+
 ## Compilers / tools
 
-| Tool                          | Input → Output                                     | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ----------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wasic`                       | `.ts` → `.wasm` (+`.wat`,`.wit`) WASI executable   | Has `_start`; the main compiler.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `modc`                        | `.ts` → `.wasm` (+`.wat`,`.wit`) **library**       | No `_start`, no WASI; exports named functions. Use for DLL-style libs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `bindgen`                     | `.wit` → `.bindings.ts`                            | TS host loader; canonical ABI marshaling (strings via cabi_realloc + TextEncoder).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `hybrid`                      | `.ts` → core `.wasm` + TS runner                   | Splits on `// @wasm` annotations; routes annotated fns through modc→bindgen.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `jstyper`                     | `.js`+`.d.ts` → typed `.ts`                        | Regex-based; `number→f64`, `--any-policy`, `--dts-only`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `wast`                        | `.wast` file/dir → assertion pass/fail report      | **`src/wast.ts`** (2026-07-02). Runs the WebAssembly `.wast` _script_ format (superset of `.wat`; the official spec-conformance testsuite format). Position-tracking S-expr reader → assemble each `(module …)` via the WABT backend → instantiate on the host engine with `spectest` imports + a `register` link registry → execute `assert_return`/`assert_trap`/`assert_invalid`/`assert_malformed`/`assert_unlinkable`/`invoke`/`get`. Bit-exact compare (i32=uint32, i64=BigInt, f32/f64 by bits incl. `nan:canonical`/`nan:arithmetic`/hex-float). Out-of-scope value types (`v128`/`ref.*`), unsupported proposals, and validation assertions the toolchain doesn't reject → SKIP; `failed` = execution wrong. CLI `wasmtk wast <file\|dir> [--verbose]`; gate `tests/wast_tests.ts` (**288 files, 37370 exec assertions, 100 known failures pinned across 15 files, 0 unrunnable** as of 2026-09-28 on binaryang 1.6.0 — a per-file baseline since 2026-08-20; failures after an unassemblable module are tagged `[cascade]`, and the runner reports a fourth number, `unbuilt-modules`). Surfaced 3 real **wabt-ts** backend bugs, all fixed in wabt-ts 1.3.4 + 1.3.5 (see [compiler-bugs.md](compiler-bugs.md) + `scripts/wabt-ts-bug-report.md`). Validates via host V8 today; structured to point at another runtime later (a `--runtime <cmd>` hook).                                                                                                                                                                                                                      |
-| `dync`                        | fully-dynamic `.ts`/`.js` → self-contained `.wasm` | **`src/dync.ts`** (v1.11.1, #14 2h). The `javyc` replacement: base64-embeds the whole program source and runs it through the embedded own runtime (`wasmtk:dynrt` interpreter) — NO external Javy/QuickJS. For fully-dynamic code (`any`, dynamic objects, `eval`) that `wasic` can't type statically; single self-contained file (interactive `prompt` + ESM import/export of other modules are out of scope). Output parity vs `deno run` is gated by `tests/dync_conformance_tests.ts`. **`javyc` (QuickJS, ~1.26 MB) was DELETED in v1.11.1.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Go producer (`--lang=go`)     | `.go` → `.wasm`                                    | **`src/gowasic.ts`** (2026-06-06). **⚠️ SUPERSEDED 2026-07-28 — see [polyglot-producers.md](polyglot-producers.md) § "UPDATED 2026-07-28": `init` now scaffolds a WASI PROGRAM (`initmod`=library); `--lang` OPTIONAL for run/build/modc (auto-detected); Go `--go-target=wasm` browser scaffold REMOVED (→ universal wasm loader), `--go-target=wasm-unknown` leaf KEPT; producers do NOT auto-emit `.wit` (TS-only).** Shells to TinyGo (`--go-runtime=std` for stdlib `go`); NOT the wasic TS compiler — a front-end handing wasm to the shared downstream. Commands (path defaults to cwd): `init` (scaffold `go.mod`+`main.go`; `--go-target=wasm`=browser; the scaffold includes a `//go:wasmexport` example), `modc` (**WASI reactor library** by default — `-target=wasip1 -buildmode=c-shared`: no `_start`, exports `//go:wasmexport` funcs + runtime, callable via `wasmtk mod`/bindgen; **`--go-target=wasm`** for a browser module + `wasm_exec.js`), `run` (build wasip1 command + run). **`wasic --lang=go` was REMOVED 2026-06-07** (standalone Go→WASI isn't merge/bindgen-consumable; the wasip1 build now lives inside `run`); **`run` auto-detects Go 2026-06-07** (a `.go` file or a dir with `go.mod` → builds+runs without `--lang=go`). **`modc --lang=go` = reactor library 2026-06-07** (was browser-only; flipped to match TS `modc` = library mode) — required a `_initialize` fix in `callExport`/`runWasi` (reactor exports trap unless `_initialize` runs first; see [compiler-bugs.md](compiler-bugs.md)). wasm-opt auto-fallback: passthrough shim + `-scheduler=none` + binaryen-ts `-Oz` when no real wasm-opt (goroutine-free). See [polyglot-producers.md](polyglot-producers.md). |
-| Zig producer (`--lang=zig`)   | `.zig` → `.wasm`                                   | **`src/zigwasic.ts`** (2026-06-07). **⚠️ SUPERSEDED 2026-07-28 (polyglot-producers.md § "UPDATED 2026-07-28"): `init`=WASI PROGRAM, `initmod`=library; `--lang` optional for run/build/modc (auto-detect from `.zig`).** Shells to `zig` (no wasm-opt shim — zig self-optimizes). `init` (scaffold a wasm-library `main.zig`: `export fn` + a **comptime-guarded** `pub fn main` test harness — Zig analyzes `main` even with `-fno-entry`, so std I/O must be guarded to the wasi target), `modc` (freestanding library: `-fno-entry --export=<name>…` scanned from source → clean exports, no `_start`/WASI + binaryen-ts `-Oz`), `run` (`wasm32-wasi` program on wasmtk's TS host; auto-detects `.zig`). See [polyglot-producers.md](polyglot-producers.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Rust producer (`--lang=rust`) | `.rs` → `.wasm`                                    | **`src/rustwasic.ts`** (2026-06-07) — **delegates fully to `rsxtk`** (owner's Rust WASM toolkit on PATH; `cargo install rsxtk`). `init`→`rsxtk init` (wasi script), `initmod`→`initmod` (library), `modc`→`rsxtk build <p> wasm`, `build`→`rsxtk build <p> wasi`, `run`→`rsxtk run` (its wasmtime; auto-detects `.rs`/`Cargo.toml`), `add`/`remove`/`list`/`fmt`/`clean`→same. **UPDATED 2026-07-28: `run`/`build`/`modc` auto-detect (`--lang` optional); the Rust-EXCLUSIVE verbs `add`/`remove`/`list`/`fmt`/`clean` need NO `--lang` (implicitly Rust).** Prereq `rustup target add wasm32-wasip1`. See [polyglot-producers.md](polyglot-producers.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+(Table as a list — Tool · Input → Output · Notes:)
+
+- `wasic` — Input → Output: `.ts` → `.wasm` (+`.wat`,`.wit`) WASI executable — Notes: Has `_start`;
+  the main compiler.
+- `modc` — Input → Output: `.ts` → `.wasm` (+`.wat`,`.wit`) **library** — Notes: No `_start`, no
+  WASI; exports named functions. Use for DLL-style libs.
+- `bindgen` — Input → Output: `.wit` → `.bindings.ts` — Notes: TS host loader; canonical ABI
+  marshaling (strings via cabi_realloc + TextEncoder).
+- `hybrid` — Input → Output: `.ts` → core `.wasm` + TS runner — Notes: Splits on `// @wasm`
+  annotations; routes annotated fns through modc→bindgen.
+- `jstyper` — Input → Output: `.js`+`.d.ts` → typed `.ts` — Notes: Regex-based; `number→f64`,
+  `--any-policy`, `--dts-only`.
+- `wast` — Input → Output: `.wast` file/dir → assertion pass/fail report — Notes: **`src/wast.ts`**
+  (2026-07-02). Runs the WebAssembly `.wast` _script_ format (superset of `.wat`; the official
+  spec-conformance testsuite format). Position-tracking S-expr reader → assemble each `(module …)`
+  via the WABT backend → instantiate on the host engine with `spectest` imports + a `register` link
+  registry → execute
+  `assert_return`/`assert_trap`/`assert_invalid`/`assert_malformed`/`assert_unlinkable`/`invoke`/`get`.
+  Bit-exact compare (i32=uint32, i64=BigInt, f32/f64 by bits incl.
+  `nan:canonical`/`nan:arithmetic`/hex-float). Out-of-scope value types (`v128`/`ref.*`),
+  unsupported proposals, and validation assertions the toolchain doesn't reject → SKIP; `failed` =
+  execution wrong. CLI `wasmtk wast <file\|dir> [--verbose]`; gate `tests/wast_tests.ts` (**288
+  files, 37370 exec assertions, 100 known failures pinned across 15 files, 0 unrunnable** as of
+  2026-09-28 on binaryang 1.6.0 — a per-file baseline since 2026-08-20; failures after an
+  unassemblable module are tagged `[cascade]`, and the runner reports a fourth number,
+  `unbuilt-modules`). Surfaced 3 real **wabt-ts** backend bugs, all fixed in wabt-ts 1.3.4 + 1.3.5
+  (see [compiler-bugs.md](compiler-bugs.md) + `scripts/wabt-ts-bug-report.md`). Validates via host
+  V8 today; structured to point at another runtime later (a `--runtime <cmd>` hook).
+- `dync` — Input → Output: fully-dynamic `.ts`/`.js` → self-contained `.wasm` — Notes:
+  **`src/dync.ts`** (v1.11.1, #14 2h). The `javyc` replacement: base64-embeds the whole program
+  source and runs it through the embedded own runtime (`wasmtk:dynrt` interpreter) — NO external
+  Javy/QuickJS. For fully-dynamic code (`any`, dynamic objects, `eval`) that `wasic` can't type
+  statically; single self-contained file (interactive `prompt` + ESM import/export of other modules
+  are out of scope). Output parity vs `deno run` is gated by `tests/dync_conformance_tests.ts`.
+  **`javyc` (QuickJS, ~1.26 MB) was DELETED in v1.11.1.**
+- Go producer (`--lang=go`) — Input → Output: `.go` → `.wasm` — Notes: **`src/gowasic.ts`**
+  (2026-06-06). **⚠️ SUPERSEDED 2026-07-28 — see [polyglot-producers.md](polyglot-producers.md) §
+  "UPDATED 2026-07-28": `init` now scaffolds a WASI PROGRAM (`initmod`=library); `--lang` OPTIONAL
+  for run/build/modc (auto-detected); Go `--go-target=wasm` browser scaffold REMOVED (→ universal
+  wasm loader), `--go-target=wasm-unknown` leaf KEPT; producers do NOT auto-emit `.wit` (TS-only).**
+  Shells to TinyGo (`--go-runtime=std` for stdlib `go`); NOT the wasic TS compiler — a front-end
+  handing wasm to the shared downstream. Commands (path defaults to cwd): `init` (scaffold
+  `go.mod`+`main.go`; `--go-target=wasm`=browser; the scaffold includes a `//go:wasmexport`
+  example), `modc` (**WASI reactor library** by default — `-target=wasip1 -buildmode=c-shared`: no
+  `_start`, exports `//go:wasmexport` funcs + runtime, callable via `wasmtk mod`/bindgen;
+  **`--go-target=wasm`** for a browser module + `wasm_exec.js`), `run` (build wasip1 command + run).
+  **`wasic --lang=go` was REMOVED 2026-06-07** (standalone Go→WASI isn't merge/bindgen-consumable;
+  the wasip1 build now lives inside `run`); **`run` auto-detects Go 2026-06-07** (a `.go` file or a
+  dir with `go.mod` → builds+runs without `--lang=go`). **`modc --lang=go` = reactor library
+  2026-06-07** (was browser-only; flipped to match TS `modc` = library mode) — required a
+  `_initialize` fix in `callExport`/`runWasi` (reactor exports trap unless `_initialize` runs first;
+  see [compiler-bugs.md](compiler-bugs.md)). wasm-opt auto-fallback: passthrough shim +
+  `-scheduler=none` + binaryen-ts `-Oz` when no real wasm-opt (goroutine-free). See
+  [polyglot-producers.md](polyglot-producers.md).
+- Zig producer (`--lang=zig`) — Input → Output: `.zig` → `.wasm` — Notes: **`src/zigwasic.ts`**
+  (2026-06-07). **⚠️ SUPERSEDED 2026-07-28 (polyglot-producers.md § "UPDATED 2026-07-28"):
+  `init`=WASI PROGRAM, `initmod`=library; `--lang` optional for run/build/modc (auto-detect from
+  `.zig`).** Shells to `zig` (no wasm-opt shim — zig self-optimizes). `init` (scaffold a
+  wasm-library `main.zig`: `export fn` + a **comptime-guarded** `pub fn main` test harness — Zig
+  analyzes `main` even with `-fno-entry`, so std I/O must be guarded to the wasi target), `modc`
+  (freestanding library: `-fno-entry --export=<name>…` scanned from source → clean exports, no
+  `_start`/WASI + binaryen-ts `-Oz`), `run` (`wasm32-wasi` program on wasmtk's TS host; auto-detects
+  `.zig`). See [polyglot-producers.md](polyglot-producers.md).
+- Rust producer (`--lang=rust`) — Input → Output: `.rs` → `.wasm` — Notes: **`src/rustwasic.ts`**
+  (2026-06-07) — **delegates fully to `rsxtk`** (owner's Rust WASM toolkit on PATH; `cargo install
+  rsxtk`). `init`→`rsxtk init` (wasi script), `initmod`→`initmod` (library), `modc`→`rsxtk build <p>
+  wasm`, `build`→`rsxtk build <p> wasi`, `run`→`rsxtk run` (its wasmtime; auto-detects
+  `.rs`/`Cargo.toml`), `add`/`remove`/`list`/`fmt`/`clean`→same. **UPDATED 2026-07-28:
+  `run`/`build`/`modc` auto-detect (`--lang` optional); the Rust-EXCLUSIVE verbs
+  `add`/`remove`/`list`/`fmt`/`clean` need NO `--lang` (implicitly Rust).** Prereq `rustup target
+  add wasm32-wasip1`. See [polyglot-producers.md](polyglot-producers.md).
 
 ## Pluggable wabt + binaryen backends — `deno.json` is the single switch
 
@@ -98,59 +161,3 @@ merge OOB-`charCodeAt` trap".
 6. `watToOptimisedWasm`: wabt `parseWat`→binary, then Binaryen `-Oz` (shrink=2, opt=2).
 7. Write `.wat`, `.wit` alongside `.wasm`.
 
-## The merge (wasmmerge.ts) — the "DLL linker"
-
-Splicing a modc `.wasm` into a host module needs three hard parts, all handled:
-
-- **Prefix-mangling** — every internal name → `${prefix}_name` (collision-free).
-- **Data relocation** — `relocateDataPtrs` shifts data-segment pointers by the combined data offset,
-  **scoped to the merged module's own `(data …)` address extent** so arithmetic constants aren't
-  mistaken for pointers (the Date fix; a pure leaf with no data segments relocates nothing).
-- **Allocator unification (Stage 0.6)** — `detectBumpAllocator` finds each module's `$__malloc`
-  (semantic gate: `(param i32)(result i32)`, touches exactly one global read **once** + written
-  **once**, `local.get 0` + `i32.add`, no loads/stores/calls), drops duplicates, and redirects call
-  sites + the heap-ptr global to the host's single `$__malloc`/`$__heap_ptr`. This makes a structure
-  built in one merged unit share one live heap with another. `WatMergeResult.
-  droppedAllocator`
-  signals it; a leaf lib (no malloc) skips it.
-- **Merge guards (loud failure, not silent corruption)** — a merged-in module must not carry
-  constructs that can't survive the WAT-splice; `wasmmerge` throws a clear diagnostic instead of
-  emitting a broken/corrupt module: (1) **`call_indirect`** (2026-06-05) — Phase 18 strips imported
-  type sections, so a `(type N)`/table ref would dangle; (2) **`memory.grow`** (2026-06-07) —
-  signals a foreign allocator that claims linear memory upward (Go runtime alloc / Rust dlmalloc /
-  Zig `page_allocator`) instead of sharing the host bump heap, which would silently corrupt once it
-  allocates. The `memory.grow` diagnostic names the per-language fix (static-arena allocator) or
-  points to keeping the module standalone as a WIT/bindgen component. wasmtk's own producers
-  (wasic/modc) emit neither — their bump allocator runs over fixed pre-declared pages — so the
-  guards fire only on heap-using foreign-language modules. (Background: the native-producer
-  mergeability matrix in [polyglot-producers.md](polyglot-producers.md).)
-
-## Bump allocator / instance lifecycle
-
-`$__malloc` advances `$__heap_ptr`; **no `free`**. Allocations accumulate for the instance lifetime
-— intentional and correct for the DLL/singleton use case (CLI tools, bounded calls). For servers
-doing many string-param calls, the planned mitigation is an instance **pool** (`createPool`) in the
-universalWasmLoader, cycling fresh instances. `cabi_post_return` (full Component Model) would remove
-the need but is deferred.
-
-## Canonical ABI (Stage 0 + return-side forward-alignment, 2026-06-15)
-
-**Accuracy note (updated 2026-06-15):** the realloc/param side AND the **return side** are now
-canonical-aligned; what remains non-canonical is only the **container** — the artifact is a P1
-**core module** with a **sidecar** `.wit` (not an embedded component-type section), and boundary
-marshalling is still done **host-side** in bindgen rather than by the binary. So: "aligned with the
-Component Model Canonical ABI calling convention, shipped as a P1 core module + sidecar WIT" is the
-accurate phrasing. The remaining P1→P2 step (embed the component type + `wasm-tools component new`)
-is now a **wrap, not a rewrite** — see [polyglot-producers.md](polyglot-producers.md).
-
-- Exports `cabi_realloc(ptr,old,align,new)` (a `select`-based wrapper over `$__malloc`) instead of
-  `__malloc`, when any export has a string param/return.
-- **String returns use the canonical callee-allocated convention (2026-06-15).** A `$fn__cabi` shim
-  (exported as `"fn"`, signature `(...params) -> i32`) allocates an 8-byte `[ptr, len]` return area
-  via `cabi_realloc`, calls the internal void `$fn` (which sets `$__str_ret_ptr`/`$__str_ret_len`
-  globals), writes ptr+len into that area, and **returns the area pointer**. A paired
-  `cabi_post_<fn>` export (empty body — the bump allocator has no free, but the export must exist
-  for the contract) lets the host release the buffer. The `$__str_ret_*` globals stay internal.
-- bindgen host: numerics direct; bool `x?1:0` / `r!==0`; string params `TextEncoder`+`cabi_realloc`;
-  string returns call the export → read `[ptr,len]` at the returned pointer via `DataView.getInt32`
-  at 0/4 → decode → call `cabi_post_<fn>(retPtr)`. (The host no longer allocates the return area.)

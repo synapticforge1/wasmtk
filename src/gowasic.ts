@@ -30,8 +30,7 @@
  * (bindgen) are deferred (ABI forward-alignment).
  */
 
-import { basename, dirname, join, resolve } from "@std/path";
-import { rt } from "./rt.ts";
+import { basename, dirname, host, join, resolve } from "./host.ts";
 import { binaryenAsyncify, binaryenOptimize } from "./binaryen.ts";
 
 /** Go backend toolchain: `tinygo` (default, small) or `std` (standard `go`, large — full runtime/GC). */
@@ -62,7 +61,7 @@ export interface GoCompileOptions {
 /** Result of a Go build / scaffold: `success` plus the output path or an error message. */
 export type GoResult = { success: boolean; outputPath?: string; error?: string };
 
-/** Decodes captured stderr+stdout from a piped rt.Command result into one diagnostic string. */
+/** Decodes captured stderr+stdout from a piped host.Command result into one diagnostic string. */
 function decodeOut(r: { stdout: Uint8Array; stderr: Uint8Array }): string {
   const dec = new TextDecoder();
   return [dec.decode(r.stderr), dec.decode(r.stdout)].filter((s) => s.trim().length > 0).join("\n");
@@ -86,11 +85,11 @@ function goBuildHint(errText: string, _target: GoTarget): string {
   return "";
 }
 
-/** Returns true if `cmd <versionArgs>` runs and exits 0. (Always pipe — rt.Command.output() reads
+/** Returns true if `cmd <versionArgs>` runs and exits 0. (Always pipe — host.Command.output() reads
  *  stdout/stderr and throws unless they are "piped".) */
 async function toolAvailable(cmd: string, versionArgs: string[]): Promise<boolean> {
   try {
-    const r = await new rt.Command(cmd, { args: versionArgs, stdout: "piped", stderr: "piped" })
+    const r = await new host.Command(cmd, { args: versionArgs, stdout: "piped", stderr: "piped" })
       .output();
     return r.success;
   } catch {
@@ -101,7 +100,7 @@ async function toolAvailable(cmd: string, versionArgs: string[]): Promise<boolea
 /** True if path exists and is a directory (handles Deno property vs node method shapes). */
 async function isDirectory(path: string): Promise<boolean> {
   try {
-    const s = await rt.stat(path) as { isDirectory: boolean | (() => boolean) };
+    const s = await host.stat(path) as { isDirectory: boolean | (() => boolean) };
     return typeof s.isDirectory === "function" ? s.isDirectory() : !!s.isDirectory;
   } catch {
     return false;
@@ -149,30 +148,17 @@ async function writeWasmOptShim(
   baseDir: string,
 ): Promise<{ launcher: string; cleanup: () => Promise<void> }> {
   const tmp = join(baseDir, `.wasmtk_wasmopt_${Date.now()}`);
-  await rt.mkdir(tmp, { recursive: true });
+  await host.mkdir(tmp, { recursive: true });
   const shimPath = join(tmp, "wasmopt_shim.ts");
-  await rt.writeTextFile(shimPath, SHIM_TS);
-  const bin = rt.execPath(); // the deno (or bun) binary running wasmtk — no reliance on PATH
-  // Deno needs `run -A` (subcommand + all-permissions); Bun executes a file directly
-  // with no permission flags. `-A` is a hard parse error under Bun, so branch on runtime.
-  const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== "undefined";
-  const runPrefix = isBun ? `"${bin}"` : `"${bin}" run -A`;
-  let launcher: string;
-  if (rt.build.os === "windows") {
-    launcher = join(tmp, "wasm-opt.cmd");
-    await rt.writeTextFile(launcher, `@echo off\r\n${runPrefix} "${shimPath}" %*\r\n`);
-  } else {
-    launcher = join(tmp, "wasm-opt");
-    await rt.writeTextFile(launcher, `#!/bin/sh\nexec ${runPrefix} "${shimPath}" "$@"\n`);
-    try {
-      await rt.chmod(launcher, 0o755);
-    } catch { /* best effort */ }
-  }
+  await host.writeTextFile(shimPath, SHIM_TS);
+  // The runtime running wasmtk (no reliance on PATH) runs the shim; the launcher's form (`.cmd` or
+  // a `#!/bin/sh` script) is the host's (src/host.ts).
+  const launcher = await host.writeLauncher(tmp, "wasm-opt", [...host.scriptRunner(), shimPath]);
   return {
     launcher,
     cleanup: async () => {
       try {
-        await rt.remove(tmp, { recursive: true });
+        await host.remove(tmp, { recursive: true });
       } catch { /* ignore */ }
     },
   };
@@ -229,7 +215,7 @@ async function buildWithTinyGo(
   const buildModeArgs = target === "reactor" ? ["-buildmode=c-shared"] : [];
   const reportLabel = target === "reactor" ? "wasip1 c-shared library" : tgoTarget;
   const baseEnv = {
-    ...rt.env.toObject(),
+    ...host.env.toObject(),
     TINYGO_CACHE: join(baseDir, ".tinygo-cache"),
     GOTMPDIR: baseDir,
   };
@@ -249,13 +235,13 @@ async function buildWithTinyGo(
   // asyncify scheduler + passthrough shim + binaryen Asyncify+-Oz) even when a
   // real `wasm-opt` is on PATH — used by the goroutine e2e and by users who want
   // zero external binaryen. Otherwise a real `wasm-opt` (if present) is preferred.
-  const forceBinaryenAsyncify = rt.env.get("WASMTK_GO_BINARYEN_ASYNCIFY") === "1";
+  const forceBinaryenAsyncify = host.env.get("WASMTK_GO_BINARYEN_ASYNCIFY") === "1";
   const haveRealWasmOpt = !forceBinaryenAsyncify &&
-    (!!rt.env.get("WASMOPT") || await toolAvailable("wasm-opt", ["--version"]));
+    (!!host.env.get("WASMOPT") || await toolAvailable("wasm-opt", ["--version"]));
 
   if (haveRealWasmOpt) {
     // Real wasm-opt → TinyGo does its full --asyncify -Oz pass (full goroutine support).
-    const r = await new rt.Command("tinygo", {
+    const r = await new host.Command("tinygo", {
       args: [...baseArgs, buildArg],
       cwd: baseDir,
       env: baseEnv,
@@ -279,7 +265,7 @@ async function buildWithTinyGo(
   // binaryen (in-wasm asyncify-import mode: binaryen ≥ 1.4.1, now binaryang ≥ 1.5.1).
   const shim = await writeWasmOptShim(baseDir);
   try {
-    const r = await new rt.Command("tinygo", {
+    const r = await new host.Command("tinygo", {
       args: [
         "build",
         "-p",
@@ -311,7 +297,7 @@ async function buildWithTinyGo(
   // Resolve the asyncify.* imports + optimize via binaryen. This MUST succeed —
   // an un-asyncified module has unresolved `asyncify.*` imports and won't run.
   try {
-    await rt.writeFile(out, binaryenAsyncify(await rt.readFile(out)));
+    await host.writeFile(out, binaryenAsyncify(await host.readFile(out)));
     return await report(out, `tinygo:${reportLabel} + binaryen asyncify+-Oz`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -335,7 +321,7 @@ async function buildWithTinyGo(
  */
 async function buildGoLeaf(baseDir: string, buildArg: string, out: string): Promise<GoResult> {
   const baseEnv = {
-    ...rt.env.toObject(),
+    ...host.env.toObject(),
     TINYGO_CACHE: join(baseDir, ".tinygo-cache"),
     GOTMPDIR: baseDir,
   };
@@ -351,7 +337,7 @@ async function buildGoLeaf(baseDir: string, buildArg: string, out: string): Prom
     buildArg,
   ];
   const runBuild = async (env: Record<string, string>): Promise<GoResult | null> => {
-    const r = await new rt.Command("tinygo", {
+    const r = await new host.Command("tinygo", {
       args,
       cwd: baseDir,
       env,
@@ -366,7 +352,8 @@ async function buildGoLeaf(baseDir: string, buildArg: string, out: string): Prom
     );
     return { success: false, error: "tinygo build failed" };
   };
-  const haveRealWasmOpt = !!rt.env.get("WASMOPT") || await toolAvailable("wasm-opt", ["--version"]);
+  const haveRealWasmOpt = !!host.env.get("WASMOPT") ||
+    await toolAvailable("wasm-opt", ["--version"]);
   if (haveRealWasmOpt) {
     const fail = await runBuild(baseEnv);
     if (fail) return fail;
@@ -380,8 +367,8 @@ async function buildGoLeaf(baseDir: string, buildArg: string, out: string): Prom
   } finally {
     await shim.cleanup();
   }
-  const opt = binaryenOptimize(await rt.readFile(out));
-  if (opt.optimized) await rt.writeFile(out, opt.bytes);
+  const opt = binaryenOptimize(await host.readFile(out));
+  if (opt.optimized) await host.writeFile(out, opt.bytes);
   else {
     // Optional, but never silent (2026-09-28: this failure used to vanish without a word).
     console.warn(`  ⚠️  binaryen -Oz failed, shipping the unoptimised module: ${opt.error}`);
@@ -424,10 +411,10 @@ async function buildWithStd(
   // supports //go:wasmexport for wasip1 in this mode).
   const goos = "wasip1";
   const buildModeArgs = target === "reactor" ? ["-buildmode=c-shared"] : [];
-  const r = await new rt.Command("go", {
+  const r = await new host.Command("go", {
     args: ["build", ...buildModeArgs, "-o", out, buildArg],
     cwd: baseDir,
-    env: { ...rt.env.toObject(), GOOS: goos, GOARCH: "wasm" },
+    env: { ...host.env.toObject(), GOOS: goos, GOARCH: "wasm" },
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -467,17 +454,17 @@ export async function scaffoldGoProject(
   // file writes target paths inside it, so scaffolding into a not-yet-created dir (e.g.
   // `wasmtk init --lang=go newproj`) would otherwise fail with "No such cwd".
   try {
-    await rt.mkdir(baseDir, { recursive: true });
+    await host.mkdir(baseDir, { recursive: true });
   } catch { /* already exists (or a benign race) — fine */ }
 
   // go mod init (skip if go.mod already present)
   let hasGoMod = false;
   try {
-    await rt.stat(join(baseDir, "go.mod"));
+    await host.stat(join(baseDir, "go.mod"));
     hasGoMod = true;
   } catch { /* none */ }
   if (!hasGoMod) {
-    const r = await new rt.Command("go", {
+    const r = await new host.Command("go", {
       args: ["mod", "init", name],
       cwd: baseDir,
       stdout: "piped",
@@ -495,13 +482,13 @@ export async function scaffoldGoProject(
   const mainPath = join(baseDir, "main.go");
   let hasMain = false;
   try {
-    await rt.stat(mainPath);
+    await host.stat(mainPath);
     hasMain = true;
   } catch { /* none */ }
   if (hasMain) {
     console.log("   main.go already exists — leaving it as is.");
   } else {
-    await rt.writeTextFile(mainPath, scaffold === "library" ? MAIN_GO_LIBRARY : MAIN_GO_PROGRAM);
+    await host.writeTextFile(mainPath, scaffold === "library" ? MAIN_GO_LIBRARY : MAIN_GO_PROGRAM);
     console.log(`   wrote ${mainPath}`);
   }
   if (scaffold === "program") {
@@ -577,7 +564,7 @@ async function report(out: string, how: string): Promise<GoResult> {
   // half-fixed here: a build that wrote nothing at `out` was announced as success; sw117).
   let size = 0;
   try {
-    size = (await rt.readFile(out)).length;
+    size = (await host.readFile(out)).length;
   } catch (e) {
     console.error(
       `❌ wasmtk (go): the build reported success but ${out} could not be read: ` +

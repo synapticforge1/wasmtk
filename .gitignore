@@ -88,3 +88,6 @@ deno.upstream.json
 
 # Private, machine-local memory (workspace working-rules § Records): real paths, clone settings.
 cmem/local/
+# Open review issues (workspace review standard § 10, letter H37): never on GitHub.
+# scripts/check-privacy.ts refuses it if it is ever tracked (`git add -f`).
+cmem/review-issues.md

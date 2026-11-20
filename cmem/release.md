@@ -5,28 +5,27 @@ recorded in one place in every project; … release.md should be the file name w
 in the 'Release History' with a summary of what changed in each one"; workspace
 `release-process.md` § 5 U11, letter H33). Created 2026-11-10.
 
-**The process** is the workspace's `../cmem/release-process.md` (§ 5, U1–U12, in 🔒 the owner's
+**The process** is the workspace's `../workspace/cmem/release-process.md` (§ 5, U1–U12, in 🔒 the owner's
 order D1: "CI to check first, then push the tag, and then create the release page from the tag,
 then publish the package to the registry"); wasmtk's names are in
 [workflow.md](workflow.md) § "The release flow". In one line: the owner gives the go and the level
-→ `deno task bump <kind>` → `deno task release` pushes `main` (no tag) → `publish.yml`: `checks` on
-that commit → CI tags `vX.Y.Z` → the GitHub Release page from the tag → `deno publish` to JSR, the
-Rekor id read back.
+→ "review" (the five classes) to an empty re-review and a passing full suite → `deno task bump
+<kind>` → `deno task release` (its first step: the review gate; then every gate, locally) pushes
+`main` (no tag) → `publish.yml`: is this a new version → CI tags `vX.Y.Z` → the GitHub Release page
+from the tag → `deno publish` to JSR, the Rekor id read back. CI runs no test (H37 (e)).
 
 **Each entry:** the version and date, a summary of what changed (CHANGELOG.md § X.Y.Z is the
-user-facing text), the CI run, the read-backs (JSR provenance, the page), and what was checked as a
-user. 🔒 **From 2026-11-12 every entry ALSO records the two required reviews** (owner; workspace
-`review-process.md` § 0, letter H35), written BEFORE the bump, as two paragraphs at column 0 in
-EXACTLY the form `**Security review (vX.Y.Z):** <scope>; rounds <n>; ended by an empty round
-(round <n>, <YYYY-MM-DD>).` (and the same for `**Hardening review (vX.Y.Z):**`), the version the
-entry's own — `deno task release` refuses without both, and CI repeats the check on the bump commit
-(guard 0g, `--verify-commit`; [review-process.md](review-process.md) § 3). **This file stays plain
-Markdown** (since review round 4): no code fences, no HTML or comments (no line starting with `<`),
-no indentation of 4+ spaces or tabs, headings only as `#`… at column 0, no `===` / `---` lines, no
-lone CR and no line of non-space whitespace (round 5) — the gate refuses such a line by number,
-since each can hide text. The entries below predate the rule. Entries before this file existed are summaries of the records they came from; the full
-per-release logs stay in [roadmap.md](roadmap.md) § "Release status (date) — vX.Y.Z", which this
-file indexes (not moved, 2026-11-10).
+user-facing text), the CI run, the read-backs (JSR provenance, the page), what was checked as a
+user, the review's commit and class counts (the issues themselves stay in the gitignored
+`cmem/review-issues.md`), and **"Platforms verified"**: one result line per platform actually run —
+the version, the commit tested, the date, the platform ID and the suite counts — plus a
+`Tested on: <OS and version> (<platform ID>)` line each (workspace `platforms.md`; owner,
+2026-11-19). From 2026-11-12 to 2026-11-20 entries had to carry two strict review-record
+paragraphs, checked by guard 0g and CI (letter H35); both checks are retired (H37 (d), (e)) and so
+is the plain-Markdown rule they needed. Entries before this file existed are summaries of the
+records they came from; the full per-release logs are in
+[archive/roadmap-to-2026-11-20.md](archive/roadmap-to-2026-11-20.md) § "Release status (date) —
+vX.Y.Z" (moved there 2026-11-20, H38).
 
 ## Release History
 

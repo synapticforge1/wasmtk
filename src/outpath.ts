@@ -9,7 +9,7 @@
  * appends the new one; `assertNotInput` refuses any write that resolves to the input, an explicit
  * `-o` included.
  */
-import { resolve } from "@std/path";
+import { host } from "./host.ts";
 
 /** `input` with its extension (one of `from`, matched in any case, at the end) replaced by `to`;
  *  when none matches, `to` is APPENDED (`lib.bin` → `lib.bin.wat`), never the input itself. */
@@ -19,10 +19,10 @@ export function defaultOutPath(input: string, from: string[], to: string): strin
   return ext ? input.slice(0, input.length - ext.length) + to : input + to;
 }
 
-/** True when `a` and `b` name the same file (case-insensitively on Windows, as its file system). */
+/** True when `a` and `b` name the same file (case-insensitively on Windows, as its file system).
+ *  The comparison is the host's (src/host.ts): it is the one OS-specific rule here. */
 export function samePath(a: string, b: string): boolean {
-  const ra = resolve(a), rb = resolve(b);
-  return Deno.build.os === "windows" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+  return host.samePath(a, b);
 }
 
 /** Throws when `out` is the input file: a command must never write over its own source. */

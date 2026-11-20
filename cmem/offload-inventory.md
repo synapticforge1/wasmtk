@@ -1,6 +1,6 @@
 # Offload inventory — what wasmtk does that a sibling could own (H11, 2026-09-28)
 
-Answer to workspace letter **H11** (`../../cmem/handoffs.md`) and divergence row **I10**: the owner's
+Answer to workspace letter **H11** (closed; its text in `../workspace/cmem/archive/handoffs-to-2026-11-19.md`) and divergence row **I10**: the owner's
 direction is "anything wasmtk can offload in the main program will ultimately be a benefit" and
 "nothing moves before its trigger". **This is an inventory. Moved so far: `wasmbundle` →
 binaryang's `bundle()` (2026-10-26; note below).**
@@ -70,21 +70,72 @@ universalWasmLoader SPEC 3.0.0) plus workspace rows I2 / I10 / I11 / C1 / S4. Li
 
 ## Candidates
 
-| # | wasmtk responsibility (size) | could move to | trigger | blocker / note |
-| --- | --- | --- | --- | --- |
-| **1** | **Regex-over-WAT merge**: `wasmmerge.ts` (957 lines, ~45 regex sites), wasic's post-merge fixups (~27 sites: import insertion, `_start` init call, memory raising, heap-ptr scrape/re-seat), `wasmbundle.ts`'s 2 | **binaryang's parser + IR**: parse once, rewrite the IR, write once. The merge LOGIC stays ours | 🔒 **I2, owner-set**: binaryang one-front-end stage 5 **in a published version we pin**. Met on their `main`; not yet released | Needs a stable public IR-edit API (today's `compat/wabt` is parse→encode only). This retires our "never require a bracketing you did not emit" invariant and the `readDebugNames:false` contract. Highest value: every backend text-format change has broken these regexes (wabt-ts 1.3.5→1.4.0→1.4.1, binaryang 1.6.0), and so has an OPTIMIZER change: binaryang 1.8.1→1.12.0 (2026-10-13) printed multi-value block types by index, `(block (type 17)`, which the merge left pointing at the program's type 17 (every dynrt bundle invalid), and inlined `$__malloc` away, so allocator unification (found by that function) silently failed. Fixed: block types spelled inline; the heap global found by a library's `__heap_ptr` export |
-| **2** | **Module merging / static linking itself**: `mergeWasmWat` semantics (prefix mangling, WASI import dedupe, allocator unification, data relocation) + `runWasmBundle` (410 lines) | **binaryang `wasm-merge`** (Binaryen has one) | binaryang re-opens its DESIGN row (**owner decision**), AFTER #1 | wasmtk-specific semantics (unified `$__malloc`/`$__heap_ptr`, `memory.grow`/`call_indirect` guards) would stay a wasmtk pass over binaryang's IR even if generic merging moves |
-| **3** | **WAT post-passes in wasic**: `internalizeDynrtHostImports`, `injectDynrtMarshalExports`, `fixTerminalFallthru` + a private WAT tokenizer/parser/serializer (`tokenizeWat`, `parseWatNodes`, `serializeWat`) | binaryang IR (as #1) | #1 | `fixTerminalFallthru` works around our own emitter. It belongs IN the emitter (H12 / `ts2wasm`), not in a text pass anyone owns. The private WAT parser is a 4th in-house WAT parser (I2 counts three) |
-| **4** | **Validation before assembly** (none today), and the wast runner's validity oracle | binaryang `./wasm-validate` | `allFeatures` exported (requested 2026-09-28) | Unblocks 12 wast definitions V8 refuses for its limits. `compat/binaryen`'s `validate()` is a stub that returns 1: do not use it |
-| **5** | **Assemble/optimise/inspect wrappers**: `watToOptimisedWasm` (`wasic.ts:202`), `binaryenOptimize`/`binaryenAsyncify` (`binaryen.ts`), `convertFile`, `getWasmBytes`, `showInfo` | already binaryang; could call its TOOL subpaths (`./wat2wasm`, `./tools/wasm-opt`, `./wasm2wat`, `./wasm-objdump`) instead of the `compat` shims | none: a thinning, not a move | Low value on its own. Worth doing WITH #1, when the `compat/*` pins are revisited anyway. `showInfo` ≈ `wasm-objdump -x` |
-| **6** | **WASI preview-1 host + runner**: `wasiImports`, `runWasi`, `callExport` (`utils.ts`), exit-status handling | **wasmrt or wazmrt**: CLI `wasi` verb, or C ABI via Deno FFI | the owner's **runtime-slot** decision (goals 4), runtimes at 1.0.0 lockstep. 🔒 **NOT via our cross-engine gates (owner, 2026-09-28): wasmrt and wazmrt are NOT added to `engine_cross_check_tests` / `dync_cross_runtime_tests`. They run their own testing against our tests.** (That was the "cheapest foothold" from wazmrt's own vision; declined.) | wasmtk's `env` host imports (`console.log` UTF-16, `__host_print`, `__host_call`) need host-function registration, which means the FFI path, not the CLI. Exit codes are ALREADY aligned since 2026-09-28 (trap 1, `proc_exit(N)` → N), except that the runtimes mask `& 0xff` |
-| **7** | **Loader generation**: `bindgen.ts` (652 lines), a static TS loader (WASI shim, `cabi_realloc` strings, `cabi_post`, `any` box/unbox via `dynrt_*`, per-runtime byte loading) | universalWasmLoader-js (runtime `.wit` loading) | **owner decision** (bindgen emits a thin wrapper over the loader, or stays generative), and SPEC growth to cover `any` boxing and `__host_call`/`__host_print` | Today the two duplicate the canonical-ABI marshalling in different forms. Workspace S4 wants loader fixtures regenerated from ONE `wasmtk modc` run: do that regardless |
-| **8** | **The `.wast` runner** (`wast.ts`, 1,698 lines; SIMD/NaN/exnref trampoline, GC classifier, per-assertion verdict rules) + the vendored corpus (C2) | binaryang (the runner gates ITS assembler), or C1 convergence | **owner / C1** | It tests binaryang assembly + V8 execution; the runtimes run the corpus natively with 0 skips. 2026-09-28's work (100 runner-caused failures, 186 false passes) shows a runner is only as good as its verdict rules. Whoever owns it should inherit `compiler-bugs.md`'s two entries on it |
+(Table as a list — # · wasmtk responsibility (size) · could move to · trigger · blocker / note:)
+
+- **1** — wasmtk responsibility (size): **Regex-over-WAT merge**: `wasmmerge.ts` (957 lines, ~45
+  regex sites), wasic's post-merge fixups (~27 sites: import insertion, `_start` init call, memory
+  raising, heap-ptr scrape/re-seat), `wasmbundle.ts`'s 2 — could move to: **binaryang's parser +
+  IR**: parse once, rewrite the IR, write once. The merge LOGIC stays ours — trigger: 🔒 **I2,
+  owner-set**: binaryang one-front-end stage 5 **in a published version we pin**. Met on their
+  `main`; not yet released — blocker / note: Needs a stable public IR-edit API (today's
+  `compat/wabt` is parse→encode only). This retires our "never require a bracketing you did not
+  emit" invariant and the `readDebugNames:false` contract. Highest value: every backend text-format
+  change has broken these regexes (wabt-ts 1.3.5→1.4.0→1.4.1, binaryang 1.6.0), and so has an
+  OPTIMIZER change: binaryang 1.8.1→1.12.0 (2026-10-13) printed multi-value block types by index,
+  `(block (type 17)`, which the merge left pointing at the program's type 17 (every dynrt bundle
+  invalid), and inlined `$__malloc` away, so allocator unification (found by that function) silently
+  failed. Fixed: block types spelled inline; the heap global found by a library's `__heap_ptr`
+  export
+- **2** — wasmtk responsibility (size): **Module merging / static linking itself**: `mergeWasmWat`
+  semantics (prefix mangling, WASI import dedupe, allocator unification, data relocation) +
+  `runWasmBundle` (410 lines) — could move to: **binaryang `wasm-merge`** (Binaryen has one) —
+  trigger: binaryang re-opens its DESIGN row (**owner decision**), AFTER #1 — blocker / note:
+  wasmtk-specific semantics (unified `$__malloc`/`$__heap_ptr`, `memory.grow`/`call_indirect`
+  guards) would stay a wasmtk pass over binaryang's IR even if generic merging moves
+- **3** — wasmtk responsibility (size): **WAT post-passes in wasic**: `internalizeDynrtHostImports`,
+  `injectDynrtMarshalExports`, `fixTerminalFallthru` + a private WAT tokenizer/parser/serializer
+  (`tokenizeWat`, `parseWatNodes`, `serializeWat`) — could move to: binaryang IR (as #1) — trigger:
+  #1 — blocker / note: `fixTerminalFallthru` works around our own emitter. It belongs IN the emitter
+  (H12 / `ts2wasm`), not in a text pass anyone owns. The private WAT parser is a 4th in-house WAT
+  parser (I2 counts three)
+- **4** — wasmtk responsibility (size): **Validation before assembly** (none today), and the wast
+  runner's validity oracle — could move to: binaryang `./wasm-validate` — trigger: `allFeatures`
+  exported (requested 2026-09-28) — blocker / note: Unblocks 12 wast definitions V8 refuses for its
+  limits. `compat/binaryen`'s `validate()` is a stub that returns 1: do not use it
+- **5** — wasmtk responsibility (size): **Assemble/optimise/inspect wrappers**: `watToOptimisedWasm`
+  (`wasic.ts:202`), `binaryenOptimize`/`binaryenAsyncify` (`binaryen.ts`), `convertFile`,
+  `getWasmBytes`, `showInfo` — could move to: already binaryang; could call its TOOL subpaths
+  (`./wat2wasm`, `./tools/wasm-opt`, `./wasm2wat`, `./wasm-objdump`) instead of the `compat` shims —
+  trigger: none: a thinning, not a move — blocker / note: Low value on its own. Worth doing WITH #1,
+  when the `compat/*` pins are revisited anyway. `showInfo` ≈ `wasm-objdump -x`
+- **6** — wasmtk responsibility (size): **WASI preview-1 host + runner**: `wasiImports`, `runWasi`,
+  `callExport` (`utils.ts`), exit-status handling — could move to: **wasmrt or wazmrt**: CLI `wasi`
+  verb, or C ABI via Deno FFI — trigger: the owner's **runtime-slot** decision (goals 4), runtimes
+  at 1.0.0 lockstep. 🔒 **NOT via our cross-engine gates (owner, 2026-09-28): wasmrt and wazmrt are
+  NOT added to `engine_cross_check_tests` / `dync_cross_runtime_tests`. They run their own testing
+  against our tests.** (That was the "cheapest foothold" from wazmrt's own vision; declined.) —
+  blocker / note: wasmtk's `env` host imports (`console.log` UTF-16, `__host_print`, `__host_call`)
+  need host-function registration, which means the FFI path, not the CLI. Exit codes are ALREADY
+  aligned since 2026-09-28 (trap 1, `proc_exit(N)` → N), except that the runtimes mask `& 0xff`
+- **7** — wasmtk responsibility (size): **Loader generation**: `bindgen.ts` (652 lines), a static TS
+  loader (WASI shim, `cabi_realloc` strings, `cabi_post`, `any` box/unbox via `dynrt_*`, per-runtime
+  byte loading) — could move to: universalWasmLoader-js (runtime `.wit` loading) — trigger: **owner
+  decision** (bindgen emits a thin wrapper over the loader, or stays generative), and SPEC growth to
+  cover `any` boxing and `__host_call`/`__host_print` — blocker / note: Today the two duplicate the
+  canonical-ABI marshalling in different forms. Workspace S4 wants loader fixtures regenerated from
+  ONE `wasmtk modc` run: do that regardless
+- **8** — wasmtk responsibility (size): **The `.wast` runner** (`wast.ts`, 1,698 lines;
+  SIMD/NaN/exnref trampoline, GC classifier, per-assertion verdict rules) + the vendored corpus (C2)
+  — could move to: binaryang (the runner gates ITS assembler), or C1 convergence — trigger: **owner
+  / C1** — blocker / note: It tests binaryang assembly + V8 execution; the runtimes run the corpus
+  natively with 0 skips. 2026-09-28's work (100 runner-caused failures, 186 false passes) shows a
+  runner is only as good as its verdict rules. Whoever owns it should inherit `compiler-bugs.md`'s
+  two entries on it
 
 **Stays in wasmtk** (its role per workspace `projects.md`: orchestration, other-language
 producers, the corpus, the loaders' fixtures):
 
-- `rt.ts`, the Deno/Bun/Node host abstraction.
+- `host.ts` (was `rt.ts`), every system call: the Deno/Bun/Node host abstraction (H39).
 - The Go/Zig/Rust producers. Rust already delegates wholly to rsxtk.
 - `.wit` GENERATION (wasmtk is the source of truth for its ABI).
 - `main.ts` CLI plumbing.

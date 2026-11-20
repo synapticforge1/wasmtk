@@ -1,0 +1,19 @@
+{
+  "$comment": "Every package in deno.lock with its licence, read from the registry (JSR: the package's LICENSE file; npm: the registry's license field) on 2026-11-20. scripts/check-licences.ts fails on a package not listed here or a licence not in `allowed`. A new dependency is added here by hand after reading its licence.",
+  "allowed": ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "0BSD"],
+  "packages": {
+    "jsr:@jrmarcum/binaryang@4.1.1": { "licence": "MIT", "note": "ships NOTICE.md for its wabt / binaryen ports (Apache-2.0)" },
+    "jsr:@std/assert@1.0.19": { "licence": "MIT", "note": "tests only" },
+    "jsr:@std/cli@1.0.32": { "licence": "MIT" },
+    "jsr:@std/fmt@1.0.1": { "licence": "MIT", "note": "tests only" },
+    "jsr:@std/fs@1.0.0": { "licence": "MIT", "note": "tests only; no LICENSE file in this version's package, deno_std is MIT" },
+    "jsr:@std/fs@1.0.1": { "licence": "MIT", "note": "tests only" },
+    "jsr:@std/fs@1.0.23": { "licence": "MIT", "note": "tests only" },
+    "jsr:@std/internal@1.0.14": { "licence": "MIT" },
+    "jsr:@std/path@1.0.2": { "licence": "MIT", "note": "tests only; no LICENSE file in this version's package, deno_std is MIT" },
+    "jsr:@std/path@1.1.4": { "licence": "MIT" },
+    "jsr:@std/path@1.1.6": { "licence": "MIT" },
+    "npm:wasm2js@0.2.0": { "licence": "MIT" },
+    "npm:minimist@1.2.8": { "licence": "MIT", "note": "wasm2js's dependency" }
+  }
+}

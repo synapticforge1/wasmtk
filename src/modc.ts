@@ -35,9 +35,8 @@
  * The source file must contain at least one `export function` declaration.
  */
 
-import { basename, dirname } from "@std/path";
 import { compileLibTs } from "./wasic.ts";
-import { rt } from "./rt.ts";
+import { basename, dirname, host } from "./host.ts";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -71,7 +70,7 @@ export async function compileModule(path: string, outPath?: string): Promise<boo
   console.log(`✅ Building Library: ${basename(out)}`);
 
   try {
-    if (outPath) await rt.mkdir(dirname(outPath), { recursive: true });
+    if (outPath) await host.mkdir(dirname(outPath), { recursive: true });
 
     const result = await compileLibTs(path, out);
     if (!result.success) {

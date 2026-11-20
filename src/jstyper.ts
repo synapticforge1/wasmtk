@@ -12,6 +12,7 @@
  */
 
 import { assertNotInput, defaultOutPath } from "./outpath.ts";
+import { host } from "./host.ts";
 
 /** The JavaScript extensions whose sibling `.d.ts` / `.ts` the paths are derived from (sw113). */
 const JS_EXTS = [".js", ".mjs", ".cjs"];
@@ -311,7 +312,7 @@ export function generateTypedTs(
  * writes a skeleton `.d.ts` (`dtsOnly`), or merges the JS bodies with the
  * typed `.d.ts` declarations and writes the resulting typed `.ts`. With
  * `dryRun` the output is printed to stdout instead of being written. Missing
- * input files cause an error message and `Deno.exit(1)`; type warnings are
+ * input files cause an error message and exit code 1; type warnings are
  * printed to stderr.
  *
  * @param jsFile   Path to the input `.js` file.
@@ -325,10 +326,10 @@ export async function runJstyper(
 
   let jsText: string;
   try {
-    jsText = await Deno.readTextFile(jsFile);
+    jsText = await host.readTextFile(jsFile);
   } catch {
     console.error(`❌ jstyper: cannot read ${jsFile}`);
-    Deno.exit(1);
+    host.exit(1);
     return;
   }
 
@@ -343,7 +344,7 @@ export async function runJstyper(
       console.log(`--- ${dest} ---`);
       console.log(skeleton);
     } else {
-      await Deno.writeTextFile(dest, skeleton);
+      await host.writeTextFile(dest, skeleton);
       console.log(`✅ jstyper: wrote ${dest}`);
     }
     return;
@@ -358,7 +359,7 @@ export async function runJstyper(
 
   let dtsText: string;
   try {
-    dtsText = await Deno.readTextFile(dtsPath);
+    dtsText = await host.readTextFile(dtsPath);
   } catch {
     console.error(
       `❌ jstyper: no type declarations found for '${jsBase}'\n\n` +
@@ -368,7 +369,7 @@ export async function runJstyper(
         `  (i32, f64, bool, string, void) and re-run:\n` +
         `    wasmtk jstyper ${jsBase}`,
     );
-    Deno.exit(1);
+    host.exit(1);
     return;
   }
 
@@ -384,7 +385,7 @@ export async function runJstyper(
   } else {
     assertNotInput(jsFile, dest, "jstyper");
     assertNotInput(dtsPath, dest, "jstyper");
-    await Deno.writeTextFile(dest, source);
+    await host.writeTextFile(dest, source);
     console.log(`✅ jstyper: wrote ${dest}`);
   }
 }

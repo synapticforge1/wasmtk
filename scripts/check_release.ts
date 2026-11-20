@@ -3,70 +3,40 @@
  * a fake). The push half of release.ts is rehearsed against a scratch bare origin instead
  * (cmem/workflow.md § The release flow, U4). Review rounds 1–2, 2026-11-12.
  *
- * The review record (guard 0g, `reviewsRecorded` / `reviewRecordProblem`) — the STRICT form
- *   "**Security review (v<version>):** <scope>; rounds <n>; ended by an empty round (round <n>, <YYYY-MM-DD>).":
- *   R1  both in the form → no problem          R2  no entry → refused
- *   R3  only the security review → the hardening review named as missing
- *   R5  another version's records do not count R6  `### 4.0.0-rc.1` is not 4.0.0
- *   R7  unfinished phrasings round 2 found ("NOT done … —", "hasn't …", "TODO:", "planned to be",
- *       a denial after the phrase) → each refused
- *   R8  the template's own placeholder "(round n, date)" → refused
- *   R9  last round ≠ round count; an impossible date; text after the final period → refused
- *   R11 a reviewed entry before, or AFTER, § Release History does not count
- *   R12 a `####` subheading stays inside the entry; R13 CRLF; R14 a record given twice → refused
+ * The review gate (guard 0g since 2026-11-20, `scripts/review-gate.ts`; letter H37 (d)) — it
+ * replaced the record-paragraph cases R1–R16 and X1 (the retired `--verify-commit`):
+ *   G1  "Review complete: <sha>" → the commit; G2 "none", no line, two lines, not hex → refused
+ *   G3  a BOM / CRLF file still reads    G4 the bump, CHANGELOG.md and cmem/ are reviewed;
+ *       anything else, and the issues file itself, are not
+ *   G5  passes: an ancestor, only allowed files changed (committed AND in the working tree)
+ *   G6  no issues file; G7 not an ancestor; G8 an unknown commit; G9 a src/ change committed
+ *       since; G10 an uncommitted src/ change → each refused, by name
  * The bump only (guards 0a / 0b, `releaseBlockers`, `bumpOnly`):
  *   B1  untracked / unrelated paths block, the bump's files pass; B2 rename / add / delete block
  *   B3  version-only JSON → accepted; B4 a top-level OR NESTED (`imports`) change → refused
  *   B5  utils.ts: VERSION only → accepted, in any spacing; another edit → refused
  * `lsRemoteHas`: L1 the exact ref only; a warning line that MENTIONS the ref is not one
- * The commit gate CI repeats (`verifyReleaseCommit`, a fake git):
- *   V1  a `bump to` commit, version lines only, both records → passes
- *   V2  a wrong subject; V3 a fourth file in the commit; V4 a ride-along inside deno.json;
- *   V5  the records missing at HEAD → each refused, by name
+ * The commit gate for a bump already committed (`verifyReleaseCommit`, a fake git):
+ *   V1  a `bump to` commit, version lines only → passes
+ *   V2  a wrong subject; V3 a fourth file in the commit; V4 a ride-along inside deno.json
+ *       → each refused, by name
  * Round 3:
  *   V6  deno.json bumped alone (package.json / VERSION left behind) → refused, each by name
  *   V7  HEAD^ already at the version (a "bump" that bumps nothing) → refused
  *   V8  a merge / V9 a root commit is not a release commit
  *   B6  a VERSION in a comment is not the constant; two constants → refused
- * Round 4 — the record names its version, and cmem/release.md must be PLAIN Markdown:
- *   R9d an empty scope; R9e a scope with a backtick / <  → refused
- *   R10a–p every construct that can hide text (comments, fences — in lists and quotes too —
- *       `<?`, `<style>`, CDATA, `<!X`, `<!-->`, 4-space / tab indentation) → refused BY LINE
- *   R11c–e an indented / tab / setext heading → refused   R11f an entry cannot borrow the next
- *       entry's records (they name their version)   R15 an inline `<!--` is text
- *   R16 the REAL cmem/release.md is inside the subset
- *   V10 no cmem/release.md at HEAD   B7 a release file that is not JSON
- *   X1  the `--verify-commit` COMMAND's exit codes, in a real git repo
+ * Round 4: B7 a release file that is not JSON
  *
  * Usage (from the repo root):  bun scripts/check_release.ts
  */
-import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   bumpOnly,
   type Git,
   lsRemoteHas,
-  markdownSubsetProblems,
   releaseBlockers,
-  reviewsRecorded,
   verifyReleaseCommit,
 } from "./release.ts";
-
-const secFor = (v: string) =>
-  `**Security review (v${v}):** everything since v3.0.0; rounds 3; ended by an empty round (round 3, 2026-12-01).`;
-const hardFor = (v: string) =>
-  `**Hardening review (v${v}):** the seven axes; rounds 2; ended by an empty round (round 2, 2026-12-01).`;
-const SEC = secFor("4.0.0");
-const HARD = hardFor("4.0.0");
-const both = (v: string) =>
-  `### ${v} — 2026-12-01\n\n**Summary.** Something changed.\n\n${secFor(v)}\n\n${hardFor(v)}\n`;
-const SUBSET =
-  /line \d+: (a code fence|a line starting with "<"|indented 4\+ spaces|a tab|an indented heading|a heading without a space|a "===" \/ "---" line)/;
-const doc = (...entries: string[]) => `# release.md\n\n## Release History\n\n${entries.join("\n")}`;
-const entry = (...paras: string[]) => doc(`### 4.0.0\n\n${paras.join("\n\n")}\n`);
+import { reviewedCommit, reviewGate, unreviewedFiles } from "./review-gate.ts";
 
 let failed = 0;
 let cases = 0;
@@ -81,212 +51,6 @@ const is = (name: string, ok: boolean, got: string) => {
   if (!ok) failed++;
   console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${got}`);
 };
-
-// ── the review record ──
-check("R1 both in the strict form", reviewsRecorded(doc(both("4.0.0")), "4.0.0"), null);
-check("R2 no entry", reviewsRecorded(doc(both("3.0.0")), "4.0.0"), /no "### 4\.0\.0" entry/);
-check("R3 hardening missing", reviewsRecorded(entry(SEC), "4.0.0"), /no \*\*Hardening review/);
-check(
-  "R5 another version's records do not count",
-  reviewsRecorded(doc("### 4.0.0 — 2026-12-02\n\n**Summary.** none\n", both("3.0.0")), "4.0.0"),
-  /no \*\*Security review/,
-);
-check(
-  "R6 4.0.0-rc.1 is not 4.0.0",
-  reviewsRecorded(doc(both("4.0.0-rc.1")), "4.0.0"),
-  /no "### 4\.0\.0" entry/,
-);
-const S = "**Security review (v4.0.0):**";
-for (
-  const [label, sec] of [
-    ["NOT done … —", `${S} NOT done for v3.0.4 — ended by an empty round (round 2, 2026-12-01).`],
-    ["hasn't … yet", `${S} it hasn't ended by an empty round (round 2) yet.`],
-    ["TODO:", `${S} TODO: ended by an empty round (round 2).`],
-    ["planned to be", `${S} planned to be ended by an empty round (round 2, 2026-12-01).`],
-    [
-      "a denial after",
-      `${S} x; rounds 2; ended by an empty round (round 2, 2026-12-01). No — round 2 found 3.`,
-    ],
-  ]
-) {
-  check(
-    `R7 unfinished: ${label}`,
-    reviewsRecorded(entry(sec, HARD), "4.0.0"),
-    /security review is not in the recorded form/,
-  );
-}
-check(
-  "R8 the template's placeholder",
-  reviewsRecorded(
-    entry(`${S} <scope>; rounds <n>; ended by an empty round (round n, date).`, HARD),
-    "4.0.0",
-  ),
-  /security review is not in the recorded form/,
-);
-check(
-  "R9a last round ≠ round count",
-  reviewsRecorded(
-    entry(`${S} x; rounds 3; ended by an empty round (round 2, 2026-12-01).`, HARD),
-    "4.0.0",
-  ),
-  /last round \(2\) is not its round count \(3\)/,
-);
-check(
-  "R9b an impossible date",
-  reviewsRecorded(
-    entry(`${S} x; rounds 2; ended by an empty round (round 2, 2026-02-30).`, HARD),
-    "4.0.0",
-  ),
-  /2026-02-30 is not a real date/,
-);
-check(
-  "R9c rounds 0",
-  reviewsRecorded(
-    entry(`${S} x; rounds 0; ended by an empty round (round 0, 2026-12-01).`, HARD),
-    "4.0.0",
-  ),
-  /round count \(0\)/,
-);
-check(
-  "R9d an EMPTY scope → refused",
-  reviewsRecorded(
-    entry(`${S} ; rounds 1; ended by an empty round (round 1, 2026-12-01).`, HARD),
-    "4.0.0",
-  ),
-  /security review is not in the recorded form/,
-);
-check(
-  "R9e a scope that is not plain text (a backtick / <) → refused",
-  reviewsRecorded(
-    entry(`${S} the \`x\` tool; rounds 1; ended by an empty round (round 1, 2026-12-01).`, HARD),
-    "4.0.0",
-  ),
-  /scope .* is not plain text/,
-);
-// Round 4: the file must be PLAIN Markdown — every construct that can hide text is refused by
-// line, whether or not it hides the records (rounds 2–3 had emulated CommonMark and missed cases).
-for (
-  const [label, md] of [
-    ["R10a a closed HTML comment", doc(`<!--\n${both("4.0.0")}\n-->\n`)],
-    ["R10b an UNCLOSED HTML comment", doc(`<!--\n${both("4.0.0")}\n`)],
-    ["R10c a ``` fence", entry("```", "", SEC, HARD, "```")],
-    ["R10d a ```` fence", entry("````", "```", SEC, HARD, "```", "````")],
-    ["R10e an UNCLOSED ~~~ fence", entry("~~~", "", SEC, HARD)],
-    ["R10f a comment opened in a LIST ITEM", entry("- <!--", `  ${SEC}`, `  ${HARD}`, "  -->")],
-    ["R10g a fence in a list item", entry("- ```\n  code\n```", SEC, HARD)],
-    ["R10h a <? … ?> block", entry("<?", SEC, HARD, "?>")],
-    ["R10i a <style> block", entry("<style>", SEC, HARD, "</style>")],
-    ["R10j a <![CDATA[ block", entry("<![CDATA[", SEC, HARD, "]]>")],
-    ["R10k a <!X declaration", entry("<!X", SEC, HARD, ">")],
-    ["R10l a record indented 4 spaces", entry(`    ${SEC}`, HARD)],
-    ["R10m a tab-indented line", entry(`\t${SEC}`, HARD)],
-    ["R10n a quoted fence", entry("> ```", SEC, HARD)],
-    ["R10o a <!--> line", entry("<!-->", SEC, HARD)],
-    ["R10p a numbered fence in a paragraph", entry("text\n5. ```", SEC, HARD)],
-  ]
-) check(`${label} → refused by line`, reviewsRecorded(md, "4.0.0"), SUBSET);
-for (
-  const [label, md] of [
-    ["R11c an INDENTED heading", doc("### 4.0.0\n\nNotes.\n\n ### 3.9.9\n", both("3.9.9"))],
-    ["R11d a heading with a TAB", doc("### 4.0.0\n\nNotes.\n\n###\t3.9.9\n", both("3.9.9"))],
-    ["R11e a SETEXT heading", doc("### 4.0.0\n\nNotes.\n\n3.9.9\n-----\n", both("3.9.9"))],
-  ]
-) {
-  check(
-    `${label} → refused by line (an entry could run into it)`,
-    reviewsRecorded(md, "4.0.0"),
-    SUBSET,
-  );
-}
-check(
-  "R11f the next entry's records NAME its version: an entry cannot borrow them",
-  reviewsRecorded(
-    doc("### 4.0.0\n\nNotes.\n", `#### 3.9.9\n\n${secFor("3.9.9")}\n\n${hardFor("3.9.9")}\n`),
-    "4.0.0",
-  ),
-  /security review is not in the recorded form "\*\*Security review \(v4\.0\.0\):\*\*/,
-);
-check(
-  "R11a a reviewed entry BEFORE § Release History",
-  reviewsRecorded(
-    `# r\n\n## Plans\n\n${both("4.0.0")}\n## Release History\n\n### 4.0.0\n\n**Summary.** x\n`,
-    "4.0.0",
-  ),
-  /no \*\*Security review/,
-);
-check(
-  "R11b a reviewed entry in a section AFTER § Release History",
-  reviewsRecorded(
-    `# r\n\n## Release History\n\n### 3.0.0\n\n**Summary.** x\n\n## Plans\n\n${both("4.0.0")}`,
-    "4.0.0",
-  ),
-  /no "### 4\.0\.0" entry/,
-);
-check(
-  "R12 a #### subheading stays inside",
-  reviewsRecorded(entry("#### Reviews", SEC, HARD), "4.0.0"),
-  null,
-);
-check("R13 CRLF", reviewsRecorded(doc(both("4.0.0")).replace(/\n/g, "\r\n"), "4.0.0"), null);
-check(
-  "R14 a record given twice",
-  reviewsRecorded(entry(SEC, SEC, HARD), "4.0.0"),
-  /security review twice/,
-);
-check(
-  "R15 an inline `<!--` mid-line in prose is text (no false refusal)",
-  reviewsRecorded(entry("Note: write `<!--` to hide; text <!-- here too.", SEC, HARD), "4.0.0"),
-  null,
-);
-// Round 5.
-check(
-  "R17 a LONE CR before a comment (CommonMark ends the line there) → refused by line",
-  reviewsRecorded(entry("Notes.\r\r<!-- not done yet", SEC, HARD, "-->"), "4.0.0"),
-  /line \d+: a lone carriage return/,
-);
-check(
-  "R18 a 'blank' line of U+00A0 (not blank to CommonMark) joining a link title → refused",
-  reviewsRecorded(entry("[x]: /u '\n ", SEC, " ", HARD, " \n'"), "4.0.0"),
-  /line \d+: a line of whitespace other than spaces \/ tabs/,
-);
-check(
-  "R19 a setext underline with a trailing TAB → refused",
-  reviewsRecorded(
-    doc("### 4.0.0\n\nNotes.\n===\t\n", both("4.0.0").replace("### 4.0.0", "#### x")),
-    "4.0.0",
-  ),
-  /line \d+: a "===" \/ "---" line/,
-);
-check(
-  "R20 a NESTED marker (> - ```) before a fence → refused",
-  reviewsRecorded(entry("> - ```", SEC, HARD), "4.0.0"),
-  /line \d+: a code fence/,
-);
-check(
-  "R21 no '## Release History' heading (a lowercase one) → refused, never a pass",
-  reviewsRecorded(`# r\n\n## Release history\n\n${both("4.0.0")}`, "4.0.0"),
-  /no "## Release History" section/,
-);
-for (const [label, scope] of [["<", "<!-- NOT DONE --> all"], ["a backslash", "all \\ of it"]]) {
-  check(
-    `R9f a scope with ${label} → refused`,
-    reviewsRecorded(
-      entry(`${S} ${scope}; rounds 1; ended by an empty round (round 1, 2026-12-01).`, HARD),
-      "4.0.0",
-    ),
-    /scope .* is not plain text/,
-  );
-}
-{
-  // The REAL cmem/release.md is inside the subset (a false refusal would block every release).
-  const here = dirname(fileURLToPath(import.meta.url));
-  const real = markdownSubsetProblems(readFileSync(join(here, "..", "cmem", "release.md"), "utf8"));
-  is(
-    "R16 the real cmem/release.md is plain Markdown",
-    real.length === 0,
-    real.join(" | ") || "yes",
-  );
-}
 
 // ── the bump only ──
 {
@@ -345,7 +109,6 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
 
 // ── the commit gate CI repeats ──
 {
-  const MD = `# r\n\n## Release History\n\n${both("4.0.0")}`;
   const PJ = JSON.stringify({ name: "@x/y", version: "3.0.0", type: "module" }, null, 2) + "\n";
   const UT = 'export const VERSION = "3.0.0";\nexport const X = 1;\n';
   // All three release files, bumped (round 3: the gate now reads every one, changed or not).
@@ -361,7 +124,6 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
     subject?: string;
     diff?: string;
     files?: Record<string, [string, string]>;
-    md?: string | null;
     parents?: number;
   } = {}): Git => {
     const files = { ...BUMPED, ...o.files };
@@ -382,11 +144,6 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
       }
       if (args[0] === "show") {
         const [rev, path] = args[1].split(":");
-        if (path === "cmem/release.md") {
-          return o.md === null
-            ? { code: 128, out: "", err: "fatal: no such path" }
-            : { code: 0, out: o.md ?? MD, err: "" };
-        }
         const pair = files[path];
         if (!pair) return { code: 128, out: "", err: "fatal: no such path" };
         return { code: 0, out: rev === "HEAD^" ? pair[0] : pair[1], err: "" };
@@ -415,16 +172,6 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
       commitGit({ files: { "deno.json": [DJ, bumpV(DJ).replace('"d"', '"X"')] } }),
     ),
     /deno\.json changes more than its version line/,
-  );
-  check(
-    "V5 the records missing at HEAD",
-    verifyReleaseCommit("4.0.0", commitGit({ md: doc("### 4.0.0\n\n**Summary.** none\n") })),
-    /no \*\*Security review/,
-  );
-  check(
-    "V10 HEAD has NO cmem/release.md → refused (round 4: never reached before)",
-    verifyReleaseCommit("4.0.0", commitGit({ md: null })),
-    /HEAD has no cmem\/release\.md/,
   );
   // Round 3.
   check(
@@ -495,52 +242,93 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
   );
 }
 {
-  // X1: the `--verify-commit` COMMAND, as CI runs it — its exit code is the gate (round 4: a
-  // mutant making it exit 0 on a refusal left every case green). A real git repo in a temp folder.
-  const here = dirname(fileURLToPath(import.meta.url));
-  const dir = mkdtempSync(join(tmpdir(), "wasmtk-check-release-"));
-  try {
-    const g = (...a: string[]) =>
-      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], {
-        cwd: dir,
-        encoding: "utf8",
-      });
-    const put = (p: string, s: string) => {
-      mkdirSync(dirname(join(dir, p)), { recursive: true });
-      writeFileSync(join(dir, p), s);
-    };
-    const files = (v: string) => {
-      put("deno.json", JSON.stringify({ name: "@x/y", version: v }, null, 2) + "\n");
-      put("package.json", JSON.stringify({ name: "@x/y", version: v }, null, 2) + "\n");
-      put("src/utils.ts", `export const VERSION = "${v}";\n`);
-    };
-    g("init", "-q", "-b", "main");
-    files("3.0.0");
-    put("cmem/release.md", doc(both("4.0.0")));
-    for (const f of ["release.ts", "publish-workflow.ts"]) {
-      cpSync(join(here, f), join(dir, "scripts", f));
+  // ── the review gate (guard 0g since 2026-11-20, scripts/review-gate.ts; letter H37 (d)) ──
+  const SHA = "0123456789abcdef0123456789abcdef01234567";
+  const RF = ["deno.json", "package.json", "src/utils.ts"];
+  const done = `# review-issues\n\nReview complete: ${SHA}\n`;
+  const r1 = reviewedCommit(done);
+  is(
+    'G1 "Review complete: <sha>" → the commit',
+    "commit" in r1 && r1.commit === SHA,
+    JSON.stringify(r1),
+  );
+  const refusals = [
+    reviewedCommit("Review complete: none\n"),
+    reviewedCommit("# nothing here\n"),
+    reviewedCommit(`Review complete: ${SHA}\nReview complete: ${SHA}\n`),
+    reviewedCommit("Review complete: main\n"),
+    reviewedCommit("Review complete:\n"),
+  ];
+  is(
+    "G2 none / no line / two lines / not hex / empty → each refused",
+    refusals.every((r) => "refusal" in r) &&
+      "refusal" in refusals[0] && /says no review is complete/.test(refusals[0].refusal),
+    refusals.map((r) => ("refusal" in r ? r.refusal : "ACCEPTED")).join(" | "),
+  );
+  const bom = reviewedCommit(`﻿Review complete: ${SHA}\r\n`);
+  is("G3 a BOM and CRLF still read", "commit" in bom && bom.commit === SHA, JSON.stringify(bom));
+  const outside = unreviewedFiles(
+    [
+      "deno.json",
+      "package.json",
+      "src/utils.ts",
+      "CHANGELOG.md",
+      "cmem/release.md",
+      "cmem/STATE.md",
+      "cmem/review-issues.md",
+      "src/wasic.ts",
+      "README.md",
+      ".github/workflows/publish.yml",
+    ],
+    RF,
+  );
+  is(
+    "G4 the bump, CHANGELOG.md and cmem/ are reviewed; the issues file and anything else are not",
+    outside.join(",") ===
+      "cmem/review-issues.md,src/wasic.ts,README.md,.github/workflows/publish.yml",
+    outside.join(","),
+  );
+  const fake = (o: { anc?: number; committed?: string; working?: string } = {}): Git => (args) => {
+    if (args[0] === "merge-base") {
+      const code = o.anc ?? 0;
+      return { code, out: "", err: code > 1 ? `fatal: Not a valid commit name ${args[2]}` : "" };
     }
-    g("add", "-A");
-    g("commit", "-q", "-m", "base");
-    files("4.0.0");
-    g("commit", "-q", "-am", "bump to v4.0.0");
-    const run = () =>
-      spawnSync("bun", ["scripts/release.ts", "--verify-commit"], { cwd: dir, encoding: "utf8" });
-    const ok = run();
-    put("README.md", "x\n");
-    g("add", "-A");
-    g("commit", "-q", "-m", "not a bump");
-    const bad = run();
-    is(
-      "X1 `release.ts --verify-commit`: exit 0 on a bump commit, exit 1 with ::error:: on another",
-      ok.status === 0 && bad.status === 1 && /::error::v4\.0\.0: HEAD's subject/.test(bad.stderr),
-      `bump → exit ${ok.status}; non-bump → exit ${bad.status} ${
-        (ok.status === 0 ? bad.stderr : ok.stderr + ok.stdout).trim().split("\n")[0]
-      }`,
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    if (args[0] === "diff" && args.length === 5) {
+      return { code: 0, out: o.committed ?? "", err: "" };
+    }
+    if (args[0] === "diff") return { code: 0, out: o.working ?? "", err: "" };
+    return { code: 1, out: "", err: "fake git: unexpected" };
+  };
+  check(
+    "G5 an ancestor; only the bump, CHANGELOG.md and cmem/ changed since → passes",
+    reviewGate(
+      done,
+      fake({ committed: "cmem/STATE.md\nCHANGELOG.md\n", working: "deno.json\npackage.json\n" }),
+      RF,
+    ),
+    null,
+  );
+  check("G6 no issues file → refused", reviewGate(null, fake(), RF), /no cmem\/review-issues\.md/);
+  check(
+    "G7 not an ancestor of HEAD → refused",
+    reviewGate(done, fake({ anc: 1 }), RF),
+    /not an ancestor/,
+  );
+  check(
+    "G8 an unknown commit → refused",
+    reviewGate(done, fake({ anc: 128 }), RF),
+    /not a commit here/,
+  );
+  check(
+    "G9 a src/ change COMMITTED since the review → refused, by name",
+    reviewGate(done, fake({ committed: "cmem/STATE.md\nsrc/wasic.ts\n" }), RF),
+    /^  src\/wasic\.ts$/,
+  );
+  check(
+    "G10 an UNCOMMITTED src/ change → refused, by name",
+    reviewGate(done, fake({ working: "src/host.ts\n" }), RF),
+    /^  src\/host\.ts$/,
+  );
 }
 {
   const h = '// export const VERSION = "3.0.0";\nexport const VERSION = "3.0.0";\n';
