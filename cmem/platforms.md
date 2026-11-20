@@ -28,11 +28,14 @@ Machine names and paths are in the gitignored `cmem/local/`, never here.
 
 ## Engines
 
-| engine | runtime | status | measured |
-| --- | --- | --- | --- |
-| V8 | Deno 2.9.8 | `tested` | 2026-11-20, win-x64: the full gate (wasi 509/509, golden 568, wast 64,506 / 0 / 16, cross-check 1374) and `--self-check` |
-| JavaScriptCore | Bun 1.4.4 | `pending` | the product resolves its dependencies through deno.json's import map, which Bun does not read (deno-exit-plan.md P2); `src/host.ts` has the Bun branches. The repo's scripts already run on Bun |
-| V8 | Node | `pending` | deno-exit-plan.md (M1: Node LTS); not run |
+(Table as a list — engine · runtime · status · measured:)
+
+- V8 — runtime: Deno 2.9.8 — status: `tested` — measured: 2026-11-20, win-x64: the full gate (wasi
+  509/509, golden 568, wast 64,506 / 0 / 16, cross-check 1374) and `--self-check`
+- JavaScriptCore — runtime: Bun 1.4.4 — status: `pending` — measured: the product resolves its
+  dependencies through deno.json's import map, which Bun does not read (deno-exit-plan.md P2);
+  `src/host.ts` has the Bun branches. The repo's scripts already run on Bun
+- V8 — runtime: Node — status: `pending` — measured: deno-exit-plan.md (M1: Node LTS); not run
 
 ## Platforms
 
@@ -45,8 +48,10 @@ Machine names and paths are in the gitignored `cmem/local/`, never here.
 | `mac-x64` | `pending` | no machine yet (the owner's Intel Mac) |
 | `mac-arm64` | `pending` | no machine yet |
 
-A pure-source package (JSR): no per-platform build, no glibc / musl build; the baseline in the
-workspace file does not apply.
+A pure-source package (JSR): no per-platform build, so no target name and no glibc / musl build;
+the baseline in the workspace file does not apply. "Tested on" names a role (the dev machine), the
+machine itself is in `cmem/local/`. Every platform-specific setting in code carries its IDs in a
+comment (`[win-x64, win-arm64]`, six in `src/host.ts`, 2026-11-20): search for the ID.
 
 ## win-x64
 

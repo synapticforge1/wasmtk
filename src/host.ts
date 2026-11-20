@@ -39,6 +39,7 @@ async function readTextFile(path: string): Promise<string> {
  * it is being used by another process". Transient by nature: a just-exited child process, an
  * indexer or an AV scanner still holds a handle for a few milliseconds after we are done with it.
  */
+// [win-x64, win-arm64] the sharing-violation retry (cmem/platforms.md § win-x64)
 function isWindowsSharingViolation(e: unknown): boolean {
   const m = e instanceof Error ? e.message : String(e);
   return /os error 32|being used by another process|EBUSY/i.test(m);
@@ -77,6 +78,7 @@ async function retryOnSharingViolation<T>(op: () => Promise<T>): Promise<T> {
 function isDevicePath(path: string): boolean {
   if (/^\/dev\/|^\/proc\/self\/fd\//.test(path)) return true;
   if (build.os !== "windows") return false;
+  // [win-x64, win-arm64] Windows' reserved device names
   if (/^\\\\[.?]\\/.test(path)) return true; // \\.\NUL, \\?\…
   const stem = path.split(/[\\/]/).pop()!.split(".")[0].replace(/[ :]+$/, "");
   return /^(NUL|CON|PRN|AUX|COM[1-9]|LPT[1-9])$/i.test(stem);
@@ -107,6 +109,7 @@ async function writeAtomic(path: string, data: Uint8Array | string): Promise<voi
     // x.wat -o NUL` failed the same way); measured under both permission forms. So: the `\\.\`
     // spelling, opened for writing only.
     let devicePath = path;
+    // [win-x64, win-arm64] a device name through its `\\.\` form (ld136)
     if (build.os === "windows" && !/^\\\\[.?]\\/.test(path)) {
       const stem = path.split(/[\\/]/).pop()!.split(".")[0].replace(/[ :]+$/, "").toUpperCase();
       devicePath = `\\\\.\\${stem}`;
@@ -268,6 +271,7 @@ async function makeTempDir(prefix: string): Promise<string> {
 /** True when `a` and `b` name the same file (case-insensitively on Windows, as its file system). */
 function samePath(a: string, b: string): boolean {
   const ra = resolve(a), rb = resolve(b);
+  // [win-x64, win-arm64] case-insensitive, as the file system
   return build.os === "windows" ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
 }
 
@@ -319,6 +323,7 @@ function scriptRunner(): string[] {
  */
 async function writeLauncher(dir: string, name: string, command: string[]): Promise<string> {
   const quoted = command.map((c) => `"${c}"`).join(" ");
+  // [win-x64, win-arm64] a `.cmd` launcher; elsewhere a `#!/bin/sh` script, mode 755
   if (build.os === "windows") {
     const p = join(dir, `${name}.cmd`);
     await writeTextFile(p, `@echo off\r\n${quoted} %*\r\n`);
@@ -336,6 +341,7 @@ async function writeLauncher(dir: string, name: string, command: string[]): Prom
  * (owner decision M7, deno-exit-plan.md: keep this fix). A no-op elsewhere and on Bun.
  */
 function setupConsole(): void {
+  // [win-x64, win-arm64] SetConsoleOutputCP(65001) through FFI
   if (build.os !== "windows" || isBun) return;
   try {
     const kernel32 = Deno.dlopen("kernel32.dll", {

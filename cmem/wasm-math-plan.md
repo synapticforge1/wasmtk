@@ -51,11 +51,17 @@ compile and match Deno (measured 2026-09-30). What is missing is the rest of the
 
 Rule gaps (the ruling says one thing, wasic does another):
 
-| id | source | Deno | wasm | cause |
-| --- | --- | --- | --- | --- |
-| sw36 | `const r: f64 = m / n` (5, 3) | 1.666… | 1 | `/` typed from the left operand (`lhsType`, wasic.ts ~10334); the declared f64 is applied AFTER `i32.div_s` |
-| sw37 | `Math.floor(a / b)` (−7, 2) | −4 | −3 | same: the `Math` argument is emitted as f64, but the division inside is already `i32.div_s`. `ceil` and `round` alike; `trunc` agrees only by coincidence |
-| ld15 | `const x: i32 = Math.floor(3.7)`; also `trunc`, `ceil`, `round`, with or without a division | 3 | invalid module | `F64_UNARY` / `round` return f64 whatever `defaultType` is (wasic.ts ~9437–9451); the i32 local gets an f64. LOUD, but it hits a common pattern |
+(Table as a list — id · source · Deno · wasm · cause:)
+
+- sw36 — source: `const r: f64 = m / n` (5, 3) — Deno: 1.666… — wasm: 1 — cause: `/` typed from the
+  left operand (`lhsType`, wasic.ts ~10334); the declared f64 is applied AFTER `i32.div_s`
+- sw37 — source: `Math.floor(a / b)` (−7, 2) — Deno: −4 — wasm: −3 — cause: same: the `Math`
+  argument is emitted as f64, but the division inside is already `i32.div_s`. `ceil` and `round`
+  alike; `trunc` agrees only by coincidence
+- ld15 — source: `const x: i32 = Math.floor(3.7)`; also `trunc`, `ceil`, `round`, with or without a
+  division — Deno: 3 — wasm: invalid module — cause: `F64_UNARY` / `round` return f64 whatever
+  `defaultType` is (wasic.ts ~9437–9451); the i32 local gets an f64. LOUD, but it hits a common
+  pattern
 
 Plain bugs (TypeScript and wasm are both f64 here, so the ruling is not involved; ALL FIXED in
 Phase 1, 2026-10-06, as was ld15 above):

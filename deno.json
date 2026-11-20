@@ -54,6 +54,7 @@
     "bump": "bun scripts/bump.ts",
     "api-surface": "bun scripts/api-surface.ts",
     "check-host": "bun scripts/check-host.ts",
+    "check-cmem": "bun scripts/check-cmem.ts",
     "upstream:link": "bun scripts/upstream-link.ts",
     "upstream:install": "deno task upstream:link && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.upstream.json --force -n wasmtk-upstream main.ts",
     "install": "deno task update-version && deno task cache && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.json --force -n wasmtk main.ts",

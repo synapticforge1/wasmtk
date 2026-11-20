@@ -5,15 +5,13 @@
 # The local `deno task release` (scripts/release.ts, U4) pushes `main` with the `bump to vX.Y.Z`
 # commit and NO tag. Every push to `main` runs this workflow:
 #
-#   checks   contents: read    U5: HEAD = github.sha; the release tooling's self-tests; "is this a
-#            actions: read     release?" — only the bump commit's own run, pushed alone, over a
-#                              released previous version, releases (a tag already at this commit =
-#                              resume / re-verify; JSR without the tag = refused); any other push
-#                              meeting an unreleased version reads the bump run: running = a
-#                              warning, finished or missing = refused by name); for a release,
-#                              the surface floor on the untagged candidate (api-surface.ts
-#                              --verify-release); the type check; the publish dry run on exactly
-#                              the tree the jsr job publishes
+#   checks   contents: read    U5 as amended (H37 (e), 2026-11-20): "is this a release?" only —
+#            actions: read     only the bump commit's own run, pushed alone, over a released
+#                              previous version, releases (a tag already at this commit = resume /
+#                              re-verify; JSR without the tag = refused); any other push meeting an
+#                              unreleased version reads the bump run: running = a warning, finished
+#                              or missing = refused by name. NO tests and NO gates here: they run
+#                              locally in `deno task release` (owner, 2026-11-17: CI only publishes)
 #   tag      contents: write   U6: CI creates the annotated tag on github.sha (an existing one at
 #                              this commit = done; elsewhere = refused, a tag never moves), reads back
 #   release  contents: write   U7: the GitHub Release page FROM the tag — REST API, never `gh`; an
@@ -43,9 +41,9 @@
 # both tags annotated, tagger github-actions[bot]; JSR Rekor 3814264552 / 3815373888). Nothing
 # here waits for a tag trigger (the jobs chain with `needs:`), so the OIDC identity is this run's.
 # wasmtk's own first release in this order is still the first measurement of THIS file's tag →
-# page → publish half. The compiler's tests are NOT run in `checks` yet: wasmtk's gate is local
-# (installed `wasmtk`, Go, Zig, standalone engines); a CI gate is Deno-exit plan P7. The release
-# tooling's own self-tests are (review round 3).
+# page → publish half. 🔒 CI runs NO test and NO gate (owner, 2026-11-17, workspace review
+# standard § 10, letter H37 (e)): every gate, the suites and the release tooling's self-tests
+# included, runs locally before `deno task release` pushes (review-gate, guards 0i / 0e).
 #
 # Every action is pinned to a commit hash; the comment names its release. Move a pin by reading
 # the release tag's commit with `git ls-remote` (verified 2026-11-10 for the three below).
@@ -89,57 +87,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          fetch-depth: 0 # the compatibility gate reads the PREVIOUS v* tag's surface
+          fetch-depth: 0 # is-release reads the version at the pushed commit and its parent
           persist-credentials: false
 
-      # Every script runs on Bun, locally and here, so the local gate IS CI's gate (workspace
-      # `working-rules.md` § The gate; Tooling rule 1). Pinned to the installed Bun (rule 10).
+      # The workflow script runs on Bun. Pinned to the installed Bun (Tooling rule 10).
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
           token: "" # never the job's GITHUB_TOKEN (the action's default)
 
-      # Deno for `deno doc` (the surface JSR sees), the type check and `deno publish` only.
-      # DO NOT pin the Deno version to chase JSR provenance: tried 2026-07-30 and RULED OUT (the
-      # 2026-07 outage was scope-wide and outside this repo; cmem/design-decisions.md).
-      - name: Install Deno
-        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
-        with:
-          deno-version: v2.x
-
-      # The code checks come FIRST, so a JSR outage cannot hide them (review round 2, R2-D).
-      - name: Type-check
-        run: deno check main.ts
-
-      # The release tooling's own self-tests (fakes and a local mock API only — no network, no
-      # writes outside a temp folder), so a broken gate cannot release (review round 3).
-      - name: Release tooling self-tests
-        run: |
-          bun scripts/check_release.ts
-          bun scripts/check_publish_workflow.ts
-
-      # The `jsr` job publishes from a checkout of deno.json's `publish.include` (+ deno.lock)
-      # alone. Rehearse exactly that tree here.
-      - name: Checkout the published files only (as the jsr job does)
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          path: jsr-tree
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /deno.json
-            /deno.lock
-            /main.ts
-            /src/
-            /README.md
-            /LICENSE
-            /LICENSE-MIT
-            /LICENSE-APACHE
-
-      - name: JSR dry run, on the tree the jsr job publishes
-        working-directory: jsr-tree
-        run: deno publish --dry-run
+      # 🔒 CI only publishes (owner, 2026-11-17; letter H37 (e)): the type check, the release
+      # tooling's self-tests, the JSR dry run, the compatibility gate and the release-commit gate
+      # left this job on 2026-11-20 — they run LOCALLY in `deno task release` (guards 0g, 0i, 0e),
+      # with every other gate, before anything is pushed. What stays: is this a new version.
 
       # A release only in the run of the bump commit, pushed ALONE (BEFORE = its parent), over a
       # released previous version; a re-run of that run resumes (or re-verifies) it.
@@ -152,20 +113,6 @@ jobs:
           BEFORE: ${{ github.event.before }}
           GITHUB_TOKEN: ${{ github.token }}
         run: bun scripts/publish-workflow.ts is-release
-
-      # The local `deno task bump` ran the compatibility gate; this repeats it on the pushed
-      # commit before CI tags it (H6, Rule 3): the snapshot matches, one SemVer step at or above
-      # the floor since the previous tag, no removal without a deprecation release (Rule 4).
-      - name: Compatibility gate on the release candidate
-        if: steps.rel.outputs.release == 'true'
-        run: bun scripts/api-surface.ts --verify-release
-
-      # `deno task release`'s commit-level gate, repeated on the pushed commit, so a bump pushed
-      # by hand (or any push that changes the version) is not released without it (review round 2,
-      # R2-B): the subject `bump to v<version>`, version lines only, both reviews recorded.
-      - name: Release commit gate (the bump commit, both reviews recorded)
-        if: steps.rel.outputs.release == 'true'
-        run: bun scripts/release.ts --verify-commit
 
   tag:
     name: Tag ${{ needs.checks.outputs.tag }}
