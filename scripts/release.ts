@@ -43,7 +43,7 @@
  * on 2026-11-10, which had none of the guards, force-moved a local tag and pushed twice.
  */
 import { spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -194,9 +194,22 @@ export function verifyReleaseCommit(version: string, git: Git): string[] {
 const version = denoJson.version;
 const tag = `v${version}`;
 
+/** Every command this script starts stops after 30 minutes (review H2, 2026-11-20: a hung `git
+ *  fetch` or cold check hung the release with no message). */
+const COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
+
 function run(cmd: string[], cwd?: string): void {
   console.log(`$ ${cmd.join(" ")}`);
-  const code = spawnSync(cmd[0]!, cmd.slice(1), { stdio: "inherit", cwd }).status ?? 1;
+  const r = spawnSync(cmd[0]!, cmd.slice(1), {
+    stdio: "inherit",
+    cwd,
+    timeout: COMMAND_TIMEOUT_MS,
+  });
+  if (r.error && /ETIMEDOUT/.test(String(r.error))) {
+    console.error(`\nCommand did not finish within 30 min and was stopped: ${cmd.join(" ")}`);
+    process.exit(1);
+  }
+  const code = r.status ?? 1;
   if (code !== 0) {
     console.error(`\nCommand failed with exit code ${code}: ${cmd.join(" ")}`);
     process.exit(code);
@@ -212,8 +225,16 @@ function capture(
   cmd: string[],
   opts: { env?: NodeJS.ProcessEnv; cwd?: string } = {},
 ): { code: number; out: string; err: string } {
-  const r = spawnSync(cmd[0]!, cmd.slice(1), { encoding: "utf8", maxBuffer: 1 << 26, ...opts });
-  return { code: r.status ?? 1, out: r.stdout ?? "", err: r.stderr ?? "" };
+  const r = spawnSync(cmd[0]!, cmd.slice(1), {
+    encoding: "utf8",
+    maxBuffer: 1 << 26,
+    timeout: COMMAND_TIMEOUT_MS,
+    ...opts,
+  });
+  // A command that could not start, or was stopped at the limit, says so (it read as a silent
+  // refusal with no detail — review H14's sibling, R6-L5).
+  const why = r.error ? `\n${cmd[0]}: ${r.error.message}` : "";
+  return { code: r.status ?? 1, out: r.stdout ?? "", err: (r.stderr ?? "") + why };
 }
 const git: Git = (args) => capture(["git", ...args]);
 const said = (r: { out: string; err: string }) => (r.err + r.out).trim();
@@ -241,7 +262,12 @@ if (import.meta.main) {
   } catch {
     issues = null;
   }
-  const unreviewed = reviewGate(issues, git, RELEASE_FILES);
+  const unreviewed = reviewGate(
+    issues,
+    git,
+    RELEASE_FILES,
+    (file, atReviewed) => bumpOnly(file, atReviewed, readFileSync(file, "utf8"), version),
+  );
   if (unreviewed.length > 0) {
     refuse(
       "the review set has not passed for this code.",

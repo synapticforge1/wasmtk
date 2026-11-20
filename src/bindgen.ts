@@ -660,6 +660,17 @@ export async function runBindgen(
   opts: { outPath?: string } & BindgenOptions = {},
 ): Promise<void> {
   const witSrc = await host.readTextFile(witPath);
+  // A `.wit` this tool cannot read is refused by name: an empty, truncated or garbage file wrote an
+  // empty-interface binding and exited 0 (review H9, 2026-11-20).
+  const code = witSrc.replace(/\/\/[^\n]*/g, "");
+  const open = (code.match(/\{/g) ?? []).length, close = (code.match(/\}/g) ?? []).length;
+  if (open !== close) {
+    throw new Error(`${witPath}: unbalanced braces ({ ${open}, } ${close}) — a truncated .wit?`);
+  }
+  const parsed = parseWit(witSrc);
+  if (!parsed.worldName && parsed.exports.length === 0 && parsed.imports.length === 0) {
+    throw new Error(`${witPath}: no world and no functions — nothing to generate bindings for`);
+  }
   const ts = generateBindings(witSrc, opts);
   // sw113: `H2.WIT` matched no replace and the TypeScript was written over the WIT
   const out = opts.outPath ?? defaultOutPath(witPath, [".wit"], ".bindings.ts");

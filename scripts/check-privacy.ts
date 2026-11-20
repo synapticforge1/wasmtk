@@ -54,6 +54,10 @@ const RULES: { kind: string; re: RegExp }[] = [
   { kind: "drive path", re: /(?<![\w.:/])\/[a-z]\/(?:Users|Programs)\/[^\s'"`]*/g },
   { kind: "home path", re: /\/Users\/[A-Za-z][\w.-]*\/[^\s'"`]*/g },
   { kind: "home path", re: /\/home\/(?!runner\/)[a-z][\w.-]*\/[^\s'"`]*/g },
+  // wasmtk (review P1, 2026-11-20): a Linux REMOVABLE drive — `/run/media/<user>/<volume>/…`,
+  // `/media/<user>/…` — and Silverblue's `/var/home/<user>/…` name the user too; a `file:///`
+  // URL of any of these is matched through its path. (Both history purges missed this form.)
+  { kind: "home path", re: /\/(?:run\/media|media|var\/home)\/[a-z][\w.-]*\/[^\s'"`]*/g },
   { kind: "private key", re: /-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----/g },
   { kind: "GitHub token", re: /\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{22,}\b/g },
   { kind: "npm token", re: /\bnpm_[A-Za-z0-9]{36}\b/g },
@@ -67,7 +71,13 @@ const RULES: { kind: string; re: RegExp }[] = [
     re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
   },
   // wasmtk (2026-11-20): a password in a URL, 8 characters or more (`user:pass@` is a placeholder).
-  { kind: "URL credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:[^\s/@]{8,}@/gi },
+  // The scheme is bounded (32): unbounded, `a.a.a.…` was scanned to the end from every position —
+  // quadratic, 152 s on a 1 MB line (found by review H13's test, 2026-11-20). The user and password
+  // parts are bounded too.
+  {
+    kind: "URL credentials",
+    re: /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s/@:]{1,256}:[^\s/@]{8,256}@/gi,
+  },
   {
     kind: "secret assignment",
     re:
@@ -101,10 +111,15 @@ const MANIFESTS = new Set(["deno.json", "package.json"]);
  */
 export const KNOWN: readonly { where: string; kind: string; why: string }[] = [
   {
-    where: "cmem/archive/history-purge-2026-10-26.md:20",
+    where: "cmem/archive/history-purge-2026-10-26.md:*",
     kind: "drive path",
     why:
       "quotes the std path library's own doc example (a user 'foo'), in the verbatim purge record",
+  },
+  {
+    where: "cmem/history-purge-2026-10-26.md:*",
+    kind: "drive path",
+    why: "the same record at its path before the 2026-11-20 archive move (history blobs only)",
   },
 ];
 
@@ -117,6 +132,29 @@ export function mask(s: string): string {
  * Every leak in `text`, named `name` (a path, or `commit <sha>`). `maintainer` is the one address
  * allowed, in a manifest only.
  */
+/**
+ * The email addresses in one line, found from each `@` outward: at most 64 characters of local
+ * part (an address's limit) and 253 of domain. Linear in the line's length — the EMAIL regex run
+ * over the whole line was quadratic on a long line with no `@` (2 MB ≈ 15 minutes; review H13,
+ * 2026-11-20). Returns [address, index] pairs, as `matchAll` did.
+ */
+export function emailsIn(line: string): Array<[string, number] & { index: number }> {
+  const out: Array<[string, number] & { index: number }> = [];
+  const LOCAL = /[A-Za-z0-9._%+-]/;
+  const DOMAIN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
+  for (let at = line.indexOf("@"); at >= 0; at = line.indexOf("@", at + 1)) {
+    let s = at;
+    while (s > 0 && at - s < 64 && LOCAL.test(line[s - 1])) s--;
+    if (s === at) continue;
+    const d = DOMAIN.exec(line.slice(at + 1, at + 1 + 253));
+    if (!d) continue;
+    const pair = [line.slice(s, at + 1 + d[0].length), s] as [string, number] & { index: number };
+    pair.index = s;
+    out.push(pair);
+  }
+  return out;
+}
+
 export function findLeaks(name: string, text: string, maintainer: string | undefined): Leak[] {
   const out: Leak[] = [];
   const lines = text.split("\n");
@@ -131,7 +169,7 @@ export function findLeaks(name: string, text: string, maintainer: string | undef
         out.push({ where, kind, masked: mask(m[0]) });
       }
     }
-    for (const m of line.matchAll(EMAIL)) {
+    for (const m of emailsIn(line)) {
       const addr = m[0];
       if (SERVICE.test(addr) || RESERVED.test(addr)) continue;
       // `scheme://user:pass@host` is URL userinfo, not an address (wasmtk's URL-parsing test
@@ -150,7 +188,16 @@ export function findLeaks(name: string, text: string, maintainer: string | undef
 
 /** The leaks not in {@link KNOWN}. */
 export function unknown(leaks: readonly Leak[]): Leak[] {
-  return leaks.filter((l) => !KNOWN.some((k) => k.where === l.where && k.kind === l.kind));
+  // A history blob is named `blob <id> (<path>):<line>`: matched by its path and line, as a file.
+  // A KNOWN entry ending `:*` matches every line of that path.
+  const place = (w: string) => w.replace(/^blob \w+ \((.*)\)(:\d+)$/, "$1$2");
+  return leaks.filter((l) =>
+    !KNOWN.some((k) =>
+      k.kind === l.kind &&
+      (k.where === place(l.where) ||
+        (k.where.endsWith(":*") && place(l.where).startsWith(k.where.slice(0, -1))))
+    )
+  );
 }
 
 /** The maintainer contact, from the manifests' own fields, if one is there. */
@@ -208,9 +255,12 @@ function git(args: string[]): string {
 }
 
 /** Parses `--dir D` (repeatable) and `--commits R`; anything else is refused. */
-export function parseArgs(argv: string[]): { dirs: string[]; commits: string | undefined } {
+export function parseArgs(
+  argv: string[],
+): { dirs: string[]; commits: string | undefined; history: boolean } {
   const dirs: string[] = [];
   let commits: string | undefined;
+  let history = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     const v = argv[i + 1];
@@ -219,9 +269,61 @@ export function parseArgs(argv: string[]): { dirs: string[]; commits: string | u
     }
     if (a === "--dir") dirs.push(argv[++i]!);
     else if (a === "--commits") commits = argv[++i]!;
+    else if (a === "--history") history = true;
     else throw new Error(`unknown argument ${a}`);
   }
-  return { dirs, commits };
+  return { dirs, commits, history };
+}
+
+/**
+ * `--history` (review P1, 2026-11-20): every blob reachable from EVERY ref, each once — a path
+ * removed from HEAD is still published in history, and the gate read HEAD only. Each finding names
+ * the blob and a path it had.
+ */
+function scanHistory(maintainer: string | undefined): { leaks: Leak[]; blobs: number } {
+  const objs = git(["rev-list", "--all", "--objects"]).split("\n").filter(Boolean);
+  const pathOf = new Map<string, string>();
+  for (const line of objs) {
+    const sp = line.indexOf(" ");
+    if (sp > 0 && !pathOf.has(line.slice(0, sp))) pathOf.set(line.slice(0, sp), line.slice(sp + 1));
+  }
+  const types = spawnSync("git", ["cat-file", "--batch-check=%(objectname) %(objecttype)"], {
+    input: [...pathOf.keys()].join("\n") + "\n",
+    encoding: "utf8",
+    maxBuffer: 1 << 28,
+  }).stdout.split("\n").filter((l) => l.endsWith(" blob")).map((l) => l.split(" ")[0]);
+  const leaks: Leak[] = [];
+  let scanned = 0;
+  // `node_modules/` was tracked by mistake in old commits: those blobs are the dependencies' own
+  // PUBLISHED files (the std path library's doc examples, npm authors' addresses in their own
+  // package.json) — not facts about this project's creator, and public already. Skipped, by name.
+  const ids = types.filter((id) => !/(^|\/)node_modules\//.test(pathOf.get(id) ?? ""));
+  // `git cat-file --batch`, 500 blobs a call (one call per blob took 9 minutes)
+  for (let at = 0; at < ids.length; at += 500) {
+    const batch = ids.slice(at, at + 500);
+    const r = spawnSync("git", ["cat-file", "--batch"], {
+      input: batch.join("\n") + "\n",
+      maxBuffer: 1 << 30,
+    });
+    if (r.status !== 0) throw new Error(`git cat-file --batch failed: ${r.stderr}`);
+    const out = r.stdout as Buffer;
+    let p = 0;
+    for (const id of batch) {
+      const nl = out.indexOf(10, p);
+      const header = out.subarray(p, nl).toString("latin1"); // "<id> blob <size>"
+      const size = Number(header.split(" ")[2]);
+      if (!header.startsWith(id) || !Number.isFinite(size)) {
+        throw new Error(`git cat-file --batch: unexpected header "${header}"`);
+      }
+      const body = out.subarray(nl + 1, nl + 1 + size);
+      p = nl + 1 + size + 1; // the content, then a newline
+      leaks.push(
+        ...findLeaks(`blob ${id.slice(0, 12)} (${pathOf.get(id)})`, textOf(body), maintainer),
+      );
+      scanned++;
+    }
+  }
+  return { leaks, blobs: scanned };
 }
 
 /**
@@ -260,15 +362,24 @@ if (import.meta.main) {
     let text: string | undefined;
     try {
       text = textOf(readFileSync(join(root, f)));
-    } catch {
-      continue; // listed but deleted in the working tree
+    } catch (e) {
+      // listed but deleted in the working tree: nothing to scan. Any OTHER failure (locked,
+      // denied, a folder) is a file left unscanned — a finding, never a silent skip (review H14).
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+      console.error(`check-privacy: cannot read ${f}: ${(e as Error).message}`);
+      process.exit(1);
     }
     files++;
     leaks.push(...findLeaks(f, text, maintainer));
   }
   for (const d of args.dirs) {
     const all: string[] = [];
-    walk(join(root, d), all);
+    try {
+      walk(join(root, d), all);
+    } catch (e) {
+      console.error(`check-privacy: --dir ${d}: ${(e as Error).message}`); // was a raw stack (H14)
+      process.exit(1);
+    }
     for (const p of all) {
       const text = textOf(readFileSync(p));
       files++;
@@ -291,6 +402,12 @@ if (import.meta.main) {
     );
     process.exit(1);
   }
+  let blobs = 0;
+  if (args.history) {
+    const h = scanHistory(maintainer);
+    leaks.push(...h.leaks);
+    blobs = h.blobs;
+  }
   const found = unknown(leaks);
   if (found.length > 0) {
     console.error(`check-privacy: ${found.length} finding(s) (masked):`);
@@ -298,6 +415,8 @@ if (import.meta.main) {
     process.exit(1);
   }
   console.log(
-    `check-privacy: clean — ${files} files${commits ? `, ${commits} commit messages` : ""}`,
+    `check-privacy: clean — ${files} files${commits ? `, ${commits} commit messages` : ""}${
+      blobs ? `, ${blobs} history blobs on every ref` : ""
+    }`,
   );
 }

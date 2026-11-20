@@ -13,6 +13,29 @@ branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
 > Closed sections (13) moved verbatim to [archive/next-work-to-2026-11-20.md](archive/next-work-to-2026-11-20.md) on 2026-11-20 (H38).
 
+## 2026-11-20 — review round 7, the first under the final standard (owner: "review", then "push")
+
+On branch `review/2026-11-20`. Five classes, one fresh reviewer each; the full record (every
+finding, the owner's answers, each fix and its test) is the gitignored `cmem/review-issues.md`.
+- **Owner at triage:** "Fix all, class by class"; P1 "Purge history (3rd time)"; L3's origin is
+  battlelinegames/ArtOfWasm (its MIT text now beside the tests).
+- **Fixed, each with a test:** basic B1–B8 (module-f64 unary minus and `!`, `**` into an i32 slot,
+  library exceptions named, `>>>` unsigned in print / arithmetic / comparison / `%` / `%=`, radix
+  literals in console.log, the release gate's version-only rule, no .wat beside `-o NUL`);
+  hardening H1–H17 (same-file output, subprocess time limit and process-tree kill, nesting and
+  source-size refusals, atomic writes through links, UTF-8 / UTF-16 refusal, unresolvable imports,
+  truncated .wit / .js, CLI arity, `repeat` bounds, WASI fd checks, check-privacy linear time);
+  licensing L1–L3 (dual licence everywhere, SPDX `OR` in check-licences); security S1–S2
+  (launcher quoting, temp names); privacy P1–P3 (`-trimpath`, README § Privacy, history scan).
+- **Re-reviews:** two rounds; every fix confirmed by runs; the new findings (RH1, RB1–RB3 and their
+  follow-ups) fixed with tests and mutation-checked.
+- **OPEN, blocked on binaryang (letter C48):** RH2: a long chain of dependent statements in one
+  function is sunk by binaryang's simplify-locals into one tree as deep as the chain: N ≥ 1000 is
+  refused (named), N = 20000 aborts V8 out of memory. `Review complete` waits on it.
+- **Owner's call (not changed):** `const u: i32 = x >>> 0` stores -1 (the hash idiom relies on it).
+- **Full gate:** GREEN, every suite (counts in `testing-2.md`); golden and cross-check re-recorded.
+- **P1 purge:** PURGE_RESULT
+
 ## 2026-11-20 — H38, H43, H37 (owner: "commit. then work on H38, H43 and H37")
 
 On branch `refactor/host-ts-2026-11-20`, committed after `a3aee940` (local, not pushed).

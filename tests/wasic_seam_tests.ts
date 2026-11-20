@@ -19,7 +19,7 @@
  * Usage:
  *   deno run --allow-read tests/wasic_seam_tests.ts
  *
- * @license MIT
+ * @license MIT OR Apache-2.0
  */
 
 import { join } from "jsr:@std/path";

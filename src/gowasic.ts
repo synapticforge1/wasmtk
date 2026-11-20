@@ -145,10 +145,12 @@ try {
 
 /** Writes the passthrough shim + a platform launcher TinyGo can exec as `wasm-opt`. */
 async function writeWasmOptShim(
-  baseDir: string,
+  _baseDir: string,
 ): Promise<{ launcher: string; cleanup: () => Promise<void> }> {
-  const tmp = join(baseDir, `.wasmtk_wasmopt_${Date.now()}`);
-  await host.mkdir(tmp, { recursive: true });
+  // A fresh temp folder, never the project's (review S1 / H16, 2026-11-20): Windows runs a `.cmd`
+  // through cmd.exe, which expands `%…%` in the LAUNCHER's own path, and a project folder named
+  // with shell syntax broke (or, under sh, injected into) the build. Removed by `cleanup`.
+  const tmp = await host.makeTempDir("wasmtk_wasmopt_");
   const shimPath = join(tmp, "wasmopt_shim.ts");
   await host.writeTextFile(shimPath, SHIM_TS);
   // The runtime running wasmtk (no reliance on PATH) runs the shim; the launcher's form (`.cmd` or
@@ -411,8 +413,11 @@ async function buildWithStd(
   // supports //go:wasmexport for wasip1 in this mode).
   const goos = "wasip1";
   const buildModeArgs = target === "reactor" ? ["-buildmode=c-shared"] : [];
+  // `-trimpath`: no build-machine path in the module (review P2, 2026-11-20: 206 GOROOT paths and
+  // the project folder, the user's name in them, were written into every std-Go module); TinyGo's
+  // `-no-debug` already does this for the default runtime.
   const r = await new host.Command("go", {
-    args: ["build", ...buildModeArgs, "-o", out, buildArg],
+    args: ["build", "-trimpath", ...buildModeArgs, "-o", out, buildArg],
     cwd: baseDir,
     env: { ...host.env.toObject(), GOOS: goos, GOARCH: "wasm" },
     stdout: "piped",

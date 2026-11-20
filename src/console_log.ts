@@ -471,11 +471,32 @@ export function setI32SlotResolver(
 /** Widen `wat` from numeric type `from` to `to`, or null when that would lose information (a float
  *  into an integer, i64 into i32). A lossy request means the console path guessed the argument's
  *  type wrong, which must be reported, not truncated. */
+/** The value of a hex / octal / binary integer literal (`0xFF`, `-0x10`, `0o17`, `0b101`, with `_`
+ *  separators), or undefined when `s` is not one (review B7, 2026-11-20). */
+function radixLiteral(s: string): number | undefined {
+  const m = s.trim().match(/^(-?)0([xXoObB])([0-9a-fA-F_]+)$/);
+  if (!m || m[3].startsWith("_") || m[3].endsWith("_") || m[3].includes("__")) return undefined;
+  const digits = m[3].replace(/_/g, "");
+  const radix = /[xX]/.test(m[2]) ? 16 : /[oO]/.test(m[2]) ? 8 : 2;
+  const valid = radix === 16 ? /^[0-9a-fA-F]+$/ : radix === 8 ? /^[0-7]+$/ : /^[01]+$/;
+  if (!valid.test(digits)) return undefined;
+  const v = Number(`0${m[2].toLowerCase()}${digits}`);
+  return m[1] ? -v : v;
+}
+
+/** An i32 widened to a float: UNSIGNED when its top operation is `>>>` (`i32.shr_u`), JavaScript's
+ *  unsigned 32-bit result — `(-1) >>> 0` is 4294967295, not -1 (review B5, 2026-11-20). */
+function i32ToFloat(to: "f64" | "f32", wat: string): string {
+  return /^\(i32\.shr_u /.test(wat.trimStart())
+    ? `(${to}.convert_i32_u ${wat})`
+    : `(${to}.convert_i32_s ${wat})`;
+}
+
 function widenNumeric(wat: string, from: string, to: string): string | null {
   const f = from === "bool" ? "i32" : from;
   if (f === to) return wat;
   if (f === "i32" && to === "i64") return `(i64.extend_i32_s ${wat})`;
-  if (f === "i32" && (to === "f64" || to === "f32")) return `(${to}.convert_i32_s ${wat})`;
+  if (f === "i32" && (to === "f64" || to === "f32")) return i32ToFloat(to, wat);
   if (f === "i64" && (to === "f64" || to === "f32")) return `(${to}.convert_i64_s ${wat})`;
   if (f === "f32" && to === "f64") return `(f64.promote_f32 ${wat})`;
   return null;
@@ -552,6 +573,12 @@ function hoistCallingArgs(segments: LogSegment[]): { segments: LogSegment[]; pre
     return `(local.get ${name})`;
   };
   const out = segments.map((s): LogSegment => {
+    // An expression whose top operator is `>>>` is JavaScript's UNSIGNED 32-bit value (0 … 2³²−1):
+    // printed as the number it is, not as the signed i32 it is held in (`(-1) >>> 0` printed -1;
+    // review B5, 2026-11-20). A variable DECLARED i32 keeps the declared type's semantics.
+    if (s.kind === "i32expr" && /^\(i32\.shr_u /.test(s.wat.trimStart())) {
+      return { kind: "f64expr", wat: tmp("f64", `(f64.convert_i32_u ${s.wat})`) };
+    }
     switch (s.kind) {
       case "i32expr":
       case "boolexpr":
@@ -2417,7 +2444,13 @@ function parseSingleArg(
     findTopLevelOp(token, "**") > 0;
   // sw119: a `+ - *` of i32s prints JavaScript's result, `65536 * 65536` 4294967296 (it wrapped
   // to 0): computed in f64, which prints an integral value as the i32 printer does
-  if ((leadType === "i32" || leadType === "bool") && !hasKnownFloat && !isArithChain(token)) {
+  // `%` with a `>>>` side can be 2³¹ or more (`(x >>> 0) % (n >>> 0)`): printed as the f64 it is
+  // (re-review 2 of RB3; the i32 printer showed -7 for 4294967289)
+  const unsignedRem = !isTopLevelComparison(token) && isUnsignedRem(token);
+  if (
+    (leadType === "i32" || leadType === "bool") && !hasKnownFloat && !isArithChain(token) &&
+    !unsignedRem
+  ) {
     return [{
       kind: "i32expr",
       wat: exprToWat(
@@ -2578,6 +2611,38 @@ function isArithChain(s: string): boolean {
   return ["+", "-", "*"].some((o) => findTopLevelOp(u, o) > 0);
 }
 
+/** Whether `s` is a `>>>` at its top level, JavaScript's unsigned 32-bit value (review RB3); the
+ *  twin of wasic's `isUnsignedShift`. Anything of lower precedence at the top level says no. */
+function isUnsignedShift(s: string): boolean {
+  let u = s.trim();
+  while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+    u = u.slice(1, -1).trim();
+  }
+  if (findTopLevelOp(u, ">>>") <= 0) return false;
+  const lower = ["||", "&&", "??", "|", "^", "&", "===", "!==", "==", "!=", "<=", ">=", "<", "?"];
+  if (lower.some((o) => findTopLevelOp(u, o) > 0)) return false;
+  return !/(?<![>=])>(?![>=])/.test(u.replace(/>>>|>>/g, ""));
+}
+
+/** A `%` at the top level of `s` with an unsigned side: itself unsigned (wasic's twin, RB3). */
+function isUnsignedRem(s: string): boolean {
+  let u = s.trim();
+  while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+    u = u.slice(1, -1).trim();
+  }
+  const i = findTopLevelOp(u, "%");
+  if (i <= 0) return false;
+  const lower = ["||", "&&", "??", "|", "^", "&", "===", "!==", "==", "!=", "<=", ">=", "<", "?"];
+  if ([...lower, "+", "-"].some((o) => findTopLevelOp(u, o) > 0)) return false;
+  if (/(?<![>=])>(?![>=])/.test(u.replace(/>>>|>>/g, ""))) return false;
+  return isUnsignedValue(u.slice(0, i)) || isUnsignedValue(u.slice(i + 1));
+}
+
+/** JavaScript's unsigned 32-bit value held in an i32: a `>>>`, or a `%` of one. */
+function isUnsignedValue(s: string): boolean {
+  return isUnsignedShift(s) || isUnsignedRem(s);
+}
+
 function toInt32Wat(
   e: string,
   locals: Map<string, string>,
@@ -2589,6 +2654,9 @@ function toInt32Wat(
 ): string {
   const lit = e.trim();
   if (/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(lit)) return `(i32.const ${Number(lit) | 0})`;
+  // `0xFFFFFFFF` as an operand of `&` is ToInt32 of its value, -1, as JavaScript (review B7)
+  const rv = radixLiteral(lit);
+  if (rv !== undefined) return `(i32.const ${rv | 0})`;
   // an i32 `+ - *` (sw119): ToInt32 of JavaScript's exact value; asked for as an i32 it is the
   // checked store, which throws where JavaScript wraps
   if (isArithChain(e)) {
@@ -2673,6 +2741,23 @@ function exprToWat(
     return `(${
       expectedType === "i32" || expectedType === "i64" ? "f64" : expectedType
     }.const ${expr})`;
+  }
+
+  // A hex / octal / binary literal (`0xFF`, `0o17`, `0b101`): its value as a decimal literal, under
+  // the same rules. It was refused here ("cannot emit the expression '0xFF'"), so the README's
+  // `x & 0xFF` failed inside console.log only (review B7, 2026-11-20).
+  const radixValue = radixLiteral(expr);
+  if (radixValue !== undefined) {
+    return exprToWat(
+      String(radixValue),
+      locals,
+      expectedType,
+      funcLookup,
+      allocString,
+      arrayLookup,
+      structLookup,
+      globals,
+    );
   }
 
   // Integer literal — emit const for the expected type
@@ -3343,18 +3428,24 @@ function exprToWat(
   // Unary ! — logical not → i32.eqz. Like unary minus below, only when no binary operator sits at
   // top level: `!a && b` is `(!a) && b`; it was `!(a && b)` (sw96, 2026-10-19).
   if (expr.startsWith("!") && !expr.startsWith("!=") && !hasTopLevelBinaryOp(expr)) {
-    return `(i32.eqz ${
-      exprToWat(
-        expr.slice(1).trim(),
-        locals,
-        "i32",
-        funcLookup,
-        allocString,
-        arrayLookup,
-        structLookup,
-        globals,
-      )
-    })`;
+    const nw = exprToWat(
+      expr.slice(1).trim(),
+      locals,
+      "i32",
+      funcLookup,
+      allocString,
+      arrayLookup,
+      structLookup,
+      globals,
+    );
+    // A float operand (a module-level f64 const, inlined as `f64.const`): JavaScript's truthiness,
+    // `|x| > 0` (false for 0, -0 and NaN), as wasic's emitCond — `i32.eqz` of an f64 was an
+    // invalid module reported as success (review B2, 2026-11-20).
+    const nt = watOuterType(nw, locals, globals);
+    if (nt === "f64" || nt === "f32") {
+      return `(i32.eqz (${nt}.gt (${nt}.abs ${nw}) (${nt}.const 0)))`;
+    }
+    return `(i32.eqz ${nw})`;
   }
 
   // Unary ~ — bitwise not → i32.xor with -1
@@ -3407,9 +3498,22 @@ function exprToWat(
         exprToWat(inner, locals, "i64", funcLookup, allocString, arrayLookup, structLookup, globals)
       })`;
     }
-    return `(i32.sub (i32.const 0) ${
-      exprToWat(inner, locals, "i32", funcLookup, allocString, arrayLookup, structLookup, globals)
-    })`;
+    const iw = exprToWat(
+      inner,
+      locals,
+      "i32",
+      funcLookup,
+      allocString,
+      arrayLookup,
+      structLookup,
+      globals,
+    );
+    // A float operand asked for as an i32 (a MODULE-level f64 in `console.log(-g | 0)`): negate it
+    // as the float it is and let the caller convert (toInt32Wat applies ToInt32 to a float); an
+    // `i32.sub` of an f64 was an invalid module reported as success (review B1, 2026-11-20).
+    const it = watOuterType(iw, locals, globals);
+    if (it === "f64" || it === "f32") return `(${it}.neg ${iw})`;
+    return `(i32.sub (i32.const 0) ${iw})`;
   }
 
   // Ternary: cond ? then : else
@@ -3781,6 +3885,21 @@ function exprToWat(
     // values (`big + 1 > 0` of an i32 max is true), as wasic's emitExpr does
     const cmpOfChain = i32Typed && /^(<|>|<=|>=|==|!=|===|!==)$/.test(op) &&
       (isArithChain(lhs) || isArithChain(rhs));
+    // a comparison or `%` with a `>>>` side uses the unsigned value: wasic's emitExpr owns that
+    // form (review RB3; `(n >>> 0) > 5` of n = -1 printed false, `(x >>> 0) % 10` printed -1)
+    if (
+      i32Typed && _exprFallbackResolver && /^(<|>|<=|>=|==|!=|===|!==|%)$/.test(op) &&
+      (isUnsignedValue(lhs) || isUnsignedValue(rhs))
+    ) {
+      const r = _exprFallbackResolver(expr, locals);
+      const widened = r ? widenNumeric(r.wat, r.type, expectedType) : null;
+      if (widened !== null) return widened;
+      // wasic gives `%` here as its exact f64 (an integer below 2³²): an i32 printer gets its 32
+      // bits, as wasic's own `%` into an i32 does
+      if (r && r.type === "f64" && expectedType === "i32") {
+        return `(i32.wrap_i64 (i64.trunc_f64_s ${r.wat}))`;
+      }
+    }
     const opType = alwaysI32 || boolEquality
       ? "i32"
       : effLhsType === "i64"
@@ -3806,7 +3925,7 @@ function exprToWat(
             structLookup,
             globals,
           );
-          return watOuterType(w, locals, globals) === "i32" ? `(f64.convert_i32_s ${w})` : w;
+          return watOuterType(w, locals, globals) === "i32" ? i32ToFloat("f64", w) : w;
         };
         const fw = `(f64.${op === "+" ? "add" : op === "-" ? "sub" : "mul"} ${f(lhs)} ${f(rhs)})`;
         return expectedType === "f32" ? `(f32.demote_f64 ${fw})` : fw;
@@ -4155,6 +4274,10 @@ export function parseConsoleLogArgs(
 
   for (let i = 0; i < args.length; i++) {
     if (i > 0) segments.push({ kind: "literal", text: " " }); // space between args
+    // A whole-argument hex / octal / binary literal is its decimal value: `0xFF` matched the
+    // identifier form and became `local.get $0xFF` (review B7, 2026-11-20).
+    const rv = radixLiteral(args[i]);
+    if (rv !== undefined) args[i] = String(rv);
     const obj = _objectInspectResolver?.(args[i].trim(), locals);
     if (obj) {
       segments.push({ kind: "strexpr", ptrWat: obj.ptrWat, lenWat: obj.lenWat });
@@ -4477,6 +4600,9 @@ export function emitConsoleLog(
           callExpr = `(call ${i64Printer(seg)} (local.get $${seg.name}) ${destExpr})`;
         } else if (seg.kind === "f64var") {
           callExpr = `(call ${f64Printer(seg)} (local.get $${seg.name}) ${destExpr})`;
+        } else if (seg.kind === "i32expr" && /^\(i32\.shr_u /.test(seg.wat.trimStart())) {
+          // `>>>`: JavaScript's unsigned 32-bit number (review B5)
+          callExpr = `(call $__f64_to_str (f64.convert_i32_u ${seg.wat}) ${destExpr})`;
         } else if (seg.kind === "i32expr") {
           callExpr = `(call $__i32_to_str ${seg.wat} ${destExpr})`;
         } else if (seg.kind === "i64expr") {
@@ -4640,6 +4766,10 @@ export function emitConsoleLog(
           callExpr = `(call ${i64Printer(seg)} (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "f64var") {
           callExpr = `(call ${f64Printer(seg)} (local.get $${seg.name}) (i32.const ${scratchPtr}))`;
+        } else if (seg.kind === "i32expr" && /^\(i32\.shr_u /.test(seg.wat.trimStart())) {
+          // `>>>`: JavaScript's unsigned 32-bit number (review B5)
+          callExpr =
+            `(call $__f64_to_str (f64.convert_i32_u ${seg.wat}) (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "i32expr") {
           callExpr = `(call $__i32_to_str ${seg.wat} (i32.const ${scratchPtr}))`;
         } else if (seg.kind === "i64expr") {

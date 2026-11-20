@@ -162,6 +162,13 @@ try {
     await expectExit(`${cmd} -o is refused`, [cmd, "inc.wasm", "-o", "x.txt"], dir, 1, /writes no file/);
   }
   await expectExit("run x.wasm -o is refused", ["run", "argc.wasm", "-o", "x.txt"], dir, 1, /writes no file/);
+  // review H10 (2026-11-20): the argument count, and an i32's value, are checked against the export
+  await expectExit("mod: a missing argument is refused", ["mod", "inc.wasm", "inc"], dir, 1, /takes 1 argument\(s\), got 0/);
+  await expectExit("mod: an extra argument is refused", ["mod", "inc.wasm", "inc", "1", "2"], dir, 1, /takes 1 argument\(s\), got 2/);
+  await expectExit("mod: 1.5 for an i32 is refused", ["mod", "inc.wasm", "inc", "1.5"], dir, 1, /is not an i32/);
+  await expectExit("mod: 1e10 for an i32 is refused", ["mod", "inc.wasm", "inc", "1e10"], dir, 1, /is not an i32/);
+  await expectOut("mod: the i32 limits are taken", ["mod", "inc.wasm", "inc", "-2147483648"], dir, "-2147483647");
+  await expectExit("wasic: a second file is refused", ["wasic", "usedual.ts", "inc.wat"], dir, 1, /takes one file/);
   await expectExit("a command without its target exits 1", ["wasic"], dir, 1, /expected a target/);
   await expectExit("--help exits 0", ["--help"], dir, 0);
 
@@ -169,6 +176,98 @@ try {
   await expectOut("mod: i64 add, beyond 2^53", ["mod", "i64.wasm", "add64", "9007199254740993", "1"], dir, "9007199254740994");
   await expectOut("run (library call): i64 add", ["run", "i64.wasm", "add64", "2", "3"], dir, "5");
   await expectExit("mod: a fraction for an i64 is refused", ["mod", "i64.wasm", "add64", "2.5", "1"], dir, 1, /is not an integer/);
+
+  console.log("── `run`: an unimplemented WASI call fails, and no fd but 1 / 2 is written (review H12) ──");
+  await Deno.writeTextFile(
+    join(dir, "wasi_errs.wat"),
+    `(module\n  (import ${WASI} "fd_write" (func $w (param i32 i32 i32 i32) (result i32)))\n` +
+      `  (import ${WASI} "path_open" (func $open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))\n` +
+      `  (import ${WASI} "proc_exit" (func $exit (param i32)))\n  (memory (export "memory") 1)\n` +
+      `  (data (i32.const 64) "hi\\n")\n  (func $start\n` +
+      `    (i32.store (i32.const 0) (i32.const 64)) (i32.store (i32.const 4) (i32.const 3))\n` +
+      `    (call $exit (i32.add\n` +
+      `      (i32.mul (call $w (i32.const 3) (i32.const 0) (i32.const 1) (i32.const 16)) (i32.const 100))\n` +
+      `      (call $open (i32.const 3) (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0) (i64.const 0) (i64.const 0) (i32.const 0) (i32.const 32)))))\n` +
+      `  (export "_start" (func $start)))\n`,
+  );
+  // EBADF (8) * 100 + ENOSYS (52) = 852 (Windows keeps 32-bit exit codes; POSIX 852 mod 256 = 84);
+  // both were 0, success
+  await expectExit(
+    "fd 3 is EBADF and path_open ENOSYS, nothing written",
+    ["run", "wasi_errs.wat"],
+    dir,
+    Deno.build.os === "windows" ? 852 : 84,
+  );
+
+  console.log("── an import that does not resolve is refused, not dropped (review H8) ──");
+  await Deno.writeTextFile(join(dir, "missing_import.ts"), `import { x } from "./nope.ts";\nconsole.log(x);\n`);
+  await expectExit("tsbundle: a missing import is refused by name", ["tsbundle", "missing_import.ts", "-o", "mi.ts"], dir, 1, /cannot resolve the import/);
+  check("…and no bundle is written", !(await exists(join(dir, "mi.ts"))), "mi.ts exists");
+
+  console.log("── too deep to compile: named, with the source file (review H3) ──");
+  await Deno.writeTextFile(
+    join(dir, "deep.ts"),
+    `function f(x: number): number { return x + 1; }\nconsole.log(${"f(".repeat(400)}1${")".repeat(400)});\n`,
+  );
+  let chain = "const v: number = 3;\n";
+  for (let i = 0; i < 300; i++) chain += `${i ? "else " : ""}if (v === ${i}) console.log(${i});\n`;
+  await Deno.writeTextFile(join(dir, "chain.ts"), chain);
+  await expectExit("wasic: a 400-deep call is refused, naming deep.ts", ["wasic", "deep.ts"], dir, 1, /deep\.ts: the program nests too deeply/);
+  await expectExit("wasic: a 300-branch else-if chain names chain.ts", ["wasic", "chain.ts"], dir, 1, /chain\.ts: the compiled program nests deeper than 256 levels/);
+
+  console.log("── a program over the size cap is refused, not compiled for minutes (review H4) ──");
+  await Deno.writeTextFile(join(dir, "huge.ts"), `console.log("${"a".repeat(1_100_000)}");\n`);
+  {
+    const t0 = Date.now();
+    await expectExit("wasic: a 1.1 MB program is refused at once", ["wasic", "huge.ts"], dir, 1, /over the 1048576-byte cap/);
+    check("…within seconds (it took minutes)", Date.now() - t0 < 30_000, `${Date.now() - t0} ms`);
+  }
+
+  console.log("── a truncated .wit / .js is refused, not turned into an empty result (review H9) ──");
+  await Deno.writeTextFile(join(dir, "trunc.wit"), `package a:b;\ninterface i { f: func(x: u32\n`);
+  await Deno.writeTextFile(join(dir, "empty.wit"), ``);
+  await Deno.writeTextFile(join(dir, "trunc.js"), `function f(a, b) { return a + b\n`);
+  await expectExit("bindgen: a truncated .wit is refused", ["bindgen", "trunc.wit"], dir, 1, /unbalanced braces/);
+  await expectExit("bindgen: an empty .wit is refused", ["bindgen", "empty.wit"], dir, 1, /no world and no functions/);
+  await expectExit("jstyper: a truncated .js is refused", ["jstyper", "trunc.js", "--dts-only"], dir, 1, /unbalanced braces/);
+
+  console.log("── a negative repeat count fails loudly, as JavaScript's RangeError (review H11) ──");
+  await Deno.writeTextFile(
+    join(dir, "rep.ts"),
+    `const k: number = -1;\nconsole.log("ab".repeat(3), "ab".repeat(0).length);\nconsole.log("ab".repeat(k).length);\n`,
+  );
+  await step(["wasic", "rep.ts", "-o", "rep.wasm"], dir);
+  await expectExit("run: repeat(-1) traps, exit 1 (it printed 0)", ["run", "rep.wasm"], dir, 1, /ababab 0[\s\S]*unreachable/);
+
+  console.log("── an uncaught exception from a library is named, as JavaScript would (review B4) ──");
+  await Deno.writeTextFile(
+    join(dir, "ovf.ts"),
+    `type i32 = number;\nexport function add(a: i32, b: i32): i32 {\n  return a + b;\n}\n`,
+  );
+  await step(["modc", "ovf.ts"], dir);
+  await expectOut("mod: an i32 add that fits", ["mod", "ovf.wasm", "add", "2", "3"], dir, "5");
+  await expectExit(
+    "mod: an i32 overflow prints the RangeError's message, exit 1",
+    ["mod", "ovf.wasm", "add", "2147483647", "1"],
+    dir,
+    1,
+    /RangeError: the result of '\+' does not fit an i32/,
+  );
+
+  console.log("── a fraction from '**' into an i32 fails loudly (review RB1; it truncated 2 ** -1 to 0) ──");
+  await Deno.writeTextFile(
+    join(dir, "pw.ts"),
+    `type i32 = number;\nexport function pe(a: i32, b: i32): i32 {\n  return a ** b;\n}\n`,
+  );
+  await step(["modc", "pw.ts"], dir);
+  await expectOut("mod: an integer power into an i32", ["mod", "pw.wasm", "pe", "3", "4"], dir, "81");
+  await expectExit(
+    "mod: 2 ** -1 (0.5) into an i32 is a RangeError, exit 1",
+    ["mod", "pw.wasm", "pe", "2", "-1"],
+    dir,
+    1,
+    /RangeError: the result of '\*\*' does not fit an i32/,
+  );
 
   console.log("── a bindgen binding links a camelCase host import and loads a path or a view (ld82, ld83) ──");
   await step(["modc", "hostlib.ts"], dir);
@@ -205,6 +304,33 @@ try {
     check("the module is at out/golib.wasm", await exists(join(dir, "out", "golib.wasm")), "absent");
     check("nothing was written under src/out/", !(await exists(join(dir, "src", "out", "golib.wasm"))), "written there");
     await expectOut("the module works", ["mod", "out/golib.wasm", "add", "2", "3"], dir, "5");
+  }
+
+  console.log("── Go (std runtime): no build-machine path in the module (review P2) ──");
+  const hasGo = await new Deno.Command("go", { args: ["version"], stdout: "null", stderr: "null" })
+    .output().then((o) => o.success, () => false);
+  if (!hasGo) {
+    skipped++;
+    console.log("  - skipped: Go is not installed");
+  } else {
+    await Deno.mkdir(join(dir, "gostd"));
+    await Deno.writeTextFile(
+      join(dir, "gostd", "main.go"),
+      `package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("hello")\n}\n`,
+    );
+    const r = await wasmtk(["build", "--lang=go", "--go-runtime=std", "gostd/main.go"], dir);
+    const bytes = await Deno.readFile(join(dir, "gostd", "main.wasm")).catch(() => new Uint8Array());
+    const text = new TextDecoder("latin1").decode(bytes);
+    // the temp folder this suite runs in, and the Go install's path: neither may be in the module
+    const leaks = [dir, Deno.env.get("GOROOT") ?? "", Deno.env.get("USERPROFILE") ?? Deno.env.get("HOME") ?? ""]
+      .filter((p) => p.length > 3)
+      .flatMap((p) => [p, p.replace(/\\/g, "/")])
+      .filter((p) => text.includes(p));
+    check(
+      "build --go-runtime=std: the module carries no build-machine path (-trimpath)",
+      r.code === 0 && bytes.length > 0 && leaks.length === 0,
+      `exit ${r.code}, ${bytes.length} bytes, ${leaks.length} path(s) found`,
+    );
   }
 } finally {
   await Deno.remove(dir, { recursive: true });

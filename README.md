@@ -1549,6 +1549,25 @@ replacement.
   atomics). Goroutines, channels, and `select` **already work today** via the Go producer's asyncify
   scheduler.
 
+## Privacy
+
+wasmtk collects nothing and sends nothing. It has no telemetry and no update check, and it makes
+no network request of its own: a binding `bindgen` generates loads only the `.wasm` path or URL
+you pass to it.
+
+- **What it reads:** the files you name, and these environment variables: `WASMTK_SUBPROCESS_TIMEOUT_S`
+  (the time limit on a toolchain it starts, default 1800 s), `WASMTK_MAX_SOURCE_BYTES` (the size cap
+  on a program, default 1 MiB), `WASMOPT` and `WASMTK_GO_BINARYEN_ASYNCIFY` (the Go producer), and
+  `PATH` (to find a toolchain). The producer commands (Go, Zig, Rust) run your installed toolchain
+  with your environment, and that toolchain keeps its own build cache.
+- **What a module it builds contains:** your program, never your paths, user name or environment.
+  The Go builds are made without debug paths (TinyGo `-no-debug`, standard Go `-trimpath`); a Zig
+  or Rust build carries what that toolchain's own settings put in it.
+- **What `wasmtk run` gives a module:** its arguments, standard output and error, and random
+  bytes and the clock; no environment variable and no file or folder.
+- **Temporary files:** written beside the output for a moment (an atomic write) or in the system
+  temp folder for a build, and removed when the command ends.
+
 ## License
 
 wasmtk is dual-licensed under either of

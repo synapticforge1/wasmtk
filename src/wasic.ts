@@ -136,6 +136,7 @@ import {
   type WmHelper,
 } from "./wasmath_lower.ts";
 import { bindDefaultParam } from "./default_params.ts";
+import { EXN_KINDS } from "./exn_kinds.ts";
 import {
   arrInspectKind,
   type ClosureVarLookup,
@@ -1307,6 +1308,7 @@ const I32_FIT_NAMES: Record<string, string> = {
   "+": "add",
   "-": "sub",
   "*": "mul",
+  "**": "pow",
   "++": "inc",
   "--": "dec",
 };
@@ -1315,6 +1317,7 @@ const I32_WRAP_NAMES: Record<string, string> = {
   "+": "add",
   "-": "sub",
   "*": "mul",
+  "**": "pow",
   "++": "add",
   "--": "sub",
 };
@@ -1322,16 +1325,7 @@ const I32_WRAP_NAMES: Record<string, string> = {
 /** sw44 (2026-10-06): the Error family a `throw` can carry, by kind number. 0 is "not an Error"
  *  (a thrown string, number or boolean). `$__exn_kind` holds the kind of the exception in flight;
  *  a catch variable keeps its own copy in `$<var>__kind`. */
-const EXN_KINDS = [
-  "",
-  "Error",
-  "TypeError",
-  "RangeError",
-  "SyntaxError",
-  "EvalError",
-  "ReferenceError",
-  "URIError",
-];
+// EXN_KINDS (what `$__exn_kind` holds) is in ./exn_kinds.ts, shared with the host (review B4).
 
 /** The memory load for a value of WAT type `t`. The chains this replaces sent `f32` to
  *  `i32.load`, so an f32 struct field or array element was an i32 (ld18, sw43; 2026-10-06). */
@@ -2538,6 +2532,48 @@ class WasicTranspiler {
     return ["+", "-", "*"].some((o) => this.findBinaryOp(u, o) > 0);
   }
 
+  /**
+   * Whether `s`, its parentheses stripped, is a `>>>` at its top level: JavaScript's unsigned
+   * 32-bit value, held in an i32 (review RB3). An operator of lower precedence at the top level
+   * (a comparison, a bitwise or logical operator, a ternary) means the `>>>` is inside it.
+   */
+  private isUnsignedShift(s: string): boolean {
+    let u = s.trim();
+    while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+      u = u.slice(1, -1).trim();
+    }
+    if (this.findBinaryOp(u, ">>>") <= 0) return false;
+    const lower = ["||", "&&", "??", "|", "^", "&", "===", "!==", "==", "!=", "<=", ">=", "<"];
+    if (lower.some((o) => this.findBinaryOp(u, o) > 0) || this.findDepth0LTR(u, "?") !== -1) {
+      return false;
+    }
+    // `>` alone: findBinaryOp may see the `>` of `>>>`; only a `>` that is not part of a shift
+    return !/(?<![>=])>(?![>=])/.test(u.replace(/>>>|>>/g, ""));
+  }
+
+  /** A `%` at the top level of `s` with an unsigned side: an unsigned value up to 2³² − 1. */
+  private isUnsignedRem(s: string): boolean {
+    let u = s.trim();
+    while (u.startsWith("(") && u.endsWith(")") && parenDepthNeverNegative(u.slice(1, -1))) {
+      u = u.slice(1, -1).trim();
+    }
+    const i = this.findBinaryOp(u, "%");
+    if (i <= 0) return false;
+    const lower = ["||", "&&", "??", "|", "^", "&", "===", "!==", "==", "!=", "<=", ">=", "<", "+"];
+    if (lower.some((o) => this.findBinaryOp(u, o) > 0) || this.findDepth0LTR(u, "?") !== -1) {
+      return false;
+    }
+    if (this.findBinaryOp(u, "-") > 0 || /(?<![>=])>(?![>=])/.test(u.replace(/>>>|>>/g, ""))) {
+      return false;
+    }
+    return this.isUnsignedValue(u.slice(0, i)) || this.isUnsignedValue(u.slice(i + 1));
+  }
+
+  /** JavaScript's unsigned 32-bit value held in an i32: a `>>>`, or a `%` of one (review RB3). */
+  private isUnsignedValue(s: string): boolean {
+    return this.isUnsignedShift(s) || this.isUnsignedRem(s);
+  }
+
   /** `$__i32_fit_<op>(v: f64) -> i32`: v, or a RangeError when it is outside the i32 range. */
   private i32FitHelpersWat(): string {
     return [...this.i32FitUsed].map(([op, msg]) =>
@@ -2557,7 +2593,15 @@ class WasicTranspiler {
     (local $m i32)
     (if (i32.or (f64.lt (local.get $v) (f64.const -2147483648)) (f64.gt (local.get $v) (f64.const 2147483647)))
       (then
-        ${this.i32FitThrowWat(msg)}))
+        ${this.i32FitThrowWat(msg)}))${
+          // '**' can give a fraction or NaN (2 ** -1, a ** 0.5), which no i32 holds (review RB1);
+          // '+ - *' of i32 operands cannot, so their helpers keep the range test only
+          op === "**"
+            ? `
+    (if (f64.ne (f64.trunc (local.get $v)) (local.get $v))
+      (then
+        ${this.i32FitThrowWat(msg)}))`
+            : ""}
     (i32.trunc_f64_s (local.get $v))
   )`
     ).join("\n");
@@ -14096,7 +14140,16 @@ ${prefixed}
     // Unary - on a non-literal (e.g. -x, -(a+b))
     if (unaryOk && expr.startsWith("-") && !/^-\d/.test(expr)) {
       const inner = expr.slice(1).trim();
-      const innerType = /^\w+$/.test(inner) && locals.has(inner) ? locals.get(inner)! : defaultType;
+      // The operand's own type: a local's declared type, else what the expression infers to. A
+      // MODULE-level f64 is not in `locals`, and taking `defaultType` (i32 in `-g | 0`) emitted
+      // `(i32.sub (i32.const 0) <f64>)` — an invalid module, reported as success (review B1,
+      // 2026-11-20).
+      const inferred = watBaseType(this.inferExprType(inner, locals));
+      const innerType = /^\w+$/.test(inner) && locals.has(inner)
+        ? locals.get(inner)!
+        : inferred === "f64" || inferred === "f32" || inferred === "i64"
+        ? inferred
+        : defaultType;
       if (innerType === "f64" || innerType === "f32") {
         return `(${innerType}.neg ${this.emitExpr(inner, locals, innerType)})`;
       }
@@ -14133,9 +14186,17 @@ ${prefixed}
           return this.convertWat(w, "i64", defaultType);
         }
         this.needsMathLib38 = true;
-        return `(call $mathlib_pow ${this.emitExpr(lhs, locals, "f64")} ${
+        const pw = `(call $mathlib_pow ${this.emitExpr(lhs, locals, "f64")} ${
           this.emitExpr(rhs, locals, "f64")
         })`;
+        // An i32 slot (a return, a declaration, an argument) gets JavaScript's result through the
+        // checked store, as `+ - *` do (sw119); the raw f64 there was an invalid module reported
+        // as success (`function sq(a: i32): i32 { return a ** 2; }`, review B3, 2026-11-20).
+        if (watBaseType(defaultType as WatType) === "i32" && !this.i32ChainPending) {
+          this.useI32Fit("**");
+          return `(call $__i32_fit_pow ${pw})`;
+        }
+        return pw;
       }
     }
 
@@ -14720,13 +14781,19 @@ ${prefixed}
           // an integer literal is its f64 constant (smaller, and no i32.const for the merge to
           // mistake for a data pointer, sw138)
           if (/^-?\d+$/.test(s.trim())) return `(f64.const ${Number(s.trim())})`;
+          // a `%` of an unsigned value is itself one, up to 2³² − 1: its exact f64 (RB3)
+          if (this.isUnsignedRem(s)) return this.emitExpr(s, locals, "f64");
           // only an operand that IS a `+ - *` chain: else the marker leaked into a call's own
           // argument (`n * fact(n - 1)` passed an f64 to fact)
           const hits = this.i32ChainHits;
           this.i32ChainPending = this.isArithChain(s);
           const w = this.emitExpr(s, locals, "i32");
           this.i32ChainPending = false;
-          return this.i32ChainHits > hits && w.startsWith("(f64.") ? w : `(f64.convert_i32_s ${w})`;
+          if (this.i32ChainHits > hits && w.startsWith("(f64.")) return w;
+          // a `>>>` operand is JavaScript's UNSIGNED 32-bit value (review B5, 2026-11-20)
+          return /^\(i32\.shr_u /.test(w.trimStart())
+            ? `(f64.convert_i32_u ${w})`
+            : `(f64.convert_i32_s ${w})`;
         };
         // sw119: a COMPARISON of i32s where a side is a `+ - *` chain compares JavaScript's exact
         // values: `big + 1 > 0` of an i32 max is true (wrapped it was false; checked it would throw)
@@ -14740,11 +14807,26 @@ ${prefixed}
           "!=": "ne",
           "!==": "ne",
         };
+        // a `>>>` side is unsigned, so it compares as its f64 value too: `(n >>> 0) > 5` of n = -1
+        // was false in the signed i32 compare (review RB3, 2026-11-20)
+        const lShr = this.isUnsignedValue(lhs), rShr = this.isUnsignedValue(rhs);
         if (
           baseType === "i32" && !alwaysI32 && F64_CMP[op] && !this.i32ChainPending &&
-          (this.isArithChain(lhs) || this.isArithChain(rhs))
+          (this.isArithChain(lhs) || this.isArithChain(rhs) || lShr || rShr)
         ) {
           return `(f64.${F64_CMP[op]} ${opF64(lhs)} ${opF64(rhs)})`;
+        }
+        // `%` with a `>>>` side: the remainder of the unsigned value, in i64 where both fit
+        // (`(x >>> 0) % 10` of x = -1 was -1, JavaScript's is 5; review RB3)
+        if (baseType === "i32" && op === "%" && (lShr || rShr)) {
+          const ext = (s: string, u: boolean) =>
+            `(i64.extend_i32_${u ? "u" : "s"} ${this.emitToInt32(s, locals)})`;
+          const r = `(i64.rem_s ${ext(lhs, lShr)} ${ext(rhs, rShr)})`;
+          const ctx = watBaseType(defaultType as WatType);
+          if (ctx === "f64") return `(f64.convert_i64_s ${r})`;
+          if (ctx === "f32") return `(f32.convert_i64_s ${r})`;
+          if (ctx === "i64") return r;
+          return `(i32.wrap_i64 ${r})`;
         }
         if (baseType === "i32" && !alwaysI32 && (op === "+" || op === "-" || op === "*")) {
           // This op is the operand of an enclosing checked op: hand back the exact f64, unchecked
@@ -14937,6 +15019,10 @@ ${prefixed}
       const t = m[1];
       return `(${t}.gt (${t}.abs ${m[2]}) (${t}.const 0))`;
     }
+    // A float the emitter left as it is (a module-level f64 const is inlined as `f64.const`): the
+    // same truthiness test — `!x` was `i32.eqz` of an f64, an invalid module (review B2).
+    const ft = this.watResultType(w, locals);
+    if (ft === "f64" || ft === "f32") return `(${ft}.gt (${ft}.abs ${w}) (${ft}.const 0))`;
     return w;
   }
 
@@ -16934,8 +17020,28 @@ ${prefixed}
       const eaRhs = expAssignMatch[2].trim();
       const isGlobal = !locals.has(eaVar) && this.moduleGlobals.has(eaVar);
       const getWat = isGlobal ? `(global.get $${eaVar})` : `(local.get $${eaVar})`;
-      this.needsMathLib38 = true;
-      const powWat = `(call $mathlib_pow ${getWat} ${this.emitExpr(eaRhs, locals, "f64")})`;
+      // stored as the variable's own type, as `x = x ** rhs` is: the f64 result went straight into
+      // an i32 local, an invalid module reported as success (review RB2, 2026-11-20)
+      const eaType = watBaseType(
+        (isGlobal ? this.moduleGlobals.get(eaVar)!.type : locals.get(eaVar)!) as WatType,
+      );
+      let powWat: string;
+      if (eaType === "i64") {
+        this.mathHelpers.add("i64_pow");
+        powWat = `(call $__i64_pow ${getWat} ${this.emitExpr(eaRhs, locals, "i64")})`;
+      } else {
+        this.needsMathLib38 = true;
+        const base = eaType === "i32"
+          ? `(f64.convert_i32_s ${getWat})`
+          : eaType === "f32"
+          ? `(f64.promote_f32 ${getWat})`
+          : getWat;
+        powWat = `(call $mathlib_pow ${base} ${this.emitExpr(eaRhs, locals, "f64")})`;
+        if (eaType === "i32") {
+          this.useI32Fit("**");
+          powWat = `(call $__i32_fit_pow ${powWat})`;
+        } else if (eaType === "f32") powWat = `(f32.demote_f64 ${powWat})`;
+      }
       return isGlobal ? `(global.set $${eaVar} ${powWat})` : `(local.set $${eaVar} ${powWat})`;
     }
 
@@ -16978,7 +17084,12 @@ ${prefixed}
       }
       // sw119: `x += e` of an i32 is `x = x + (e)`, so it gives JavaScript's result and the store
       // into x is checked like any other
-      if (opType === "i32" && !alwaysI32 && /^[+\-*]=$/.test(op)) {
+      // `x %= (n >>> 0)`: the remainder by the UNSIGNED value, as `x = x % (…)` gives it (re-review
+      // 2 of RB3: `7 %= (-1 >>> 0)` was 0, JavaScript's is 7)
+      if (
+        (opType === "i32" && !alwaysI32 && /^[+\-*]=$/.test(op)) ||
+        (opType === "i32" && op === "%=" && this.isUnsignedValue(rhs))
+      ) {
         return this.emitStatementCore(
           `${varName} = ${varName} ${op[0]} (${rhs});`,
           locals,
@@ -24119,9 +24230,16 @@ ${sum}
     (param $ptr i32) (param $len i32) (param $n i32)
     (result i32 i32)
     (local $out i32) (local $outlen i32) (local $i i32) (local $j i32)
-    (if (i32.le_s (local.get $n) (i32.const 0))
+    ;; A negative count is JavaScript's RangeError: a trap here, never "" (review H11, 2026-11-20).
+    (if (i32.lt_s (local.get $n) (i32.const 0)) (then (unreachable)))
+    (if (i32.eqz (local.get $n))
       (then (return (local.get $ptr) (i32.const 0)))
     )
+    ;; len * n must fit: it wrapped in 32 bits, a small allocation, and the copy then wrote past it
+    ;; (JavaScript: "Invalid string length"; review H11's sibling)
+    (if (i32.and (i32.ne (local.get $len) (i32.const 0))
+                 (i32.gt_u (local.get $n) (i32.div_u (i32.const 0x7fffffff) (local.get $len))))
+      (then (unreachable)))
     (local.set $outlen (i32.mul (local.get $len) (local.get $n)))
     (local.set $out (call $__malloc (local.get $outlen)))
     (block $done
@@ -27875,6 +27993,52 @@ function bundleErrorText(tsPath: string, err: unknown): string {
  * @param tsPath - Path to the source .ts file.
  * @param outPath - Optional output path; defaults to same name with .wasm extension.
  */
+/**
+ * A transpile failure as the user should read it. Running out of the host's stack — a very deep
+ * nesting or a very long expression — surfaced as "Maximum call stack size exceeded", or as an
+ * internal regex's "Stack overflow", with no file (review H3, 2026-11-20): it is named, with the
+ * file and what to do.
+ */
+/** binaryang's nesting refusal names `<input>` (the generated WAT): named here with the SOURCE file
+ *  and the source shapes that produce it (review H3, 2026-11-20). Anything else is unchanged. */
+function nestingErrorText(tsPath: string, error: string | undefined): string | undefined {
+  if (!error || !/nests deeper than \d+ levels/.test(error)) return error;
+  const levels = error.match(/deeper than (\d+) levels/)![1];
+  return `${tsPath}: the compiled program nests deeper than ${levels} levels (binaryang's limit on ` +
+    `every runtime) — a long else-if chain, ternary chain or && / || chain; split it into a ` +
+    `switch, a lookup table or smaller functions`;
+}
+
+/**
+ * The size cap on a program's text after its imports are inlined (review H4, 2026-11-20): compile
+ * time grows quadratically with it (a 400 KB string literal took 52 s, 5 MB over 200 s, with no
+ * limit). `WASMTK_MAX_SOURCE_BYTES`, default 1 MiB — five times the largest real input (the dynamic
+ * runtime library, 197 KB); 0 = no cap. Returns the refusal, or undefined.
+ */
+function sourceTooLarge(tsPath: string, source: string): string | undefined {
+  const raw = host.env.get("WASMTK_MAX_SOURCE_BYTES");
+  const cap = raw === undefined || raw.trim() === "" ? 1 << 20 : Number(raw);
+  if (!Number.isFinite(cap) || cap < 0) {
+    return `WASMTK_MAX_SOURCE_BYTES=${raw} is not a number of bytes (0 = no cap)`;
+  }
+  const size = new TextEncoder().encode(source).length;
+  if (cap === 0 || size <= cap) return undefined;
+  return `${tsPath}: the program is ${size} bytes with its imports, over the ${cap}-byte cap ` +
+    `(compile time grows with the square of the size); set WASMTK_MAX_SOURCE_BYTES to raise it`;
+}
+
+function transpileErrorText(tsPath: string, err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    (err instanceof RangeError && /call stack/i.test(msg)) ||
+    /Stack overflow|too much recursion/i.test(msg)
+  ) {
+    return `${tsPath}: the program nests too deeply, or an expression is too long, to compile ` +
+      `(the compiler ran out of stack) — split it into smaller expressions or functions`;
+  }
+  return `Transpile error: ${msg}`;
+}
+
 export async function compileWasiTs(
   tsPath: string,
   outPath?: string,
@@ -27932,6 +28096,8 @@ export async function compileWasiTs(
     }
   }
 
+  const tooLarge = sourceTooLarge(tsPath, source);
+  if (tooLarge) return { success: false, error: tooLarge };
   const transpiler = new WasicTranspiler(source, "wasi", allExternalFuncs);
   let wat: string;
   try {
@@ -27939,7 +28105,7 @@ export async function compileWasiTs(
   } catch (err) {
     return {
       success: false,
-      error: `Transpile error: ${err instanceof Error ? err.message : String(err)}`,
+      error: transpileErrorText(tsPath, err),
     };
   }
 
@@ -28037,17 +28203,19 @@ export async function compileWasiTs(
   // `compileLibTs` path and keep the env imports for their host loader.)
   wat = internalizeDynrtHostImports(wat);
 
-  // Write WAT alongside the output for inspection / debugging
-  await host.writeTextFile(watPath, wat);
+  // Write WAT alongside the output for inspection / debugging — not beside a DEVICE (`-o NUL`,
+  // `/dev/null`): there is no folder there, and the lines claimed files never written (review B8)
+  const toDevice = host.isDevice(out);
+  if (!toDevice) await host.writeTextFile(watPath, wat);
 
   const result = await watToOptimisedWasm(wat, watPath, out);
   if (result.success) {
     console.log(`✅ WASI: ${out} (${result.sizeBytes} bytes)`);
-    console.log(`   WAT:  ${watPath}`);
+    if (!toDevice) console.log(`   WAT:  ${watPath}`);
     // Phase 41: emit a .wit interface file alongside the compiled .wasm. Skipped for `dync`
     // (opts.emitWit === false): a dync module is a whole-program WASI command with no exports,
     // so its WIT is an empty world — writing it is a wasted step.
-    if (opts?.emitWit !== false) {
+    if (opts?.emitWit !== false && !toDevice) {
       const witPath = defaultOutPath(out, [".wasm"], ".wit"); // never the output itself (sw113)
       await host.writeTextFile(witPath, transpiler.generateWit(name));
       console.log(`   WIT:  ${witPath}`);
@@ -28058,7 +28226,10 @@ export async function compileWasiTs(
   } else {
     // The caller prints the error (once): printed here too, every CLI failure appeared twice, and
     // `dync` printed it a third way (ld89, 2026-10-22). The WAT's path rides in the message.
-    return { ...result, error: `${result.error}\n   Inspect generated WAT at: ${watPath}` };
+    return {
+      ...result,
+      error: `${nestingErrorText(tsPath, result.error)}\n   Inspect generated WAT at: ${watPath}`,
+    };
   }
   return result;
 }
@@ -28129,6 +28300,8 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
     }
   }
 
+  const tooLarge = sourceTooLarge(tsPath, source);
+  if (tooLarge) return { success: false, error: tooLarge };
   const transpiler = new WasicTranspiler(source, "library", allExternalFuncs2);
   let wat: string;
   try {
@@ -28136,7 +28309,7 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
   } catch (err) {
     return {
       success: false,
-      error: `Transpile error: ${err instanceof Error ? err.message : String(err)}`,
+      error: transpileErrorText(tsPath, err),
     };
   }
 
@@ -28194,22 +28367,29 @@ export async function compileLibTs(tsPath: string, outPath?: string): Promise<Wa
   // #14 follow-up: export dynrt marshalling helpers for `any`-signature functions (modc path too).
   wat = injectDynrtMarshalExports(wat, transpiler);
 
-  await host.writeTextFile(watPath, wat);
+  // not beside a DEVICE (`-o NUL`): no folder there (review B8)
+  const toDevice = host.isDevice(out);
+  if (!toDevice) await host.writeTextFile(watPath, wat);
 
   const result = await watToOptimisedWasm(wat, watPath, out);
   if (result.success) {
     // Phase 41: emit .wit interface file alongside the compiled .wasm (never the output itself)
     const witPath = defaultOutPath(out, [".wasm"], ".wit");
-    await host.writeTextFile(witPath, transpiler.generateWit(name));
+    if (!toDevice) await host.writeTextFile(witPath, transpiler.generateWit(name));
     console.log(`✅ Library: ${out} (${result.sizeBytes} bytes)`);
-    console.log(`   WAT:  ${watPath}`);
-    console.log(`   WIT:  ${witPath}`);
+    if (!toDevice) {
+      console.log(`   WAT:  ${watPath}`);
+      console.log(`   WIT:  ${witPath}`);
+    }
     if (wasmImports.length > 0) {
       console.log(`   Merged: ${wasmImports.map((e) => e.prefix).join(", ")}`);
     }
   } else {
     // printed once, by the caller (ld89; see compileWasiTs)
-    return { ...result, error: `${result.error}\n   Inspect generated WAT at: ${watPath}` };
+    return {
+      ...result,
+      error: `${nestingErrorText(tsPath, result.error)}\n   Inspect generated WAT at: ${watPath}`,
+    };
   }
   return result;
 }

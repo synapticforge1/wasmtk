@@ -334,6 +334,17 @@ export async function runJstyper(
   }
 
   const jsFns = parseJsFunctions(jsText);
+  // A source with no function this tool can read is refused by name: a truncated `.js` wrote a
+  // 1-byte `.ts` and exited 0, dropping every function silently (review H9, 2026-11-20).
+  const opens = (jsText.match(/\{/g) ?? []).length, closes = (jsText.match(/\}/g) ?? []).length;
+  if (opens !== closes || jsFns.length === 0) {
+    console.error(
+      `❌ jstyper: ${jsFile}: ${
+        opens !== closes ? `unbalanced braces ({ ${opens}, } ${closes}) — truncated?` : "no function found"
+      }; nothing to convert`,
+    );
+    host.exit(1);
+  }
 
   // --dts-only: generate skeleton .d.ts for hand-editing
   if (dtsOnly) {

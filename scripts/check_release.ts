@@ -288,46 +288,101 @@ const bumpV = (s: string) => s.replace('"3.0.0"', '"4.0.0"');
       "cmem/review-issues.md,src/wasic.ts,README.md,.github/workflows/publish.yml",
     outside.join(","),
   );
+  // The release files at the reviewed commit, and "now" (the working tree), for the version check.
+  const DJ0 = JSON.stringify({ name: "@x/y", version: "3.0.0", imports: { a: "jsr:@a/a@1" } });
+  const UT0 = 'export const VERSION = "3.0.0";\nexport const X = 1;\n';
+  const reviewedText: Record<string, string> = {
+    "deno.json": DJ0,
+    "package.json": DJ0,
+    "src/utils.ts": UT0,
+  };
+  const bumped: Record<string, string> = {
+    "deno.json": DJ0.replace("3.0.0", "4.0.0"),
+    "package.json": DJ0.replace("3.0.0", "4.0.0"),
+    "src/utils.ts": UT0.replace("3.0.0", "4.0.0"),
+  };
+  const z = (...names: string[]) => names.map((n) => n + "\0").join("");
   const fake = (o: { anc?: number; committed?: string; working?: string } = {}): Git => (args) => {
     if (args[0] === "merge-base") {
       const code = o.anc ?? 0;
       return { code, out: "", err: code > 1 ? `fatal: Not a valid commit name ${args[2]}` : "" };
     }
-    if (args[0] === "diff" && args.length === 5) {
+    if (args[0] === "diff" && args.includes(SHA)) {
       return { code: 0, out: o.committed ?? "", err: "" };
     }
     if (args[0] === "diff") return { code: 0, out: o.working ?? "", err: "" };
+    if (args[0] === "show") {
+      const t = reviewedText[args[1].slice(args[1].indexOf(":") + 1)];
+      return t === undefined
+        ? { code: 128, out: "", err: "fatal: no such path" }
+        : { code: 0, out: t, err: "" };
+    }
     return { code: 1, out: "", err: "fake git: unexpected" };
   };
+  const vo = (now: Record<string, string>) => (file: string, was: string) =>
+    bumpOnly(file, was, now[file], "4.0.0");
   check(
     "G5 an ancestor; only the bump, CHANGELOG.md and cmem/ changed since → passes",
     reviewGate(
       done,
-      fake({ committed: "cmem/STATE.md\nCHANGELOG.md\n", working: "deno.json\npackage.json\n" }),
+      fake({
+        committed: z("cmem/STATE.md", "CHANGELOG.md"),
+        working: z("deno.json", "package.json"),
+      }),
       RF,
+      vo(bumped),
     ),
     null,
   );
-  check("G6 no issues file → refused", reviewGate(null, fake(), RF), /no cmem\/review-issues\.md/);
+  check(
+    "G6 no issues file → refused",
+    reviewGate(null, fake(), RF, vo(bumped)),
+    /no cmem\/review-issues\.md/,
+  );
   check(
     "G7 not an ancestor of HEAD → refused",
-    reviewGate(done, fake({ anc: 1 }), RF),
+    reviewGate(done, fake({ anc: 1 }), RF, vo(bumped)),
     /not an ancestor/,
   );
   check(
     "G8 an unknown commit → refused",
-    reviewGate(done, fake({ anc: 128 }), RF),
+    reviewGate(done, fake({ anc: 128 }), RF, vo(bumped)),
     /not a commit here/,
   );
   check(
     "G9 a src/ change COMMITTED since the review → refused, by name",
-    reviewGate(done, fake({ committed: "cmem/STATE.md\nsrc/wasic.ts\n" }), RF),
+    reviewGate(done, fake({ committed: z("cmem/STATE.md", "src/wasic.ts") }), RF, vo(bumped)),
     /^  src\/wasic\.ts$/,
   );
   check(
     "G10 an UNCOMMITTED src/ change → refused, by name",
-    reviewGate(done, fake({ working: "src/host.ts\n" }), RF),
+    reviewGate(done, fake({ working: z("src/host.ts") }), RF, vo(bumped)),
     /^  src\/host\.ts$/,
+  );
+  check(
+    "G11 a CODE edit in a release file since the review (src/utils.ts beyond VERSION) → refused (B6)",
+    reviewGate(
+      done,
+      fake({ committed: z("src/utils.ts") }),
+      RF,
+      vo({ ...bumped, "src/utils.ts": bumped["src/utils.ts"].replace("X = 1", "X = 2") }),
+    ),
+    /src\/utils\.ts \(/,
+  );
+  check(
+    "G12 deno.json's imports changed since the review → refused (B6)",
+    reviewGate(
+      done,
+      fake({ working: z("deno.json") }),
+      RF,
+      vo({ ...bumped, "deno.json": bumped["deno.json"].replace("@a/a@1", "@evil/a@1") }),
+    ),
+    /deno\.json \(/,
+  );
+  check(
+    "G13 a spaced / non-ASCII path is read as one name (-z)",
+    reviewGate(done, fake({ working: z("src/my file ü.ts") }), RF, vo(bumped)),
+    /^  src\/my file ü\.ts$/,
   );
 }
 {

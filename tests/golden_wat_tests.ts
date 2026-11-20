@@ -25,7 +25,7 @@
  *   deno run -A tests/golden_wat_tests.ts --record
  *   deno run -A tests/golden_wat_tests.ts
  *
- * @license MIT
+ * @license MIT OR Apache-2.0
  */
 
 import { join } from "jsr:@std/path";

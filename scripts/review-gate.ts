@@ -63,6 +63,11 @@ export function reviewGate(
   issues: string | null,
   git: Git,
   releaseFiles: readonly string[],
+  /** The problem with release file `file` now against its text at the reviewed commit, or "" when
+   *  only its version line changed (release.ts passes `bumpOnly`). Review B6 (2026-11-20): the
+   *  three release files were exempt by NAME, so a code edit to src/utils.ts or deno.json's
+   *  `imports` after the review shipped unreviewed. */
+  versionOnly: (file: string, atReviewed: string) => string,
 ): string[] {
   if (issues === null) {
     return [`no ${ISSUES_FILE}: run "review" (the five classes, cmem/review-process.md) first`];
@@ -78,18 +83,23 @@ export function reviewGate(
   if (anc.code !== 0) {
     return [`the reviewed commit ${r.commit} is not a commit here: ${anc.err.trim()}`];
   }
-  const committed = git(["diff", "--name-only", "--no-renames", r.commit, "HEAD"]);
-  const working = git(["diff", "--name-only", "--no-renames", "HEAD"]);
+  // `-z`: names exactly as stored (a non-ASCII or spaced path is not quoted), NUL-separated.
+  const committed = git(["diff", "--name-only", "-z", "--no-renames", r.commit, "HEAD"]);
+  const working = git(["diff", "--name-only", "-z", "--no-renames", "HEAD"]);
   if (committed.code !== 0 || working.code !== 0) {
     return [`could not diff against the reviewed commit: ${(committed.err + working.err).trim()}`];
   }
-  const changed = (committed.out + "\n" + working.out).split("\n").map((l) => l.trim()).filter(
-    Boolean,
-  );
+  const changed = [...new Set((committed.out + "\0" + working.out).split("\0").filter(Boolean))];
   const outside = unreviewedFiles(changed, releaseFiles);
+  // A release file may differ from the reviewed commit by its version line ONLY.
+  for (const p of changed.filter((f) => releaseFiles.includes(f))) {
+    const was = git(["show", `${r.commit}:${p}`]);
+    const problem = was.code !== 0 ? `not readable at ${r.commit}` : versionOnly(p, was.out);
+    if (problem) outside.push(`${p} (${problem})`);
+  }
   if (outside.length === 0) return [];
   return [
-    `${outside.length} file(s) changed since the reviewed commit ${r.commit}, outside the bump and cmem/:`,
+    `${outside.length} file(s) changed since the reviewed commit ${r.commit}, beyond the version bump and cmem/:`,
     ...outside.slice(0, 10).map((p) => `  ${p}`),
     ...(outside.length > 10 ? [`  ... and ${outside.length - 10} more`] : []),
     "Re-review the changes (a re-review reads the changes only, review-process.md § 9), then update the line.",

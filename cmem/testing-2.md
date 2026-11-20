@@ -6,6 +6,15 @@ Continues [testing.md](testing.md) (split by size on 2026-11-20, letter H38). Se
 
 ## Current pass counts (2026-11-20, binaryang **4.1.1**; latest release v3.0.0)
 
+> **2026-11-20, latest: review round 7's fixes, full gate GREEN on `review/2026-11-20`.** wasi
+> **513/513** (+4: `4n_ModuleFloatUnaryOperators`, `22_PowerIntoI32Slot`,
+> `45_UnsignedShiftIsUnsigned`, `4n_RadixLiteralsInConsole`) · golden **572**, re-recorded: 85
+> entries moved, every changed line explained (the H11 `repeat` helper's negative-count trap and
+> `len * n` check: 45 WAT + 35 optimized; B5's unsigned `>>>` print: 2; the 4 new tests) ·
+> cross-check **1386** (+12, the new tests × 3 engines, all `match`, pinned) · wast 64,506 / 0 /
+> 16 ALL CLEAN · host **15** (new) · tool_rows **59** · outpath **23** · check_release 31 ·
+> check-licences self-test 6 · check-privacy clean (1993 files) · every other suite at its count.
+
 > **2026-11-20, later: H39 — `src/host.ts` (every system call), atomic writes, `--self-check`;
 > full gate GREEN on branch `refactor/host-ts-2026-11-20`.** wasi **509/509** · golden 568
 > byte-identical · wast 64,506 / 0 / 16 ALL CLEAN · cross-check 1374 · outpath **17** (+3: `-o NUL`
