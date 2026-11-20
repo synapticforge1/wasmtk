@@ -17,9 +17,8 @@
  * `import`/`export` of other modules and interactive `prompt` (no host stdin in the interpreter).
  */
 
-import { basename, dirname } from "@std/path";
 import { assertNotInput } from "./outpath.ts";
-import { rt } from "./rt.ts";
+import { basename, dirname, host } from "./host.ts";
 import { compileWasiTs } from "./wasic.ts";
 
 /**
@@ -52,17 +51,17 @@ export async function compileDyn(path: string, outPath?: string): Promise<void> 
     assertNotInput(path, wasmOut, "dync");
   } catch (err) {
     console.error(`❌ ${err instanceof Error ? err.message : err}`);
-    rt.exit(1);
+    host.exit(1);
     return;
   }
 
   let src: string;
   try {
-    src = await rt.readTextFile(path);
+    src = await host.readTextFile(path);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`❌ dync: cannot read ${path}: ${msg}`);
-    rt.exit(1);
+    host.exit(1);
     return;
   }
 
@@ -82,7 +81,7 @@ dynRunB64(__dyn_b64, __dyn_env);
   // The driver has no relative imports (only the virtual `wasmtk:dynrt`), so its location is
   // irrelevant — write it alongside the output, compile, then remove the scaffold.
   const driverPath = `${srcDir}/${name}.__dync.ts`;
-  await rt.writeTextFile(driverPath, driver);
+  await host.writeTextFile(driverPath, driver);
   let failed = false;
   try {
     // A dync module is a whole-program WASI command with no exports — its WIT would be an empty
@@ -96,10 +95,10 @@ dynRunB64(__dyn_b64, __dyn_env);
     }
   } finally {
     try {
-      await rt.remove(driverPath);
+      await host.remove(driverPath);
     } catch { /* best-effort scaffold cleanup */ }
   }
   // Exit AFTER the cleanup: an exit inside the try never reached `finally`, so a failed compile left
   // `<name>.__dync.ts` beside the source (ld89, 2026-10-22).
-  if (failed) rt.exit(1);
+  if (failed) host.exit(1);
 }

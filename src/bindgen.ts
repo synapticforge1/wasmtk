@@ -16,7 +16,7 @@
  *   wasmtk bindgen <file.wit> [-o output.ts] [--runtime deno|node|bun]
  */
 
-import { rt } from "./rt.ts";
+import { host } from "./host.ts";
 import { assertNotInput, defaultOutPath } from "./outpath.ts";
 
 // ── WIT type definitions ─────────────────────────────────────────────────────
@@ -659,11 +659,11 @@ export async function runBindgen(
   witPath: string,
   opts: { outPath?: string } & BindgenOptions = {},
 ): Promise<void> {
-  const witSrc = await rt.readTextFile(witPath);
+  const witSrc = await host.readTextFile(witPath);
   const ts = generateBindings(witSrc, opts);
   // sw113: `H2.WIT` matched no replace and the TypeScript was written over the WIT
   const out = opts.outPath ?? defaultOutPath(witPath, [".wit"], ".bindings.ts");
   assertNotInput(witPath, out, "bindgen");
-  await rt.writeTextFile(out, ts);
+  await host.writeTextFile(out, ts);
   console.log(`   bindgen: ${out}`);
 }

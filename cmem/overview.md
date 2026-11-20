@@ -28,7 +28,7 @@ wasmtk/
 │   ├── dync.ts          # Full-dynamic-compile entry: whole TS/JS file → WASI via the own runtime (wasmtk:dynrt); replaced javyc (deleted v1.11.1)
 │   ├── jstyper.ts       # .js + .d.ts → typed .ts pre-processor (Phase 39)
 │   ├── binaryen.ts      # wrapper over npm vs JSR binaryen default-export shape + shared binaryenOptimize() (-Oz; used by Go/Zig producers)
-│   ├── rt.ts            # Runtime I/O shim (all I/O goes through rt.*, never Deno.* directly)
+│   ├── host.ts          # EVERY system call (files, paths, env, args, exit, programs); was rt.ts (H39, 2026-11-20; gate: deno task check-host)
 │   ├── utils.ts         # WASM runner / WASI shims / CLI command handlers
 │   └── wasm/            # Pre-compiled WASM library assets (e.g. mathlib.wasm, Phase 38)
 └── tests/

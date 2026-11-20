@@ -139,7 +139,7 @@ compatibility yes". Then, the same day: **M3 and M4 as recommended**, and **M2: 
   functions through `await import`; `bun build --target=browser --external 'node:*'` over every
   export in CI PLUS the source-level portability check, both proven against a used `node:fs`
   mutant; bytes-in / bytes-out APIs beside path-taking ones). New scope inside P2. Expect work:
-  `wasic` / `modc` read files, spawn backends and write outputs, and `src/rt.ts` imports
+  `wasic` / `modc` read files, spawn backends and write outputs, and `src/rt.ts` (now `src/host.ts`) imports
   `node:process` at the top today.
 - **M7. DECIDED: keep the Windows UTF-8 console fix, for compatibility** (`main.ts`,
   `SetConsoleOutputCP(65001)` through Deno's FFI). It stays as a Deno-only, feature-detected
@@ -186,7 +186,7 @@ counting the dync host).
   **Done when** `deno publish --dry-run --config jsr.json` lists the same files as before **AND the
   UPLOAD's specifiers equal today's** (ledger C20, below: a file list cannot show the rewrite).
 - **P2. The product runs on Bun, Node and Deno.**
-  - `src/rt.ts` on `node:` builtins only (no `Bun.*`, no `Deno.*` except feature-detected where
+  - `src/host.ts` (was `src/rt.ts`; since 2026-11-20 every system call, H39) on `node:` builtins only (no `Bun.*`, no `Deno.*` except feature-detected where
     Deno behaviour must stay); `main.ts` on `process.argv` / `process.exit` / `process.platform`,
     `src/jstyper.ts`, `src/wast.ts`. Mind the conversion traps the guide lists (pooled `Buffer`
     from `readFile`, `Dirent.isFile()` a method, `child_process` env REPLACES, `process.execPath`

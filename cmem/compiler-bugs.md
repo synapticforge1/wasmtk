@@ -350,6 +350,31 @@ same day, after the first tally's 2 were fixed, and that 0 carried the warning b
 audit then CONFIRMED 28 more by running them (table below). The count is only as good as the
 entries: a silent-wrong bug nobody has found is not in it.
 
+## H39 — `src/host.ts` (2026-11-20): 2 loud tool rows + 1 test gap, FOUND BY THE SELF-CHECK, FIXED
+
+Moving every system call into `src/host.ts` (workspace letter H39; platforms.md) and running the
+new `wasmtk --self-check` on the dev machine (win-x64) found:
+
+- **ld136 (loud)** — `-o NUL` failed on Windows: `wasmtk convert x.wat -o NUL` → "Conversion
+  failed: The parameter is incorrect. (os error 87)", exit 1. The installed `wasmtk` runs with an
+  explicit `--allow-write` (not `-A`), and Deno's permission check refuses a bare device name;
+  `\\.\NUL` works (measured under both permission forms; truncating it is "Incorrect function").
+  Not seen before because a run from source uses `-A`. **Fix:** `host.writeFile` writes a device in
+  place, a Windows device name through its `\\.\` form, opened for writing only. Test:
+  `tests/outpath_tests.ts` "convert -o NUL writes nothing beside it"; mutant (the mapping off) →
+  that case and the self-check both FAIL with os error 87.
+- **ld137 (loud)** — after ld136's fix, `convert -o NUL` warned "could not emit NUL.wit" — it
+  tried to write a `.wit` beside the device (binaryang 4.1.0 fixed the same in its wasm-bundle).
+  **Fix:** `emitWitBeside` writes nothing for a device (`host.isDevice`). Same test (the folder
+  must hold only the input).
+- **Test gap, caught before commit** — `tests/wasic_seam_tests.ts` forbade host I/O in the
+  compiler core with the pattern `\brt\.`; after the rename to `host` it would have passed with any
+  `host.*` call in the core. Now `\b(?:host|rt)\.` plus a self-case. Lesson in best-practices.md.
+
+Also changed, not defects: every write is atomic (a temporary file beside it, then a rename;
+outpath cases for "no temporary file left" and "an existing output replaced"); `--self-check` with
+other arguments is refused.
+
 ## Review round 6 — FOUND, NOT FIXED (2026-11-12, paused by the owner at end of day)
 
 Three fresh reviewers on `bd69c99f`. Row numbers are given when fixed; the ids below are the

@@ -665,7 +665,7 @@ opt-in via `--go-target=wasm`. All verified: init (no flag) → run PASS → mod
 `--go-runtime=tinygo` (default) / `std` (stdlib `go`: `GOOS=wasip1` for the `run` build, `GOOS=js`
 for the browser modc). All builds use `-p 1 -no-debug -panic=trap` + local
 `TINYGO_CACHE`/`GOTMPDIR`, matching the scripts. Input may be a `.go` file, a dir, or omitted (cwd);
-a dir builds package `.` → `<dir>.wasm` (needs `cwd` on `rt.Command` — added to `rt.ts`).
+a dir builds package `.` → `<dir>.wasm` (needs `cwd` on `rt.Command` — added to `rt.ts`, now `host.Command` in `src/host.ts`).
 `tgobuild.ps1` (native `.exe`) is out of scope.
 
 NOTE on `modc` (⚠ **v1/2026-06-06 — SUPERSEDED 2026-06-07**: `modc --lang=go` now builds a WASI
@@ -749,7 +749,7 @@ So:
   its `cmem/passes.md` § "In-wasm asyncify-import mode") and wired here — the roadmap "asyncify
   pass" item is COMPLETE.
 
-**Two `rt.Command` gotchas baked into `gowasic.ts`:** (1) `rt.Command.output()` always reads
+**Two `host.Command` (was `rt.Command`) gotchas baked into `gowasic.ts`:** (1) `host.Command.output()` always reads
 `result.stdout`/`stderr`, which **throws unless they are `"piped"`** — never pass
 `"null"`/`"inherit"` to a `.output()` call (use `"piped"` and decode). (2) `rt.remove` is single-arg
 (unlink-based under Bun) — use `Deno.remove(dir, {recursive:true})` for the temp shim dir.

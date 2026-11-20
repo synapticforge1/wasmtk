@@ -1,6 +1,6 @@
 # review-process.md — wasmtk's slots in the workspace review standard
 
-🔒 **The process is the workspace's `../cmem/review-process.md`** (owner, 2026-11-12: "accept the
+🔒 **The process is the workspace's `../workspace/cmem/review-process.md`** (owner, 2026-11-12: "accept the
 review process and make it a standard for all projects. each project may have differing individual
 issues, but the overall process should be the same"; letter H35; source: S3D-ReportCompiler's,
 ledger C46). It is NOT restated here: its §§ 1–6 govern — fresh read-only reviewers given the

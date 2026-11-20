@@ -15,7 +15,6 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { join } from "@std/path";
 import {
   bundleTs,
   callExport,
@@ -25,7 +24,7 @@ import {
   VERSION,
   wasm2js,
 } from "./src/utils.ts";
-import { rt } from "./src/rt.ts";
+import { host, join, selfCheck } from "./src/host.ts";
 import { emitWitBeside } from "./src/witgen.ts";
 // Imported from their defining modules, not re-exported through utils.ts — the same pattern as
 // compileDyn below. `./wasic` and `./modc` are the documented public homes for these two (see the
@@ -41,7 +40,7 @@ import { runHybrid } from "./src/hybrid.ts";
 /** True if `path` exists (file or dir). */
 async function pathExists(path: string): Promise<boolean> {
   try {
-    await rt.stat(path);
+    await host.stat(path);
     return true;
   } catch {
     return false;
@@ -60,7 +59,7 @@ async function detectRunLang(target: string): Promise<"go" | "zig" | "rust" | nu
   if (target.endsWith(".zig")) return "zig";
   if (target.endsWith(".rs")) return "rust";
   try {
-    const st = await rt.stat(target) as { isDirectory: boolean | (() => boolean) };
+    const st = await host.stat(target) as { isDirectory: boolean | (() => boolean) };
     const isDir = typeof st.isDirectory === "function" ? st.isDirectory() : !!st.isDirectory;
     if (!isDir) return null;
     if (await pathExists(join(target, "go.mod"))) return "go";
@@ -77,20 +76,16 @@ async function detectRunLang(target: string): Promise<"go" | "zig" | "rust" | nu
  * @returns {Promise<void>}
  */
 async function main(): Promise<void> {
-  // Ensure UTF-8 output on Windows so emojis and box-drawing characters render correctly.
-  // SetConsoleOutputCP(65001) sets the console to UTF-8 at the Windows API level.
-  // chcp is insufficient as Deno writes directly to the console handle, bypassing the code page.
-  if (Deno.build.os === "windows") {
-    try {
-      const kernel32 = Deno.dlopen("kernel32.dll", {
-        SetConsoleOutputCP: { parameters: ["u32"], result: "bool" },
-      });
-      kernel32.symbols.SetConsoleOutputCP(65001);
-      kernel32.close();
-    } catch { /* FFI unavailable in this build — silently continue */ }
+  // UTF-8 console output on Windows (emoji, box drawing); a no-op elsewhere. In src/host.ts.
+  host.setupConsole();
+  const cliArgs = host.args();
+
+  // `wasmtk --self-check` (H39): try every system operation wasmtk uses, on this machine.
+  if (cliArgs.length === 1 && cliArgs[0] === "--self-check") {
+    host.exit((await selfCheck()) ? 0 : 1);
   }
 
-  const args = parseArgs(Deno.args, {
+  const args = parseArgs(cliArgs, {
     alias: {
       v: "version",
       V: "version",
@@ -98,7 +93,7 @@ async function main(): Promise<void> {
       n: "name",
       o: "name",
     },
-    boolean: ["version", "help", "dts-only", "dry-run", "auto", "verbose"],
+    boolean: ["version", "help", "dts-only", "dry-run", "auto", "verbose", "self-check"],
     string: [
       "name",
       "on-conflict",
@@ -128,10 +123,10 @@ async function main(): Promise<void> {
       "go-target",
     ]);
     const raw: string[] = [];
-    for (let i = 0; i < Deno.args.length; i++) {
-      const t = Deno.args[i];
+    for (let i = 0; i < cliArgs.length; i++) {
+      const t = cliArgs[i];
       if (t === "--") {
-        raw.push(...Deno.args.slice(i + 1));
+        raw.push(...cliArgs.slice(i + 1));
         break;
       }
       if (t.startsWith("-") && isNaN(Number(t))) {
@@ -145,7 +140,7 @@ async function main(): Promise<void> {
     // number was lost: `mod lib.wasm f -1` called `f()` and printed its result (2026-10-26). The
     // scan above keeps it, so a negative number means the scan's list is the right one.
     const negativeNumber = (t: string) => t.startsWith("-") && !isNaN(Number(t));
-    if (raw.length === args._.length || Deno.args.some(negativeNumber)) args._ = raw;
+    if (raw.length === args._.length || cliArgs.some(negativeNumber)) args._ = raw;
   }
 
   // A flag with a fixed set of values: anything else was silently its default (`--runtime=nodee`
@@ -165,14 +160,20 @@ async function main(): Promise<void> {
       console.error(
         `❌ wasmtk: --${flag}=${raw} is not a value it takes; use one of: ${choices.join(", ")}`,
       );
-      Deno.exit(1);
+      host.exit(1);
     }
+  }
+
+  // `--self-check` runs alone (handled above); with anything else it was silently ignored.
+  if (args["self-check"]) {
+    console.error("❌ wasmtk: --self-check takes no other arguments");
+    host.exit(1);
   }
 
   // `-o` / `--name` on a command that writes nothing (ld90)
   const refuseOutPath = (cmd: string): never => {
     console.error(`❌ wasmtk ${cmd}: -o / --name is not an option here; ${cmd} writes no file`);
-    Deno.exit(1);
+    host.exit(1);
   };
 
   if (args.version) {
@@ -231,6 +232,7 @@ Usage:
 Options:
   -v, -V, --version            Show version information
   -h, --help                   Show this help message
+      --self-check             Try every file, path and process operation wasmtk uses on this machine
   -n, -o, --name <path>        Output file path (e.g. dist/mymodule.wasm or bindings.ts)
       --on-conflict=prefix     (wasmbundle) Auto-prefix conflicting exports with module name
       --on-conflict=alias      (wasmbundle) Auto-prefix conflicting exports with --alias values
@@ -255,7 +257,7 @@ Options:
     // A command without its target is a usage error, not a request for help: it exited 0 (ld90).
     if (!args.help && command) {
       console.error(`❌ wasmtk ${command}: expected a target file or directory`);
-      Deno.exit(1);
+      host.exit(1);
     }
     return;
   }
@@ -280,8 +282,8 @@ Options:
   const rsxtkForwardArgs = (): string[] => {
     const out: string[] = [];
     let droppedCommand = false;
-    for (let i = 0; i < Deno.args.length; i++) {
-      const a = Deno.args[i];
+    for (let i = 0; i < cliArgs.length; i++) {
+      const a = cliArgs[i];
       if (a === "--lang") {
         i++;
         continue;
@@ -304,11 +306,11 @@ Options:
     // For the shared verbs (init/initmod/modc/build), Rust must be explicit or auto-detected.
     if (effLang !== "rust" && !rustExclusiveVerbs.has(command)) {
       console.error(`❌ wasmtk: \`${command}\` is a Rust producer command — use --lang=rust.`);
-      Deno.exit(1);
+      host.exit(1);
     }
     const { runRust } = await import("./src/rustwasic.ts");
     const r = await runRust(subcommand, [...rsxtkForwardArgs(), ...extraArgs]);
-    if (!r.success) Deno.exit(1);
+    if (!r.success) host.exit(1);
   };
 
   // Browser (syscall/js) Go output is no longer produced: consume wasmtk's WASI modules with the
@@ -320,7 +322,7 @@ Options:
         "   (`@jrmarcum/universal-wasm-loader`) alongside the .wasm/.wit you produce here.\n" +
         "   For a mergeable library use `--go-target=wasm-unknown`; for a reactor library, plain `modc`.",
     );
-    Deno.exit(1);
+    host.exit(1);
   };
 
   switch (command) {
@@ -334,17 +336,17 @@ Options:
       if (lang === "zig") {
         const { scaffoldZigProject } = await import("./src/zigwasic.ts");
         const r = await scaffoldZigProject(langPath, "program");
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
         break;
       }
       if (lang !== "go") {
         console.error("❌ wasmtk: `init` supports `--lang=go`, `--lang=zig`, or `--lang=rust`.");
-        Deno.exit(1);
+        host.exit(1);
       }
       if ((args["go-target"] as string | undefined)?.toLowerCase() === "wasm") goBrowserRemoved();
       const { scaffoldGoProject } = await import("./src/gowasic.ts");
       const r = await scaffoldGoProject(langPath, "program");
-      if (!r.success) Deno.exit(1);
+      if (!r.success) host.exit(1);
       break;
     }
     case "modc":
@@ -361,7 +363,7 @@ Options:
         // no `_start`/WASI — callable via `wasmtk mod`/bindgen, the Zig analog of TS `modc`.
         const { compileZig } = await import("./src/zigwasic.ts");
         const r = await compileZig(langPath, { outPath, target: "library" });
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
         // .wit auto-emission for optimised artifacts (owner, 2026-09-28): the library went through -Oz.
         if (r.outputPath) await emitWitBeside(r.outputPath, "zig library, -Oz");
         break;
@@ -380,14 +382,14 @@ Options:
           runtime: goRuntime,
           target: goModcTarget,
         });
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
         // .wit auto-emission (owner, 2026-09-28): TinyGo output goes through wasm-opt / binaryen -Oz.
         if (r.outputPath) await emitWitBeside(r.outputPath, `go ${goModcTarget}, optimised`);
         break;
       }
       // A failed library build EXITS 1 (2026-09-30). It exited 0, so scripts, CI and
       // `bindgen_tests` took a failed `modc` for a success.
-      if (!(await compileModule(target, outPath))) Deno.exit(1);
+      if (!(await compileModule(target, outPath))) host.exit(1);
       break;
     case "wasic":
       if (lang === "go") {
@@ -403,7 +405,7 @@ Options:
             "       wasmtk run <file.go>   (language auto-detected; or a dir with go.mod)\n" +
             "   (For a callable library: wasmtk modc <file.go>.)",
         );
-        Deno.exit(1);
+        host.exit(1);
       }
       await compileWasi(target, outPath);
       break;
@@ -419,14 +421,14 @@ Options:
       if (runLang === "go") {
         const { compileGoWasi } = await import("./src/gowasic.ts");
         const r = await compileGoWasi(langPath, { outPath, runtime: goRuntime, target: "wasip1" });
-        if (!r.success || !r.outputPath) Deno.exit(1);
+        if (!r.success || !r.outputPath) host.exit(1);
         await runWasi(r.outputPath, args._.slice(2).map(String));
         break;
       }
       if (runLang === "zig") {
         const { compileZig } = await import("./src/zigwasic.ts");
         const r = await compileZig(langPath, { outPath, target: "wasi" });
-        if (!r.success || !r.outputPath) Deno.exit(1);
+        if (!r.success || !r.outputPath) host.exit(1);
         await runWasi(r.outputPath, args._.slice(2).map(String));
         break;
       }
@@ -435,7 +437,7 @@ Options:
         // auto-detected `.rs` / `Cargo.toml`.
         const { runRust } = await import("./src/rustwasic.ts");
         const r = await runRust("run", rsxtkForwardArgs());
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
         break;
       }
       // A directory reached here means no producer project was auto-detected in it (no `go.mod` /
@@ -444,7 +446,7 @@ Options:
       if (typeof target === "string") {
         let targetIsDir = false;
         try {
-          const st = await rt.stat(target) as { isDirectory: boolean | (() => boolean) };
+          const st = await host.stat(target) as { isDirectory: boolean | (() => boolean) };
           targetIsDir = typeof st.isDirectory === "function" ? st.isDirectory() : !!st.isDirectory;
         } catch { /* not found — let runWasi report the missing path */ }
         if (targetIsDir) {
@@ -453,7 +455,7 @@ Options:
               `(expected a go.mod or Cargo.toml).\n` +
               `   Point run at a project directory, or at a .wasm / .wat / .ts / .js / .go / .zig / .rs file.`,
           );
-          Deno.exit(1);
+          host.exit(1);
         }
       }
       // -o names a BUILD output; running a module writes none, so it was ignored (ld90)
@@ -482,20 +484,20 @@ Options:
     case "wasm2js":
       // Exit non-zero on failure. Both of these used to swallow the result, so a failed conversion
       // printed an error and still exited 0 — invisible to any caller checking $?.
-      if (!(await wasm2js(target, outPath))) Deno.exit(1);
+      if (!(await wasm2js(target, outPath))) host.exit(1);
       break;
     case "convert":
-      if (!(await convertFile(target, outPath))) Deno.exit(1);
+      if (!(await convertFile(target, outPath))) host.exit(1);
       break;
     case "wast": {
       // Run the WebAssembly `.wast` spec-script assertions (a file or a directory tree).
       if (!target) {
         console.error("❌ wasmtk wast: expected a .wast file or directory");
-        Deno.exit(1);
+        host.exit(1);
       }
       const { wastCli } = await import("./src/wast.ts");
       const code = await wastCli(target, { verbose: args.verbose as boolean | undefined });
-      Deno.exit(code);
+      host.exit(code);
       break;
     }
     case "tsbundle":
@@ -556,14 +558,14 @@ Options:
       } else if (lang === "zig") {
         const { scaffoldZigProject } = await import("./src/zigwasic.ts");
         const r = await scaffoldZigProject(langPath, "library");
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
       } else if (lang === "go") {
         const { scaffoldGoProject } = await import("./src/gowasic.ts");
         const r = await scaffoldGoProject(langPath, "library");
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
       } else {
         console.error("❌ wasmtk: `initmod` supports `--lang=go`, `--lang=zig`, or `--lang=rust`.");
-        Deno.exit(1);
+        host.exit(1);
       }
       break;
     case "build":
@@ -576,11 +578,11 @@ Options:
       } else if (effLang === "zig") {
         const { compileZig } = await import("./src/zigwasic.ts");
         const r = await compileZig(langPath, { outPath, target: "wasi" });
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
       } else if (effLang === "go") {
         const { compileGoWasi } = await import("./src/gowasic.ts");
         const r = await compileGoWasi(langPath, { outPath, runtime: goRuntime, target: "wasip1" });
-        if (!r.success) Deno.exit(1);
+        if (!r.success) host.exit(1);
         // .wit auto-emission (owner, 2026-09-28): an optimised artifact. (A Zig `build` is not
         // optimised, so it gets none; `run` builds only to run, so it gets none either.)
         if (r.outputPath) await emitWitBeside(r.outputPath, "go program, optimised");
@@ -589,7 +591,7 @@ Options:
           "❌ wasmtk: `build` needs a Go/Zig/Rust program — pass a .go/.zig/.rs file (auto-detected) " +
             "or `--lang=go|zig|rust`. (For a TypeScript program, use `wasmtk wasic`.)",
         );
-        Deno.exit(1);
+        host.exit(1);
       }
       break;
     case "add":
@@ -609,7 +611,7 @@ Options:
       break;
     default:
       console.error(`❌ Unknown command: ${command}`);
-      Deno.exit(1);
+      host.exit(1);
   }
 }
 
@@ -618,6 +620,6 @@ if (import.meta.main) {
     // Surface thrown errors (e.g. an unsupported-merge diagnostic from wasmmerge) as a clean
     // one-line message with a non-zero exit, instead of an unhandled-rejection stack trace.
     console.error(`❌ wasmtk: ${err instanceof Error ? err.message : err}`);
-    Deno.exit(1);
+    host.exit(1);
   });
 }

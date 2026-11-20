@@ -5,6 +5,35 @@ not an archive; git is the archive). Completed work appears below only as dated 
 commits. **The full text this file held before 2026-09-30 (1,240 lines: every census, bump log,
 branch audit and superseded plan):** `git show 2d151714025:cmem/next-work.md`.
 
+## 2026-11-20 — binaryang 4.0.0 → 4.1.1 PINNED (owner: "binaryang has been update to 4.1.1")
+
+Four specifiers + the `src/binaryen.ts` comment; full gate GREEN, nothing moved (testing.md,
+2026-11-20).
+
+## 2026-11-20 — H39, H41, H42 (owner: "proceed with H39 items and update anything related to the workspace memory")
+
+On branch `refactor/host-ts-2026-11-20` (with the 4.1.1 pin), NOT committed.
+- **H39 DONE (the four parts the letter asks for):** the module `src/host.ts` (was `src/rt.ts`;
+  145 call sites renamed, 61 direct system calls moved in — `main.ts`, `jstyper.ts`, `wast.ts`,
+  `outpath.ts`, `gowasic.ts`'s launcher, 11 files' `@std/path`); the gate `deno task check-host`
+  (`scripts/check-host.ts`, Bun; R0–R3, 26 cases + 4 mutants; 61 findings on the old tree, 0 now);
+  the self-check `wasmtk --self-check` (15 steps, every one ok on win-x64; it found ld136 at once,
+  and ld137 followed); the matrix `cmem/platforms.md` (V8/Deno `tested`; win-x64 `tested`,
+  win-arm64 `runtime`, the rest `pending`). Every write atomic. Full gate green (testing.md).
+  Found on the way: the seam test blind after the rename (fixed), `api-surface.ts`'s
+  `parseArgs(Deno.args` anchor (fixed; it reads old tags too). Records: compiler-bugs.md § H39,
+  design-decisions.md (top), best-practices.md § 4 (two lessons).
+- **H41, H42 DONE:** INDEX.md § "The workspace correspondence" rewritten for one file per item and
+  the `../workspace/cmem/` location; CLAUDE.md's session-start pointer; the live `../cmem/` pointers
+  in release.md, review-process.md, workflow.md, design-decisions.md, offload-inventory.md and two
+  script headers; the Tooling rules cited from `tooling-rules.md`. Dated history (this file's older
+  sections, `scripts/binaryang-report.md`) keeps the old path as written.
+- **At "commit":** re-baseline `api-surface.json` in its own commit (one change: `flag:--self-check`
+  added, MINOR); then append wasmtk's answer bullets to `../workspace/cmem/letters/H39.md`, `H41.md`,
+  `H42.md` with the commits (the one outside write). **Not done here:** H38 (the memory guide:
+  STATE.md, a ≤ 3 KB INDEX router — INDEX.md is far over), H43 (scratch rule 15 in a
+  `working-rules.md`), H37 (the five-review standard); `linux-x64`'s self-check in WSL.
+
 ## 2026-11-18 — binaryang 2.2.0 → 4.0.0 PINNED (owner: "binaryang has been updated to 4.0.0")
 
 All four specifiers + the `src/binaryen.ts` comment; full gate GREEN (testing.md, 2026-11-18).

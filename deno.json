@@ -41,11 +41,11 @@
   "imports": {
     "@std/cli/parse-args": "jsr:@std/cli@^1.0.0/parse-args",
     "@std/path": "jsr:@std/path@^1.1.2",
-    "binaryen-backend": "jsr:@jrmarcum/binaryang@4.0.0/compat/binaryen",
-    "binaryang-bundle": "jsr:@jrmarcum/binaryang@4.0.0/tools/wasm-bundle",
-    "binaryang-validate": "jsr:@jrmarcum/binaryang@4.0.0/wasm-validate",
+    "binaryen-backend": "jsr:@jrmarcum/binaryang@4.1.1/compat/binaryen",
+    "binaryang-bundle": "jsr:@jrmarcum/binaryang@4.1.1/tools/wasm-bundle",
+    "binaryang-validate": "jsr:@jrmarcum/binaryang@4.1.1/wasm-validate",
     "wasm2js": "npm:wasm2js@^0.2.0",
-    "wabt": "jsr:@jrmarcum/binaryang@4.0.0/compat/wabt"
+    "wabt": "jsr:@jrmarcum/binaryang@4.1.1/compat/wabt"
   },
   "tasks": {
     "dev": "deno run --watch main.ts",
@@ -53,6 +53,7 @@
     "update-version": "bun scripts/sync-version.ts",
     "bump": "bun scripts/bump.ts",
     "api-surface": "bun scripts/api-surface.ts",
+    "check-host": "bun scripts/check-host.ts",
     "upstream:link": "bun scripts/upstream-link.ts",
     "upstream:install": "deno task upstream:link && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.upstream.json --force -n wasmtk-upstream main.ts",
     "install": "deno task update-version && deno task cache && deno install -g --allow-run --allow-read --allow-write --allow-env --allow-ffi --allow-net --config deno.json --force -n wasmtk main.ts",

@@ -43,7 +43,7 @@ the owner opens it. This section designs wasmtk's seams only.** It supersedes th
 
 ### Rules for Phases 1–3 (in addition to "output-preserving" below)
 
-1. **A core module never imports** `rt.ts`, `utils.ts`, `wasmmerge.ts`, `tsbundler.ts`, `wabt`,
+1. **A core module never imports** `host.ts` (was `rt.ts`), `utils.ts`, `wasmmerge.ts`, `tsbundler.ts`, `wabt`,
    `binaryen-backend` or `@std/path`, and never calls `console.*` or exits. Errors are
    `diagnostics`. This is checkable by grep, so it becomes a gate (see below), not a convention.
 2. **The core's entry is string-in / data-out.** Phase 3's facade exposes something like

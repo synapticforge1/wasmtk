@@ -119,7 +119,22 @@ grep -ohE '^import .*from "\.\./src/[a-z_]+\.ts"' tests/<suite>.ts       # src m
 
 `go_merge_tests` was mis-classified as a Go-only outlier until this grep showed the `wasic` call.
 
-## Current pass counts (2026-11-18, binaryang **4.0.0**; latest release v3.0.0)
+## Current pass counts (2026-11-20, binaryang **4.1.1**; latest release v3.0.0)
+
+> **2026-11-20, later: H39 — `src/host.ts` (every system call), atomic writes, `--self-check`;
+> full gate GREEN on branch `refactor/host-ts-2026-11-20`.** wasi **509/509** · golden 568
+> byte-identical · wast 64,506 / 0 / 16 ALL CLEAN · cross-check 1374 · outpath **17** (+3: `-o NUL`
+> / `/dev/null` writes nothing beside it, no temporary file left, an existing output replaced) ·
+> wasic_seam **11** (+1: `host.*` is host I/O — the pattern was `rt.` only) · check-host: 30 files,
+> 0 findings; self-test 26 cases + 4 mutants · `wasmtk --self-check` every step ok (installed
+> CLI, win-x64) · every other suite at its count. Mutant: the device mapping off → outpath's NUL
+> case and the self-check FAIL (os error 87). Run order: workflow.md § The full gate, step 2d.
+
+> **2026-11-20: binaryang 4.0.0 → 4.1.1 pinned, full gate GREEN, NOTHING moved, as predicted**
+> (4.1.0: CLI device writes, `--self-check`; 4.1.1: an `-O2`+ RemoveUnusedBrs fix that only changes
+> modules it used to refuse, and the validator refusing more than one supertype). Counts identical
+> to 2026-11-18 below: wasi 509/509 · golden 568 byte-identical · wast 64,506 / 0 / 16 ALL CLEAN ·
+> cross-check 1374 · `-Oz` guard 42 / 42 · go 7 / 7 / 12 · every other suite at its count.
 
 > **2026-11-18: binaryang 2.2.0 → 4.0.0 pinned, full gate GREEN, ONE number moved, as predicted**
 > (2.2.2's `delegate` depth check): wast `legacy/try_delegate.wast` accepted-invalid 1 → 0, so

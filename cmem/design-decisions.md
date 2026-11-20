@@ -4,6 +4,24 @@ Invariants and codegen rules that are easy to break in a refactor and must NOT b
 reverted. The exhaustive list (with line numbers) is in the legacy `CLAUDE.md`; this is the
 high-value subset.
 
+## 🔒 Every system call is in `src/host.ts` (H39, owner 2026-11-19; built 2026-11-20)
+
+- **`src/host.ts` is the ONLY file of the product (`main.ts`, `src/`) that touches the system**:
+  files, folders, temp folders, paths (`basename` / `dirname` / `join` / `resolve` are re-exported
+  from it), the environment, the arguments, the streams, exit, starting programs, the OS / CPU.
+  `deno task check-host` fails otherwise (R1 imports, R2 `Deno` / `Bun` / `process` / `require`,
+  R3 `host.build` branches, R0 unreadable file). A new need is a new `host` function, never an
+  exemption. The compiler core may not use `host` at all (wasic_seam_tests).
+- **Writes are atomic**: a temporary file beside the target, then a rename (with the os error 32
+  retry); a failed write leaves the old file. A DEVICE (`NUL`, `CON`, … on Windows with any
+  extension; `/dev/…`, `/proc/self/fd/…`) is written in place — on Deno + Windows through its
+  `\\.\` name (ld136) — and gets no `.wit` beside it (ld137).
+- **`wasmtk --self-check`** tries every `host` operation on the machine it runs on; it runs only
+  when asked, alone (other arguments are refused), and removes its temp folder. When a `host`
+  function is added, add its step.
+- **`host.exit` is a METHOD with `never` written out**, and `host` is declared with an explicit type:
+  otherwise TypeScript does not end the code path after `host.exit(…)` (TS2534 / narrowing lost).
+
 ## A discriminated-union field shared by several variants is RESOLVED, never skipped (added 2026-07-30)
 
 - **The union super-struct has ONE slot per field name, and its type must hold EVERY variant's
@@ -1211,12 +1229,12 @@ silently break (all `src/wasic.ts`):
   feature unflagged, drop its flag; the gate should not move.
 - `tsbundle` outputs **`.ts`** (`.bundled.ts`), an import inliner — NOT `deno bundle`/JavaScript.
 - `.wasm` import detection matches **single-line** `import { … } from "./x.wasm"` only.
-- **`rt.Command.output()` always reads `result.stdout`/`stderr`, which THROWS unless they are
+- **`host.Command.output()` (`rt.Command` before 2026-11-20) always reads `result.stdout`/`stderr`, which THROWS unless they are
   `"piped"`.** Never pass `stdout`/`stderr` `"null"` or `"inherit"` to a `.output()` call (it surfaces
   as a misleading `catch` — e.g. a tool wrongly reported "not found"). Always `"piped"` and decode the
   captured bytes. (Bit the Go producer; see `src/gowasic.ts` `decodeOut`.) Also: `rt.remove` is
   single-arg (unlink-based under Bun) — use `Deno.remove(dir, {recursive:true})` for a directory.
-  Build subprocess env as `{ ...rt.env.toObject(), …overrides }` so PATH is preserved. `rt.Command`
+  Build subprocess env as `{ ...host.env.toObject(), …overrides }` so PATH is preserved. `host.Command`
   now also accepts `cwd` (added 2026-06-06 for the Go producer's `go mod init` / package builds).
 - Bump the version with **`deno task bump patch|minor|major`** (`scripts/bump.ts`): raises
   `deno.json`'s version, then propagates it to `package.json` + `src/utils.ts VERSION` via
@@ -1227,7 +1245,7 @@ silently break (all `src/wasic.ts`):
   Don't add `dependencies` to `package.json`; don't use `nodeModulesDir: "auto"` (Windows
   junction failures).
 - 🔒 **VERSIONS ARE PLAIN SEMANTIC VERSIONING 2.0.0 (owner, 2026-09-20; workspace letter H6,
-  `../cmem/layout-and-packaging.md` § Versioning). Implemented 2026-09-30.**
+  `../workspace/cmem/layout-and-packaging.md` § Versioning). Implemented 2026-09-30.**
 
   | release contains | bump | resets |
   | --- | --- | --- |
@@ -1283,7 +1301,7 @@ silently break (all `src/wasic.ts`):
     read from the CODE where the code is the contract: `command:<name>` = every `case` of main.ts's
     dispatcher (the commands it ACCEPTS, 22), with its `wasmtk <name> …` usage line(s) from `--help`
     as members; `flag:--<name>` = every flag in the `parseArgs` config, boolean or string, with its
-    aliases (14); `(exit)` = every literal `Deno.exit` / `rt.exit` code in main.ts and `src/`, and
+    aliases (14); `(exit)` = every literal `Deno.exit` / `rt.exit` / `host.exit` code in main.ts and `src/`, and
     each FILE that exits with a computed code (`src/utils.ts` is `wasmtk run` passing the program's
     status through), keyed by file so moving code is not a change. 37 CLI symbols; unchanged since
     v2.0.3. The Rust-only verbs (`add` `remove` `list` `fmt` `clean`) are dispatched but appear in

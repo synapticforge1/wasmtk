@@ -1,6 +1,6 @@
 # Offload inventory — what wasmtk does that a sibling could own (H11, 2026-09-28)
 
-Answer to workspace letter **H11** (`../../cmem/handoffs.md`) and divergence row **I10**: the owner's
+Answer to workspace letter **H11** (closed; its text in `../workspace/cmem/archive/handoffs-to-2026-11-19.md`) and divergence row **I10**: the owner's
 direction is "anything wasmtk can offload in the main program will ultimately be a benefit" and
 "nothing moves before its trigger". **This is an inventory. Moved so far: `wasmbundle` →
 binaryang's `bundle()` (2026-10-26; note below).**
@@ -84,7 +84,7 @@ universalWasmLoader SPEC 3.0.0) plus workspace rows I2 / I10 / I11 / C1 / S4. Li
 **Stays in wasmtk** (its role per workspace `projects.md`: orchestration, other-language
 producers, the corpus, the loaders' fixtures):
 
-- `rt.ts`, the Deno/Bun/Node host abstraction.
+- `host.ts` (was `rt.ts`), every system call: the Deno/Bun/Node host abstraction (H39).
 - The Go/Zig/Rust producers. Rust already delegates wholly to rsxtk.
 - `.wit` GENERATION (wasmtk is the source of truth for its ABI).
 - `main.ts` CLI plumbing.

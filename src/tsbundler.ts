@@ -52,8 +52,7 @@
  * handled — use single-line named imports in files intended for wasmtk.
  */
 
-import { basename, dirname, join } from "@std/path";
-import { rt } from "./rt.ts";
+import { basename, dirname, host, join } from "./host.ts";
 import { CAPABILITIES } from "./wasm/caps_bytes.ts";
 import { isWasMathSpecifier, wasMathRewrites, WM_F32_TS, WM_NAMESPACES } from "./wasmath_lower.ts";
 
@@ -350,7 +349,7 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
     // ── 1. Resolve canonical path ─────────────────────────────────────────
     let realPath: string;
     try {
-      realPath = await rt.realPath(filePath);
+      realPath = await host.realPath(filePath);
     } catch (err) {
       if (isEntry) throw err;
       return { source: "", exportRenames: new Map() };
@@ -365,7 +364,7 @@ export async function bundleImportsEx(entryPath: string): Promise<BundleResult> 
 
     let src: string;
     try {
-      src = await rt.readTextFile(realPath);
+      src = await host.readTextFile(realPath);
     } catch (err) {
       if (isEntry) throw err;
       return { source: "", exportRenames: new Map() };

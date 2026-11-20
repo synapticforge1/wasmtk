@@ -5,7 +5,7 @@ recorded in one place in every project; … release.md should be the file name w
 in the 'Release History' with a summary of what changed in each one"; workspace
 `release-process.md` § 5 U11, letter H33). Created 2026-11-10.
 
-**The process** is the workspace's `../cmem/release-process.md` (§ 5, U1–U12, in 🔒 the owner's
+**The process** is the workspace's `../workspace/cmem/release-process.md` (§ 5, U1–U12, in 🔒 the owner's
 order D1: "CI to check first, then push the tag, and then create the release page from the tag,
 then publish the package to the registry"); wasmtk's names are in
 [workflow.md](workflow.md) § "The release flow". In one line: the owner gives the go and the level

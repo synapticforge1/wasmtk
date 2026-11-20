@@ -18,8 +18,7 @@
  */
 
 import binaryen from "./binaryen.ts";
-import { basename } from "@std/path";
-import { rt } from "./rt.ts";
+import { basename, host } from "./host.ts";
 
 /** First line of every `.wit` this module writes; its presence is what allows a rewrite. */
 export const GENERATED_HEADER =
@@ -153,12 +152,15 @@ export function witFromWasm(bytes: Uint8Array, name: string): string {
  * failure is WARNED and the build it rides on is not failed. `task` names the step, for the log.
  */
 export async function emitWitBeside(wasmPath: string, task: string): Promise<void> {
+  // A module written to a device (`-o NUL`, `-o /dev/null`) has no folder to put a `.wit` in, and
+  // its bytes cannot be read back: write nothing (as binaryang 4.1.0's wasm-bundle; 2026-11-20).
+  if (host.isDevice(wasmPath)) return;
   const witPath = wasmPath.replace(/\.wasm$/i, "") + ".wit";
   try {
-    const bytes = await rt.readFile(wasmPath);
+    const bytes = await host.readFile(wasmPath);
     let existing: string | null = null;
     try {
-      existing = await rt.readTextFile(witPath);
+      existing = await host.readTextFile(witPath);
     } catch { /* absent */ }
     if (existing !== null && !GENERATED_BY.test(existing)) {
       console.log(`  ↪ kept existing ${basename(witPath)} (not generated from core signatures)`);
@@ -172,7 +174,7 @@ export async function emitWitBeside(wasmPath: string, task: string): Promise<voi
       console.log(`  ↪ no .wit for ${basename(wasmPath)}: it exports no interface`);
       return;
     }
-    await rt.writeTextFile(witPath, text);
+    await host.writeTextFile(witPath, text);
     console.log(`  ↪ WIT (${task}, core types): ${witPath}`);
   } catch (e) {
     console.warn(`  ⚠️  could not emit ${witPath}: ${e instanceof Error ? e.message : e}`);

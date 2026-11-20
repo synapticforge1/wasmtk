@@ -21,7 +21,7 @@
  * wasmtk's job; rsxtk is the producer + native runner.
  */
 
-import { rt } from "./rt.ts";
+import { host } from "./host.ts";
 
 /** Result of a delegated `rsxtk` invocation. */
 export type RustResult = {
@@ -32,7 +32,7 @@ export type RustResult = {
 /** True if `rsxtk --version` runs and exits 0. */
 export async function rsxtkAvailable(): Promise<boolean> {
   try {
-    const r = await new rt.Command("rsxtk", {
+    const r = await new host.Command("rsxtk", {
       args: ["--version"],
       stdout: "piped",
       stderr: "piped",
@@ -58,7 +58,7 @@ export async function runRust(subcommand: string, forwardArgs: string[]): Promis
     return { success: false };
   }
   // spawn (not .output()) with inherited stdio so rsxtk's build/run output streams live to the user.
-  const child = new rt.Command("rsxtk", { args: [subcommand, ...forwardArgs] }).spawn();
+  const child = new host.Command("rsxtk", { args: [subcommand, ...forwardArgs] }).spawn();
   const status = await child.status;
   return { success: status.success };
 }

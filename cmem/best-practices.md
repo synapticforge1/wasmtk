@@ -527,6 +527,20 @@ kept `deno run -A scripts/api-surface.ts` for six more days, so the tag gate and
 the same file on two runtimes. Found only by a rules review. Before calling a port done, grep the
 script's name across `.github/`, `deno.json` tasks and docs, and A/B the CI invocation too.
 
+**A rename blinds every guard that matches the old name as TEXT — and a blind guard stays
+green.** [wasmtk, 2026-11-20, H39] Renaming `rt` → `host` left `tests/wasic_seam_tests.ts`
+forbidding `\brt\.` in the compiler core: it kept passing, and would have kept passing with any
+`host.*` call there. The same rename broke `scripts/api-surface.ts` loudly (its `parseArgs(Deno.args`
+anchor) — the loud one is the lucky case. Before a rename, grep tests/ and scripts/ for the old
+name inside regexes and string patterns, not only as an identifier; after it, prove each guard
+still fires with a case using the NEW name.
+
+**Run the product the way users run it, not the way the gate runs it.** [wasmtk, 2026-11-20]
+`-o NUL` worked from source (`deno run -A`) and failed in the installed CLI (explicit
+`--allow-write`): Deno's permission check refuses a bare Windows device name. Every suite runs the
+installed binary, but none wrote to a device. The self-check (`wasmtk --self-check`) runs the
+installed permissions by construction — run it after `deno task install`, not from `main.ts`.
+
 ## 4b. Tooling that lies to you (the shell, the cache, the generator)
 
 These are not "be careful" items — each returns a **confident, plausible, wrong** answer, and every

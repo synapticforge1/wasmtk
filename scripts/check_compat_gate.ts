@@ -1,6 +1,6 @@
 /**
  * check_compat_gate.ts — proves the compatibility gate (H6.3: `scripts/api-surface.ts` +
- * `scripts/bump.ts`) FAILS on purpose, as `../cmem/layout-and-packaging.md` requires ("invert it
+ * `scripts/bump.ts`) FAILS on purpose, as `../workspace/cmem/layout-and-packaging.md` requires ("invert it
  * before trusting it"). Re-run it whenever either script changes.
  *
  * Everything happens in a THROWAWAY clone of the CURRENT BRANCH's last commit (uncommitted edits

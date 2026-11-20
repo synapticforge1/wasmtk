@@ -61,7 +61,7 @@ with *"dubious ownership"* until you ran
 clone printed its revision; ledger C9 closed the workspace-wide `safe.directory` issue) — if
 `unknown` comes back, this is the cause.
 
-## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, 1.13.0 → 1.15.0, 1.15.0 → 1.16.1, 1.16.1 → 2.2.0 — a MAJOR, whose one breaking change, a flag spelling, wasmtk never used; nothing moved, 2026-10-24 — and 2.2.0 → 4.0.0, two MAJORs at once, 2026-11-18: only the predicted `try_delegate` pin moved, 1 → 0)
+## Bumping the binaryang backend (the checklist, as run for 1.6.0 → 1.8.1, 1.8.1 → 1.12.0, 1.12.0 → 1.12.1, 1.12.1 → 1.13.0, 1.13.0 → 1.15.0, 1.15.0 → 1.16.1, 1.16.1 → 2.2.0 — a MAJOR, whose one breaking change, a flag spelling, wasmtk never used; nothing moved, 2026-10-24 — and 2.2.0 → 4.0.0, two MAJORs at once, 2026-11-18: only the predicted `try_delegate` pin moved, 1 → 0; 4.0.0 → 4.1.1, 2026-11-20: nothing moved)
 
 (1.13.0, 2026-10-20, and 1.15.0, 2026-10-23: an optimizer release moves PIPELINE goldens that merge
 a `-Oz` library, 43 of them both times, only in the merged library's functions; check that no
@@ -274,6 +274,11 @@ deno test --no-check --allow-read --allow-write --allow-run --allow-env \
 
 # 2c. typed_decl_tests + engine_tests + wast_runner_tests + golden_wat_tests (`deno run`); golden expects 559 / 0 diverged (2026-10-23, +`29_StringArgumentsAndFieldMethods`, +`28_TemplateHoles`, +`29_FieldArraysAndCallResults`, +`29_FieldInitializersAndImplicitConstructors`, +`28_ArrayNamedMethodsAndStringUnshift`; 2026-10-22, +`29_GenericAndStringClasses`, +`5h_CapturingCallbacks`, +`9_ArrayLiteralArguments`, +`63_StringMatrix`, +`44_FunctionArrayLiterals`, +`24_NullVersusUndefined`, +`7i_ConsoleWholeStructRefused`, +`29_ClassDispatchAndChaining`, +`5h_CallbacksChainsAndLoops`, +`63_ModuleGlobals2DAndBoolean`, +`28_StringsTuplesAndObjects`, +`5f_IncrementsAndCompoundForms`, +`5f_CompoundIndexSideEffectRefused` (fails on purpose: 10), +`4m_ExpressionGaps`; 2026-10-21, +`53_NumberParseRounding`; 2026-10-20, +`4l_MixedOperandTypes`, +`28_ArrayCallbackEdges`), 9 entries that fail on purpose (2026-10-19, +`28_SpliceItemReadsArrayRefused`, +`28_SpreadOfExpressionRefused`, +`15_FinallyStringReturnRefused`; `7i_NullishStringFieldRefused` removed with sw120 — `--record` does NOT delete a removed test's golden, delete it by hand); typed_decl 45
 
+# 2d. the host gate (H39, 2026-11-20): every system call in src/host.ts → "every system call is in
+#     src/host.ts"; its self-test (26 cases + 4 mutants of the real tree); and, AFTER
+#     `deno task install`, the installed CLI's self-check (the installed permissions, not `-A`)
+deno task check-host && bun scripts/check-host.ts --self-test && wasmtk --self-check
+
 # 3. the Go suites — ONE AT A TIME (see traps)
 #    go_bindgen go_merge go_asyncify
 
@@ -294,7 +299,7 @@ Always `deno task install` first, or the suites silently test the previous binar
 
 ## The release flow
 
-**THE process is the workspace's `../cmem/release-process.md` § 5 (U1–U12), in 🔒 the owner's
+**THE process is the workspace's `../workspace/cmem/release-process.md` § 5 (U1–U12), in 🔒 the owner's
 order** (2026-11-10, decision D1): **"the CI to check first, then push the tag, and then create the
 release page from the tag, then publish the package to the registry"**. This section is that
 process with wasmtk's names filled in; where they differ, the workspace file governs. The record

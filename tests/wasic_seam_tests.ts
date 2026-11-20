@@ -8,7 +8,7 @@
  *
  * Forbidden in core CODE (strings and comments are ignored; WAT templates legitimately contain
  * words like `console.log`):
- *   rt.*  Deno.*  process.exit  console.log/error/warn/info/debug  wabt  binaryen.*
+ *   host.* (rt.* before 2026-11-20)  Deno.*  process.exit  console.log/error/warn/info/debug  wabt  binaryen.*
  *   mergeWasmWat  mergeOneWasmImport  bundleImportsEx
  *
  * The scanner is its own: varscope's `maskCode` reads a `"` inside a REGEX literal as a string start,
@@ -139,7 +139,9 @@ export function maskNonCode(src: string): string {
 }
 
 const FORBIDDEN: [string, RegExp][] = [
-  ["rt.* (host I/O)", /\brt\.[A-Za-z]/],
+  // `rt` was renamed `host` (src/host.ts, H39, 2026-11-20); with only `rt.` here the check was
+  // blind to every host call. Both names stay forbidden.
+  ["host.* / rt.* (host I/O)", /\b(?:host|rt)\.[A-Za-z]/],
   ["Deno.*", /\bDeno\.[A-Za-z]/],
   ["process.exit", /\bprocess\.exit\b/],
   ["console.*", /\bconsole\.(log|error|warn|info|debug)\b/],
@@ -164,6 +166,7 @@ function main(): void {
   console.log("── scanner self-checks ───────────────────────────────────────");
   const selfCases: [string, string, boolean][] = [
     ["a regex with a quote does not hide later code", 'const r = /"x/; rt.exit(1);', true],
+    ["a host call is host I/O (src/host.ts, H39)", "await host.writeFile(p, b);", true],
     ["code in a template interpolation is checked", "const s = `a ${rt.exit(1)} b`;", true],
     ["a forbidden word in a string is ignored", 'const s = "console.log(1)";', false],
     ["a forbidden word in a comment is ignored", "// rt.exit(1)\nconst x = 1;", false],

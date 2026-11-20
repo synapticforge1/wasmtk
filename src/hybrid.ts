@@ -27,8 +27,7 @@
  *   - The generated runner uses top-level `await` (Deno ES module native support).
  */
 
-import { basename, dirname, join } from "@std/path";
-import { rt } from "./rt.ts";
+import { basename, dirname, host, join } from "./host.ts";
 import { compileModule } from "./modc.ts";
 import { runBindgen } from "./bindgen.ts";
 import { findUntypedDeclarations } from "./decltypes.ts";
@@ -695,7 +694,7 @@ export async function runHybrid(
   inputPath: string,
   opts: { outDir?: string; auto?: boolean } = {},
 ): Promise<void> {
-  const src = await rt.readTextFile(inputPath);
+  const src = await host.readTextFile(inputPath);
   const dir = dirname(inputPath);
   const base = basename(inputPath, ".ts");
   const outDir = opts.outDir ?? dir;
@@ -739,9 +738,9 @@ export async function runHybrid(
   // whether the .wit was (re)produced. Remove a stale one first so the check is reliable.
   const compileCore = async (funcs: WasmFunc[]): Promise<boolean> => {
     try {
-      await rt.remove(coreWitPath);
+      await host.remove(coreWitPath);
     } catch { /* not present */ }
-    await rt.writeTextFile(coreTsPath, generateCoreModule(funcs));
+    await host.writeTextFile(coreTsPath, generateCoreModule(funcs));
     // Success needs BOTH: compileModule's own verdict (it reports failure since 2026-09-30) and the
     // .wit on disk. The .wit alone was the only signal before, and a .wit can be written by a build
     // that then fails to assemble.
@@ -750,7 +749,7 @@ export async function runHybrid(
       built = await compileModule(coreTsPath);
     } catch { /* fall through */ }
     try {
-      await rt.stat(coreWitPath);
+      await host.stat(coreWitPath);
       return built;
     } catch {
       return false;
@@ -763,21 +762,21 @@ export async function runHybrid(
     const probeTs = join(outDir, `${base}_probe.ts`);
     const probeWit = join(outDir, `${base}_probe.wit`);
     try {
-      await rt.remove(probeWit);
+      await host.remove(probeWit);
     } catch { /* not present */ }
-    await rt.writeTextFile(probeTs, generateCoreModule(funcs));
+    await host.writeTextFile(probeTs, generateCoreModule(funcs));
     let built = false;
     try {
       built = await compileModule(probeTs);
     } catch { /* fall through */ }
     let ok = false;
     try {
-      await rt.stat(probeWit);
+      await host.stat(probeWit);
       ok = built; // both signals, as in compileCore
     } catch { /* failed */ }
     for (const ext of [".ts", ".wasm", ".wat", ".wit"]) {
       try {
-        await rt.remove(join(outDir, `${base}_probe${ext}`));
+        await host.remove(join(outDir, `${base}_probe${ext}`));
       } catch { /* best-effort cleanup */ }
     }
     return ok;
@@ -785,7 +784,7 @@ export async function runHybrid(
 
   const emitHostOnly = async (): Promise<void> => {
     const runnerOnlyPath = join(outDir, `${base}_runner.ts`);
-    await rt.writeTextFile(runnerOnlyPath, remainingSrc);
+    await host.writeTextFile(runnerOnlyPath, remainingSrc);
     console.log(`   hybrid: no WASM-routable functions remain — runner is host-only`);
     console.log(`   hybrid: runner   → ${runnerOnlyPath}`);
   };
@@ -844,7 +843,7 @@ export async function runHybrid(
   // have moved some back to the host) so only the names actually in the core are rewritten to `lib.`.
   const routedNames = wasmFuncs.map((f) => f.name);
   const runnerPath = join(outDir, `${base}_runner.ts`);
-  await rt.writeTextFile(
+  await host.writeTextFile(
     runnerPath,
     generateRunner(
       remainingSrc,
